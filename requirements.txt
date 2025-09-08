@@ -1,0 +1,19 @@
+# Core dependencies
+apache-airflow==2.7.1
+sqlalchemy==1.4.53
+
+# Scraping dependencies  
+selenium==4.15.0
+beautifulsoup4==4.12.2
+requests==2.31.0
+webdriver-manager==4.0.1
+minio==7.1.17
+psycopg2-binary==2.9.7
+
+# Data processing
+pandas==2.0.3
+numpy==1.24.3
+
+# Utilities
+python-dateutil==2.8.2
+pytz==2023.3

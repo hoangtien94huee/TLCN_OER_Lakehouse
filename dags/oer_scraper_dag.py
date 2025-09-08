@@ -4,7 +4,7 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 import json
 import os
-from selenium_scraper import AdvancedOERScraper
+from openstax_scraper import OpenStaxScraper
 
 # Cấu hình DAG
 default_args = {
@@ -41,17 +41,17 @@ def scrape_openstax_documents(**context):
     print(f"Bắt đầu cào dữ liệu cho ngày: {execution_date}")
     
     # Khởi tạo scraper
-    scraper = AdvancedOERScraper(delay=1.0, use_selenium=True)
+    openstax = OpenStaxScraper(delay=1.0, use_selenium=True)
     
     try:
         # Cào dữ liệu
-        if scraper.use_selenium:
-            documents = scraper.scrape_openstax_with_selenium()
+        if openstax.use_selenium:
+            documents = openstax.scrape_with_selenium()
         else:
-            documents = scraper.scrape_openstax_fallback()
+            documents = openstax.scrape_fallback()
         
         # Upload raw JSONL to MinIO
-        object_key = scraper.upload_raw_records_to_minio(documents, 'openstax', execution_date)
+        object_key = openstax.upload_raw_records_to_minio(documents, 'openstax', execution_date)
         print(f"[OpenStax] MinIO object: {object_key}")
         return {
             'execution_date': execution_date,
@@ -64,7 +64,7 @@ def scrape_openstax_documents(**context):
         raise
         
     finally:
-        scraper.cleanup()
+        openstax.cleanup()
 
 
 def cleanup_old_files(**context):

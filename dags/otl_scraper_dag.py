@@ -4,7 +4,7 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 import json
 import os
-from selenium_scraper import AdvancedOERScraper
+from otl_scraper import OTLScraper
 
 # Cấu hình DAG riêng cho Open Textbook Library
 default_args = {
@@ -38,19 +38,19 @@ def scrape_open_textbook_library_documents(**context):
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[OTL] Bắt đầu cào dữ liệu cho ngày: {execution_date}")
     # Selenium + tối ưu streaming
-    scraper = AdvancedOERScraper(delay=0.0, use_selenium=True)
+    otl = OTLScraper(delay=0.0, use_selenium=True)
     try:
-        documents = scraper.scrape_open_textbook_library()
+        documents = otl.scrape_open_textbook_library()
         # Upload PDFs to MinIO if downloaded
         if documents and str(os.getenv('OTL_DOWNLOAD_PDFS', '0')).lower() in {'1', 'true', 'yes'}:
             for doc in documents:
                 if doc.get('pdf_path'):
-                    s3_key = scraper.upload_pdf_to_minio(doc['pdf_path'], 'otl', execution_date)
+                    s3_key = otl.upload_pdf_to_minio(doc['pdf_path'], 'otl', execution_date)
                     if s3_key:
                         doc['pdf_s3_key'] = s3_key
 
         # Upload raw JSONL to MinIO
-        object_key = scraper.upload_raw_records_to_minio(documents, 'otl', execution_date)
+        object_key = otl.upload_raw_records_to_minio(documents, 'otl', execution_date)
         print(f"[OTL] MinIO object: {object_key}")
         return {
             'execution_date': execution_date,
@@ -61,7 +61,7 @@ def scrape_open_textbook_library_documents(**context):
         print(f"[OTL] Lỗi khi cào dữ liệu: {e}")
         raise
     finally:
-        scraper.cleanup()
+        otl.cleanup()
 
 def cleanup_old_files(**context):
     """Xóa các file JSON quá 30 ngày (so sánh theo date, an toàn timezone)."""

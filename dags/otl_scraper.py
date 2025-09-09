@@ -1,861 +1,601 @@
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-import time
-import os
 import re
-import json
-import hashlib
 from datetime import datetime
-from requests import Session
-from requests.adapters import HTTPAdapter
-from minio import Minio
+import os
+import time
+import random
+
+# Selenium imports for live mode
 try:
-    from urllib3.util.retry import Retry
-    _RETRY_KW = {'allowed_methods': frozenset(['GET'])}
-except Exception:  # pragma: no cover
-    from urllib3.util import Retry
-    _RETRY_KW = {'method_whitelist': frozenset(['GET'])}
-
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import InvalidSessionIdException, WebDriverException
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+except Exception:
+    webdriver = None
 
 
-class OTLScraper:
-    """Self-contained OTL scraper (no external core dependency)."""
+BASE_URL = "https://open.umn.edu"
 
-    def __init__(self, delay: float = 0.0, use_selenium: bool = True):
-        self.session: Session = Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36'
+# Throttling/backoff cấu hình qua ENV (mặc định an toàn)
+DEFAULT_DELAY_BASE_SEC = float(os.getenv('OTL_DELAY_BASE_SEC', '0.8'))
+DEFAULT_DELAY_JITTER_SEC = float(os.getenv('OTL_DELAY_JITTER_SEC', '0.4'))
+RETRY_BACKOFF_BASE_SEC = float(os.getenv('OTL_RETRY_BACKOFF_BASE_SEC', '2.0'))
+RETRY_BACKOFF_MAX_SEC = float(os.getenv('OTL_RETRY_BACKOFF_MAX_SEC', '10.0'))
+WAIT_UNTIL_CLEAR = (os.getenv('OTL_WAIT_UNTIL_CLEAR', 'false').lower() in ['1','true','yes'])
+WAIT_MAX_MINUTES = int(os.getenv('OTL_WAIT_MAX_MINUTES', '15'))
+PER_BOOK_DELAY_SEC = float(os.getenv('OTL_PER_BOOK_DELAY_SEC', '0.6'))
+SUBJECT_COOLDOWN_SEC = float(os.getenv('OTL_SUBJECT_COOLDOWN_SEC', '3.0'))
+FORCE_RANDOM_UA = (os.getenv('OTL_FORCE_RANDOM_UA', 'true').lower() in ['1','true','yes'])
+CUSTOM_UA = os.getenv('OTL_USER_AGENT', '').strip()
+PROXY_SERVER = os.getenv('OTL_PROXY', '').strip()
+BOOK_MAX_ATTEMPTS = int(os.getenv('OTL_BOOK_MAX_ATTEMPTS', '4'))
+RETRY_PDF_ON_MISS = (os.getenv('OTL_RETRY_PDF_ON_MISS', 'true').lower() in ['1','true','yes'])
+
+
+def _sleep(base_sec: float = DEFAULT_DELAY_BASE_SEC, jitter_sec: float = DEFAULT_DELAY_JITTER_SEC) -> None:
+    delay = max(0.0, base_sec) + max(0.0, jitter_sec) * random.random()
+    time.sleep(delay)
+
+
+def _backoff_sleep(attempt_index: int) -> None:
+    # attempt_index: 1,2,3,...
+    delay = RETRY_BACKOFF_BASE_SEC * (2 ** max(0, attempt_index - 1))
+    time.sleep(min(delay, RETRY_BACKOFF_MAX_SEC))
+
+
+def _with_cache_bust(url: str) -> str:
+    if not url:
+        return url
+    ts = str(int(time.time() * 1000))
+    return f"{url}&ts={ts}" if ('?' in url) else f"{url}?ts={ts}"
+
+
+def _pick_user_agent() -> str:
+    if CUSTOM_UA:
+        return CUSTOM_UA
+    ua_pool = [
+        # A few modern desktop UAs (rotate to reduce fingerprinting)
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    ]
+    return random.choice(ua_pool)
+
+
+def _ensure_not_retry_later(driver) -> BeautifulSoup:
+    """Ensure current page is not a 'Retry later' placeholder.
+    If WAIT_UNTIL_CLEAR is enabled, wait until cleared (up to WAIT_MAX_MINUTES).
+    Else, try up to 3 backoff refreshes.
+    Returns BeautifulSoup of the final page.
+    """
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    text = soup.get_text()
+    if 'Retry later' not in text:
+        return soup
+    if WAIT_UNTIL_CLEAR:
+        print("[OTL] [Wait] 'Retry later' detected — waiting until it clears...", flush=True)
+        start_ts = time.time()
+        attempt = 1
+        while True:
+            if time.time() - start_ts > WAIT_MAX_MINUTES * 60:
+                print("[OTL] [Wait] Max wait time reached; proceeding.", flush=True)
+                return BeautifulSoup(driver.page_source, 'html.parser')
+            _backoff_sleep(attempt)
+            attempt += 1
+            try:
+                driver.refresh()
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            except Exception:
+                pass
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            if 'Retry later' not in soup.get_text():
+                print("[OTL] [Wait] Cleared; continue.", flush=True)
+                return soup
+    else:
+        print("[OTL] [Leaf] Hit 'Retry later', applying backoff...", flush=True)
+        for attempt in range(1, 4):
+            _backoff_sleep(attempt)
+            try:
+                driver.refresh()
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            except Exception:
+                pass
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            if 'Retry later' not in soup.get_text():
+                break
+        return soup
+
+
+def _md5_id(url: str, title: str) -> str:
+    import hashlib
+    return hashlib.md5(f"{url}_{title}".encode("utf-8")).hexdigest()
+
+
+def parse_book_detail_html(html: str, book_url: str, subjects: List[str]) -> Dict[str, Any]:
+    """Parse a book detail HTML into the required output schema."""
+    soup = BeautifulSoup(html, 'html.parser')
+
+    # Title
+    title = ''
+    h1 = soup.select_one('#info h1') or soup.find('h1')
+    if h1:
+        title = h1.get_text(strip=True)
+    if not title:
+        title_tag = soup.find('title')
+        title = (title_tag.get_text(strip=True) if title_tag else '').strip()
+
+    # Description
+    description = ''
+    about = soup.select_one('#AboutBook')
+    if about:
+        p = about.find('p')
+        if p:
+            description = p.get_text('\n', strip=True)
+
+    # Authors
+    authors: List[str] = []
+    for p in soup.find_all('p'):
+        txt = (p.get_text(' ', strip=True) or '')
+        if txt.lower().startswith('contributors:'):
+            raw = txt.split(':', 1)[1].strip()
+            parts = [re.sub(r'\s+', ' ', x).strip() for x in re.split(r',| and ', raw) if x.strip()]
+            for a in parts:
+                if a and a not in authors:
+                    authors.append(a)
+            break
+    if not authors:
+        for meta_name in ['author', 'book:author']:
+            for m in soup.find_all('meta', attrs={'name': meta_name}):
+                val = (m.get('content') or '').strip()
+                if val and val not in authors:
+                    authors.append(val)
+    # Heuristic: authors appear as plain <p> lines inside #info above metadata fields
+    if not authors:
+        info_div = soup.select_one('#info')
+        if info_div:
+            started_block = False
+            for p in info_div.find_all('p'):
+                txt = (p.get_text(' ', strip=True) or '')
+                if not txt:
+                    continue
+                ltxt = txt.lower()
+                # Skip reviews and star rows
+                if 'review' in ltxt:
+                    continue
+                # If this looks like a metadata field, stop after we started authors block
+                meta_prefixes = (
+                    'copyright year', 'publisher', 'language', 'isbn', 'license',
+                    'format', 'pages', 'doi', 'edition'
+                )
+                if any(ltxt.startswith(pref) for pref in meta_prefixes) or ':' in txt:
+                    if started_block:
+                        break
+                    else:
+                        continue
+                # Treat as author line(s)
+                started_block = True
+                parts = [re.sub(r'\s+', ' ', x).strip() for x in re.split(r',| and ', txt) if x.strip()]
+                for a in parts:
+                    if a and a not in authors:
+                        authors.append(a)
+
+    # Prefer PDF URL if present; else book URL
+    url_field = book_url
+    pdf_url = ''
+    for a in soup.select('#book-types a[href]'):
+        label = (a.get_text(strip=True) or '').lower()
+        if 'pdf' in label:
+            pdf_url = urljoin(BASE_URL, a['href'])
+            url_field = pdf_url
+            break
+
+    doc = {
+        'id': _md5_id(book_url, title or book_url),
+        'title': title,
+        'description': description,
+        'authors': authors,
+        'subjects': subjects or [],
+        'source': 'Open Textbook Library',
+        'url': url_field,
+        'url_pdf': pdf_url or None,
+        'scraped_at': datetime.now().isoformat()
+    }
+    return doc
+
+
+# =========== Live (Selenium) helpers ===========
+def _init_driver(headless: bool = True):
+    if webdriver is None:
+        raise RuntimeError("Selenium not available in this environment")
+    options = Options()
+    if headless:
+        options.add_argument("--headless")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+    options.add_argument("--blink-settings=imagesEnabled=false")
+    # Reduce automation fingerprints
+    options.add_argument("--disable-blink-features=AutomationControlled")
+    options.add_experimental_option('excludeSwitches', ['enable-automation'])
+    options.add_experimental_option('useAutomationExtension', False)
+
+    ua = _pick_user_agent() if FORCE_RANDOM_UA or CUSTOM_UA else None
+    if ua:
+        options.add_argument(f"--user-agent={ua}")
+
+    if PROXY_SERVER:
+        options.add_argument(f"--proxy-server={PROXY_SERVER}")
+    try:
+        prefs = {"profile.managed_default_content_settings.images": 2}
+        options.add_experimental_option("prefs", prefs)
+    except Exception:
+        pass
+    driver = webdriver.Chrome(options=options)
+    try:
+        driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+            "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
         })
-        retry_cfg = Retry(total=3, backoff_factor=0.2, status_forcelist=[429, 500, 502, 503, 504], **_RETRY_KW)
-        adapter = HTTPAdapter(pool_connections=100, pool_maxsize=100, max_retries=retry_cfg)
-        self.session.mount('http://', adapter)
-        self.session.mount('https://', adapter)
+    except Exception:
+        pass
+    return driver
 
-        self.use_selenium = use_selenium
-        self.driver = None
-        if use_selenium:
-            self.setup_selenium()
 
-        self.delay = delay
-        self.output_dir = "scraped_data"
-        self.pdf_output_dir = os.getenv('PDF_DOWNLOAD_PATH', '/opt/airflow/scraped_pdfs/otl')
+def live_collect_book_urls(subject_url: str, timeout_sec: int = 120) -> List[str]:
+    """Open a subject page, paginate through all pages (Next) and return book URLs.
+    Falls back to scroll-based loading if pagination isn't present.
+    """
+    driver = _init_driver(headless=True)
+    book_urls: set[str] = set()
+    try:
+        # Ensure scroll mode param is present so the site exposes pagination URLs with scroll=true
+        def _with_scroll(u: str) -> str:
+            if 'scroll=true' in (u or ''):
+                return u
+            return f"{u}&scroll=true" if ('?' in u) else f"{u}?scroll=true"
+
+        current_url = _with_scroll(subject_url)
+        current_url = _with_cache_bust(current_url)
+        current_url = _with_cache_bust(current_url)
+        print(f"[OTL] [Leaf] Open subject listing: {current_url}", flush=True)
+        driver.get(current_url)
+        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+
+        # Prefer explicit pagination via Next links to avoid missing items
+        visited_pages: set[str] = set()
+        page_no = 1
+        while True:
+            soup = _ensure_not_retry_later(driver)
+            for h2 in soup.select('div.row.short-description h2 > a[href]'):
+                href = (h2.get('href') or '').strip()
+                if not href:
+                    continue
+                full = urljoin(BASE_URL, href)
+                if '/opentextbooks/textbooks/' in full:
+                    book_urls.add(full.split('#')[0])
+            print(f"[OTL] [Leaf] Page {page_no} collected so far: {len(book_urls)}", flush=True)
+
+            next_a = soup.select_one('#pagination a[rel="next"][href]')
+            if not next_a:
+                break
+            next_url = urljoin(BASE_URL, next_a.get('href') or '')
+            next_url = _with_scroll(next_url)
+            next_url = _with_cache_bust(next_url)
+            if not next_url or next_url in visited_pages:
+                break
+            visited_pages.add(next_url)
+            page_no += 1
+            _sleep()
+            driver.get(next_url)
+            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+
+        # Fallback: try scroll-based load if pagination yielded nothing
+        if not book_urls:
+            last_count = 0
+            stable_rounds = 0
+            end_time = datetime.now().timestamp() + timeout_sec
+            while datetime.now().timestamp() < end_time:
+                html = driver.page_source
+                soup = BeautifulSoup(html, 'html.parser')
+                for h2 in soup.select('div.row.short-description h2 > a[href]'):
+                    href = (h2.get('href') or '').strip()
+                    if not href:
+                        continue
+                    full = urljoin(BASE_URL, href)
+                    if '/opentextbooks/textbooks/' in full:
+                        book_urls.add(full.split('#')[0])
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                _sleep(0.4, 0.4)
+                if len(book_urls) == last_count:
+                    stable_rounds += 1
+                else:
+                    stable_rounds = 0
+                    last_count = len(book_urls)
+                print(f"[OTL] [Leaf] Listing progress: {last_count} books, stable_rounds={stable_rounds}", flush=True)
+                if stable_rounds >= 3:
+                    break
+        print(f"[OTL] [Leaf] Final listing count: {len(book_urls)}", flush=True)
+    finally:
         try:
-            os.makedirs(self.output_dir, exist_ok=True)
-            os.makedirs(self.pdf_output_dir, exist_ok=True)
+            driver.quit()
+        except Exception:
+            pass
+    return sorted(book_urls)
+
+
+def live_scrape_leaf_subject_selenium(subject_name: str, subject_url: str) -> List[Dict[str, Any]]:
+    """Live scrape using a single Selenium driver for both listing and book details."""
+    results: List[Dict[str, Any]] = []
+    driver = _init_driver(headless=True)
+    try:
+        print(f"[OTL] ===== Start subject: {subject_name} | {subject_url} =====", flush=True)
+        # Collect listing URLs with pagination first, fallback to scroll
+        def _with_scroll(u: str) -> str:
+            if 'scroll=true' in (u or ''):
+                return u
+            return f"{u}&scroll=true" if ('?' in u) else f"{u}?scroll=true"
+
+        current_url = _with_scroll(subject_url)
+        urls: List[str] = []
+        visited_pages: set[str] = set()
+        page_no = 1
+        while True:
+            driver.get(current_url)
+            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            soup = _ensure_not_retry_later(driver)
+            for h2 in soup.select('div.row.short-description h2 > a[href]'):
+                href = (h2.get('href') or '').strip()
+                if not href:
+                    continue
+                full = urljoin(BASE_URL, href)
+                if '/opentextbooks/textbooks/' in full and full not in urls:
+                    urls.append(full)
+            print(f"[OTL] [Leaf] Page {page_no} listing count so far: {len(urls)}", flush=True)
+            next_a = soup.select_one('#pagination a[rel="next"][href]')
+            if not next_a:
+                break
+            next_url = _with_scroll(urljoin(BASE_URL, next_a.get('href') or ''))
+            next_url = _with_cache_bust(next_url)
+            if not next_url or next_url in visited_pages:
+                break
+            visited_pages.add(next_url)
+            page_no += 1
+            current_url = next_url
+            _sleep()
+
+        # Fallback to scroll if pagination failed to produce any URLs
+        if not urls:
+            last_count = 0
+            stable_rounds = 0
+            while True:
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                for h2 in soup.select('div.row.short-description h2 > a[href]'):
+                    href = (h2.get('href') or '').strip()
+                    if not href:
+                        continue
+                    full = urljoin(BASE_URL, href)
+                    if '/opentextbooks/textbooks/' in full and full not in urls:
+                        urls.append(full)
+                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                _sleep(0.4, 0.4)
+                if len(urls) == last_count:
+                    stable_rounds += 1
+                else:
+                    stable_rounds = 0
+                    last_count = len(urls)
+                print(f"[OTL] [Leaf] Listing progress: {last_count} books, stable_rounds={stable_rounds}", flush=True)
+                if stable_rounds >= 3:
+                    break
+        print(f"[OTL] [Leaf] Found {len(urls)} book URLs for subject '{subject_name}'", flush=True)
+
+        # Visit each book and parse
+        for idx, url in enumerate(urls, start=1):
+            print(f"[OTL] [Leaf] Open book {idx}/{len(urls)}: {url}", flush=True)
+            # Per-book delay and cache-busting to reduce server-side throttling
+            if PER_BOOK_DELAY_SEC > 0:
+                time.sleep(PER_BOOK_DELAY_SEC + DEFAULT_DELAY_JITTER_SEC * random.random())
+            attempts = 0
+            doc = None
+            while attempts < max(1, BOOK_MAX_ATTEMPTS):
+                attempts += 1
+                driver.get(_with_cache_bust(url))
+                try:
+                    WebDriverWait(driver, 12).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                except Exception:
+                    pass
+                # Ensure not stuck on retry page
+                soup = _ensure_not_retry_later(driver)
+                # Give the page a moment for dynamic blocks
+                _sleep(0.4, 0.4)
+                # Try to scroll to Formats section to trigger lazy loads
+                try:
+                    driver.execute_script("var el=document.getElementById('Formats'); if(el){el.scrollIntoView({behavior:'instant',block:'center'});} else {window.scrollTo(0, document.body.scrollHeight);} ")
+                    WebDriverWait(driver, 4).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                except Exception:
+                    pass
+                html = driver.page_source
+                doc_try = parse_book_detail_html(html, url, [subject_name])
+                missing_title = not (doc_try.get('title') or '').strip()
+                missing_pdf = not bool(doc_try.get('url_pdf'))
+                if not missing_title and (not RETRY_PDF_ON_MISS or not missing_pdf):
+                    doc = doc_try
+                    break
+                # If missing title or pdf, backoff and retry
+                _backoff_sleep(attempts)
+            if not doc:
+                doc = parse_book_detail_html(driver.page_source, url, [subject_name])
+            if doc:
+                results.append(doc)
+                has_pdf = 'url_pdf' in doc and bool(doc['url_pdf'])
+                print(f"[OTL] [Leaf] Parsed book {idx}/{len(urls)} | title='{doc.get('title','')}' | pdf={has_pdf}", flush=True)
+        print(f"[OTL] ===== End subject: {subject_name} | total_books={len(results)} =====", flush=True)
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
+    return results
+
+
+def live_parse_subjects_index(index_url: str, root_subject: str) -> List[Dict[str, str]]:
+    """Open the subjects index and extract child subjects of a given parent.
+    Returns list of {name, url, slug}. If no children, returns the parent as a single leaf.
+    """
+    driver = _init_driver(headless=True)
+    def _norm(s: str) -> str:
+        return re.sub(r"\s+", " ", (s or '').strip()).lower()
+    try:
+        print(f"[OTL] [Index] Open subjects index: {index_url}", flush=True)
+        print(f"[OTL] [Index] Target parent: {root_subject}", flush=True)
+        driver.get(_with_cache_bust(index_url))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+        soup = _ensure_not_retry_later(driver)
+        result: List[Dict[str, str]] = []
+        for li in soup.select('#subjects ul.subject-directory > li'):
+            a = li.find('a', href=True)
+            if not a:
+                continue
+            if _norm(a.get_text()) != _norm(root_subject):
+                continue
+            ul = li.find('ul')
+            if ul:
+                for ca in ul.select('a[href]'):
+                    name = ca.get_text(strip=True)
+                    href = ca.get('href') or ''
+                    if '/opentextbooks/subjects/' in href:
+                        full = urljoin(BASE_URL, href)
+                        result.append({
+                            'name': name,
+                            'url': full,
+                            'slug': full.rstrip('/').split('/')[-1]
+                        })
+            else:
+                href = a.get('href') or ''
+                full = urljoin(BASE_URL, href)
+                result.append({
+                    'name': a.get_text(strip=True),
+                    'url': full,
+                    'slug': full.rstrip('/').split('/')[-1]
+                })
+            break
+        print(f"[OTL] [Index] Found children for '{root_subject}': {len(result)}", flush=True)
+        return result
+    finally:
+        try:
+            driver.quit()
         except Exception:
             pass
 
-        self.minio_client = None
-        self.minio_bucket = os.getenv('MINIO_BUCKET', 'oer-raw')
-        self.minio_enable = str(os.getenv('MINIO_ENABLE', '0')).lower() in {'1', 'true', 'yes'}
-        if self.minio_enable:
-            self.minio_client = Minio(
-                endpoint=os.getenv('MINIO_ENDPOINT', 'minio:9000'),
-                access_key=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
-                secret_key=os.getenv('MINIO_SECRET_KEY', 'minioadmin'),
-                secure=str(os.getenv('MINIO_SECURE', '0')).lower() in {'1', 'true', 'yes'}
-            )
-            try:
-                if not self.minio_client.bucket_exists(self.minio_bucket):
-                    self.minio_client.make_bucket(self.minio_bucket)
-            except Exception as e:
-                print(f"[MinIO] Bucket init error: {e}")
 
-    # Core utilities
-    def setup_selenium(self):
-        try:
-            print("Đang thiết lập Selenium...")
-            chrome_options = Options()
-            try:
-                chrome_options.page_load_strategy = 'eager'
-            except Exception:
-                pass
-            chrome_options.add_argument("--headless")
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-software-rasterizer")
-            chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-            chrome_options.add_argument("--remote-debugging-port=9222")
-            chrome_options.add_argument("--disable-background-timer-throttling")
-            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-            chrome_options.add_argument("--disable-renderer-backgrounding")
-            chrome_options.add_argument("--blink-settings=imagesEnabled=false")
-            try:
-                prefs = {"profile.managed_default_content_settings.images": 2}
-                chrome_options.add_experimental_option("prefs", prefs)
-            except Exception:
-                pass
-            self.driver = webdriver.Chrome(options=chrome_options)
-            print("Selenium đã sẵn sàng!")
-        except Exception as e:
-            print(f"Lỗi thiết lập Selenium: {e}")
-            print("Sẽ sử dụng requests thay thế")
-            self.use_selenium = False
+def live_scrape_root_subject_selenium(root_subject_name: str, index_url: str, max_children: int | None = None) -> List[Dict[str, Any]]:
+    """Scrape all child subjects under a root subject from the index using Selenium end-to-end."""
+    docs: List[Dict[str, Any]] = []
+    children = live_parse_subjects_index(index_url, root_subject_name)
+    if max_children:
+        children = children[:max_children]
+    print(f"[OTL] [Root] Start root='{root_subject_name}', children={len(children)}", flush=True)
+    for child in children:
+        name = child.get('name') or ''
+        url = child.get('url') or ''
+        if not name or not url:
+            continue
+        print(f"[OTL] [Root] Process child subject: {name} | {url}", flush=True)
+        # Cooldown between subjects to reduce rate limiting
+        if SUBJECT_COOLDOWN_SEC > 0:
+            time.sleep(SUBJECT_COOLDOWN_SEC)
+        for doc in live_scrape_leaf_subject_selenium(name, url):
+            docs.append(doc)
+    print(f"[OTL] [Root] Done root='{root_subject_name}', total_docs={len(docs)}", flush=True)
+    return docs
 
-    def cleanup(self):
-        if self.driver:
-            try:
-                print("Đang đóng Selenium...")
-                self.driver.quit()
-            except Exception:
-                pass
 
-    def get_page(self, url: str) -> BeautifulSoup:
-        if self.use_selenium and self.driver:
-            try:
-                self.driver.get(url)
-                WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                html = self.driver.page_source
-                return BeautifulSoup(html, 'html.parser')
-            except Exception:
-                return self.get_page_requests(url)
-        return self.get_page_requests(url)
-
-    def get_page_requests(self, url: str) -> BeautifulSoup:
-        try:
-            r = self.session.get(url, timeout=30)
-            r.raise_for_status()
-            return BeautifulSoup(r.text, 'html.parser')
-        except Exception:
-            return None
-
-    def create_doc_hash(self, url: str, title: str) -> str:
-        return hashlib.md5(f"{url}_{title}".encode()).hexdigest()
-
-    def extract_subjects(self, title: str, description: str = "") -> List[str]:
-        text = f"{title} {description}".lower()
-        subjects: List[str] = []
-        subject_keywords = {
-            'mathematics': ['math', 'algebra', 'calculus', 'geometry', 'statistics', 'mathematical', 'trigonometry'],
-            'physics': ['physics', 'mechanics', 'thermodynamics', 'quantum', 'physical'],
-            'chemistry': ['chemistry', 'organic', 'inorganic', 'biochemistry', 'chemical'],
-            'biology': ['biology', 'anatomy', 'physiology', 'genetics', 'biological', 'microbiology'],
-            'computer science': ['programming', 'computer', 'software', 'algorithm', 'coding'],
-            'engineering': ['engineering', 'mechanical', 'electrical', 'civil'],
-            'business': ['business', 'management', 'marketing', 'finance', 'economics', 'accounting', 'entrepreneurship'],
-            'psychology': ['psychology', 'cognitive', 'behavioral', 'psychological'],
-            'history': ['history', 'historical'],
-            'literature': ['literature', 'english', 'writing', 'literary'],
-            'medicine': ['medicine', 'medical', 'health', 'nursing'],
-            'education': ['education', 'teaching', 'learning', 'educational'],
-            'arts': ['art', 'music', 'painting', 'drawing', 'artistic'],
-            'philosophy': ['philosophy', 'philosophical', 'ethics'],
-            'government': ['government', 'political', 'politics', 'policy']
-        }
-        for subject, keywords in subject_keywords.items():
-            if any(k in text for k in keywords):
-                subjects.append(subject)
-        return subjects if subjects else ['general']
-
-    def upload_pdf_to_minio(self, local_path: str, source: str, logical_date: str) -> str:
-        if not self.minio_enable or not self.minio_client or not local_path or not os.path.exists(local_path):
-            return ''
-        try:
-            file_name = os.path.basename(local_path)
-            object_name = f"{source}/{logical_date}/pdfs/{file_name}"
-            self.minio_client.fput_object(self.minio_bucket, object_name, local_path)
-            print(f"[MinIO] Uploaded PDF: s3://{self.minio_bucket}/{object_name}")
-            return object_name
-        except Exception as e:
-            print(f"[MinIO] Upload PDF error: {e}")
-            return ''
-
-    def upload_raw_records_to_minio(self, records: List[Dict[str, Any]], source: str, logical_date: str) -> str:
-        if not self.minio_enable or not self.minio_client or not records:
-            return ''
-        prefix = f"{source}/{logical_date}"
-        os.makedirs('/opt/airflow/tmp', exist_ok=True)
-        tmp_path = f"/opt/airflow/tmp/{source}_{logical_date}.jsonl"
-        try:
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                for r in records:
-                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
-            object_name = f"{prefix}/data.jsonl"
-            self.minio_client.fput_object(self.minio_bucket, object_name, tmp_path)
-            print(f"[MinIO] Uploaded: s3://{self.minio_bucket}/{object_name}")
-            return object_name
-        except Exception as e:
-            print(f"[MinIO] Upload JSONL error: {e}")
-            return ''
-
-    def scrape_open_textbook_library(self) -> List[Dict[str, Any]]:
-        base_url = "https://open.umn.edu"
-        start_url = f"{base_url}/opentextbooks/"
-        documents: List[Dict[str, Any]] = []
-
-        def _get_otl(url: str) -> BeautifulSoup:
-            return self.get_page(url)
-
-        soup = _get_otl(f"{base_url}/opentextbooks/subjects")
-        subject_links: List[str] = []
-        if soup:
-            for a in soup.find_all('a', href=True):
-                href = a.get('href')
-                if not href:
-                    continue
-                full = urljoin(base_url, href.split('#')[0])
-                if '/opentextbooks/subjects/' in full and not self._is_otl_book_url(full):
-                    subject_links.append(full)
-        subject_links = list(dict.fromkeys(subject_links))
-
-        book_urls: set[str] = set()
-        # Optional limit number of subjects to crawl for quick tests
-        max_subjects = int(os.getenv('OTL_MAX_SUBJECTS', '0')) or None
-        limited_subject_links = subject_links[:max_subjects] if max_subjects else subject_links
-        for i, sub_url in enumerate(limited_subject_links, 1):
-            print(f"[OTL] Cào subject {i}/{len(subject_links)}: {sub_url}")
-            # Limit pages per subject if configured
-            max_pages_per_subject = int(os.getenv('OTL_MAX_PAGES_PER_SUBJECT', '0')) or 200
-            links = self._collect_books_from_subject(sub_url, max_pages=max_pages_per_subject)
-            for u in links:
-                book_urls.add(u)
-            time.sleep(0.5)
-
-        display_names = self._collect_subject_display_names()
-        for name in display_names:
-            url = f"{base_url}/opentextbooks/textbooks?subjects={name}"
-            for u in self._collect_books_from_listing(url):
-                book_urls.add(u)
-
-        listing_url = f"{base_url}/opentextbooks/textbooks"
-        print(f"[OTL] Cào listing tổng: {listing_url}")
-        for u in self._collect_books_from_listing(listing_url):
-            book_urls.add(u)
-
-        newest_url = f"{base_url}/opentextbooks/textbooks/newest"
-        print(f"[OTL] Cào listing newest: {newest_url}")
-        for u in self._collect_books_from_listing(newest_url):
-            book_urls.add(u)
-
-        # Optional BFS frontier limit
-        max_frontier = int(os.getenv('OTL_MAX_FRONTIER', '0')) or 5000
-        for u in self.crawl_all_book_urls(max_frontier=max_frontier):
-            book_urls.add(u)
-
-        home_soup = _get_otl(start_url)
-        for u in self._collect_book_links_from_page(home_soup, base_url):
-            book_urls.add(u)
-
-        print(f"[OTL] Tìm thấy {len(book_urls)} URL sách (sau phân trang)")
-
-        urls = sorted(book_urls)
-        # Optional limit total books to fetch details
-        max_books = int(os.getenv('OTL_MAX_BOOKS', '0')) or None
-        if max_books:
-            urls = urls[:max_books]
-        if self.use_selenium and self.driver:
-            for idx, url in enumerate(urls, 1):
-                print(f"[OTL] ({idx}/{len(urls)}) {url}")
-                doc = self.scrape_open_textbook_library_book(url)
-                if doc:
-                    documents.append(doc)
-        else:
-            from concurrent import futures
-            max_workers = int(os.getenv('OTL_CONCURRENCY', '16'))
-            print(f"[OTL] Bắt đầu cào chi tiết với {max_workers} luồng (requests)...")
-
-            def _fetch(u: str):
-                try:
-                    return self.scrape_open_textbook_library_book(u)
-                except Exception as e:
-                    print(f"[OTL] Lỗi khi cào {u}: {e}")
-                    return None
-
-            with futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                for idx, doc in enumerate(executor.map(_fetch, urls), 1):
-                    if doc:
-                        documents.append(doc)
-                    if idx % 100 == 0:
-                        print(f"[OTL] Đã xử lý {idx}/{len(urls)} sách")
-
-        return documents
-
-    # ============ Core OTL logic moved here ============
-    def _is_otl_book_url(self, url: str) -> bool:
-        if not url:
-            return False
-        if '/opentextbooks/textbooks/' not in url:
-            return False
-        blocked_slugs = {'newest', 'submit', 'in_development'}
-        slug = url.rstrip('/').split('/')[-1]
-        return slug not in blocked_slugs
-
-    def _collect_book_links_from_page(self, soup: BeautifulSoup, base_url: str) -> List[str]:
-        book_urls: List[str] = []
-        if not soup:
-            return book_urls
-        for a in soup.find_all('a', href=True):
-            href = a.get('href')
-            full_url = urljoin(base_url, href) if href else ''
-            clean_url = full_url.split('#')[0].split('?')[0]
-            if self._is_otl_book_url(clean_url) and clean_url not in book_urls:
-                book_urls.append(clean_url)
-        for link in soup.find_all('link', href=True):
-            rel = (link.get('rel') or '')
-            rel_str = ' '.join(rel) if isinstance(rel, list) else str(rel)
-            typ = (link.get('type') or '')
-            href = link.get('href')
-            if href and 'alternate' in rel_str and ('text/html' in typ or typ == '' or typ is None):
-                full_url = urljoin(base_url, href)
-                clean_url = full_url.split('#')[0].split('?')[0]
-                if self._is_otl_book_url(clean_url) and clean_url not in book_urls:
-                    book_urls.append(clean_url)
-        return book_urls
-
-    def _collect_books_from_subject(self, subject_url: str, max_pages: int = 200) -> List[str]:
-        base_url = "https://open.umn.edu"
-        seen_urls: set[str] = set()
-        if self.use_selenium and self.driver:
-            try:
-                self.driver.get(subject_url)
-                WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            except Exception:
-                pass
-
-            def collect_current_book_links() -> List[str]:
-                urls: List[str] = []
-                try:
-                    html = self.driver.page_source
-                except (InvalidSessionIdException, WebDriverException):
-                    try:
-                        self.setup_selenium()
-                        self.driver.get(subject_url)
-                        WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                        html = self.driver.page_source
-                    except Exception:
-                        return urls
-                soup_local = BeautifulSoup(html, 'html.parser')
-                for a in soup_local.find_all('a', href=True):
-                    href = (a.get('href') or '').strip()
-                    if not href:
-                        continue
-                    full = urljoin(base_url, href.split('#')[0])
-                    clean = full.split('?')[0]
-                    if self._is_otl_book_url(clean) and clean not in urls:
-                        urls.append(clean)
-                return urls
-
-            def lazy_load_all_visible(max_scrolls: int = 200):
-                last_count = 0
-                stable_rounds = 0
-                for _ in range(max_scrolls):
-                    urls_now = collect_current_book_links()
-                    if len(urls_now) <= last_count:
-                        stable_rounds += 1
-                    else:
-                        stable_rounds = 0
-                        last_count = len(urls_now)
-                    try:
-                        self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                        btns = []
-                        try:
-                            btns = self.driver.find_elements(By.XPATH, "//button[contains(., 'Load more') or contains(., 'Show more') or contains(., 'More')]")
-                        except Exception:
-                            btns = []
-                        for b in btns:
-                            try:
-                                if b.is_displayed():
-                                    self.driver.execute_script("arguments[0].click();", b)
-                                    time.sleep(0.6)
-                            except Exception:
-                                pass
-                    except (InvalidSessionIdException, WebDriverException):
-                        try:
-                            self.setup_selenium()
-                            self.driver.get(subject_url)
-                            WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                        except Exception:
-                            return
-                    except Exception:
-                        pass
-                    time.sleep(0.8)
-                    if stable_rounds >= 3:
-                        break
-
-            lazy_load_all_visible()
-            for u in collect_current_book_links():
-                seen_urls.add(u)
-
-            for _ in range(max_pages):
-                next_link_el = None
-                try:
-                    next_link_el = self.driver.find_element(By.CSS_SELECTOR, "a[rel*='next']")
-                except Exception:
-                    pass
-                if not next_link_el:
-                    try:
-                        candidates = self.driver.find_elements(By.XPATH, "//a[normalize-space()='Next' or normalize-space()='›' or normalize-space()='»']")
-                        next_link_el = candidates[0] if candidates else None
-                    except Exception:
-                        next_link_el = None
-                if not next_link_el:
-                    break
-                clicked = False
-                try:
-                    self.driver.execute_script("arguments[0].click();", next_link_el)
-                    clicked = True
-                except Exception:
-                    try:
-                        next_link_el.click()
-                        clicked = True
-                    except Exception:
-                        clicked = False
-                if not clicked:
-                    break
-                time.sleep(1.2)
-                try:
-                    WebDriverWait(self.driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-                except Exception:
-                    pass
-                lazy_load_all_visible()
-                for u in collect_current_book_links():
-                    seen_urls.add(u)
-            return sorted(seen_urls)
-
-        soup = self.get_page_requests(subject_url)
-        listing_urls: list[str] = []
-        if soup:
-            for a in soup.find_all('a', href=True):
-                href = a.get('href') or ''
-                full = urljoin(base_url, href)
-                if '/opentextbooks/textbooks' in full and '?' in full:
-                    if full not in listing_urls:
-                        listing_urls.append(full)
-        if not listing_urls:
-            slug = subject_url.rstrip('/').split('/')[-1]
-            candidate_params = ['subject', 'subjects', 'topic', 'discipline', 'term', 'term-subject', 'taxonomy', 'category', 'categories']
-            for p in candidate_params:
-                listing_urls.append(f"{base_url}/opentextbooks/textbooks?{p}={slug}")
-            pretty = slug.replace('-', ' ').title()
-            listing_urls.append(f"{base_url}/opentextbooks/textbooks?subjects={pretty}")
-        for listing in list(dict.fromkeys(listing_urls)):
-            links = self._collect_books_from_listing(listing, max_pages=max_pages * 2)
-            for u in links:
-                if u not in seen_urls:
-                    seen_urls.add(u)
-            time.sleep(0.2)
-        return sorted(seen_urls)
-
-    def _collect_books_from_listing(self, listing_url: str, max_pages: int = 1000) -> List[str]:
-        base_url = "https://open.umn.edu"
-        seen_urls: set[str] = set()
-        for page in range(0, max_pages):
-            url = listing_url
-            if page > 0:
-                joiner = '&' if ('?' in listing_url) else '?'
-                url = f"{listing_url}{joiner}page={page}"
-            soup = self.get_page_requests(url)
-            links = self._collect_book_links_from_page(soup, base_url)
-            new_links = [u for u in links if u not in seen_urls]
-            if not new_links:
-                break
-            for u in new_links:
-                seen_urls.add(u)
-            time.sleep(0.3)
-        next_url = listing_url
-        for _ in range(max_pages):
-            soup = self.get_page_requests(next_url)
-            if not soup:
-                break
-            for u in self._collect_book_links_from_page(soup, base_url):
-                if u not in seen_urls:
-                    seen_urls.add(u)
-            next_link = None
-            link_tag = soup.find('a', rel=lambda v: v and 'next' in v)
-            if link_tag and link_tag.get('href'):
-                next_link = urljoin(base_url, link_tag['href'])
-            else:
-                for a in soup.find_all('a', href=True):
-                    txt = (a.get_text() or '').strip().lower()
-                    if txt in {'next', 'next ›', '›', '»', 'more', 'older'}:
-                        next_link = urljoin(base_url, a['href'])
-                        break
-            if not next_link or next_link == next_url:
-                break
-            next_url = next_link
-            time.sleep(0.3)
-        return sorted(seen_urls)
-
-    def _collect_nav_links_from_page(self, soup: BeautifulSoup, base_url: str) -> List[str]:
-        nav_urls: List[str] = []
-        if not soup:
-            return nav_urls
-        for a in soup.find_all('a', href=True):
-            href = a.get('href')
-            full_url = urljoin(base_url, href)
-            clean_url = full_url.split('#')[0]
-            if '/opentextbooks/' not in clean_url:
+def live_parse_all_subjects_index(index_url: str) -> List[Dict[str, str]]:
+    """Parse the entire subjects index to get every leaf subject (parent without children or each child).
+    Returns list of {parent, name, url, slug}.
+    """
+    driver = _init_driver(headless=True)
+    leaves: List[Dict[str, str]] = []
+    try:
+        print(f"[OTL] [Index-All] Open subjects index: {index_url}", flush=True)
+        driver.get(_with_cache_bust(index_url))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+        soup = _ensure_not_retry_later(driver)
+        for li in soup.select('#subjects ul.subject-directory > li'):
+            a = li.find('a', href=True)
+            if not a:
                 continue
-            if self._is_otl_book_url(clean_url):
-                continue
-            if any(segment in clean_url for segment in ['/opentextbooks/subjects', '/opentextbooks/textbooks']):
-                if clean_url not in nav_urls:
-                    nav_urls.append(clean_url)
-        return nav_urls
-
-    def crawl_all_book_urls(self, max_frontier: int = 5000) -> List[str]:
-        base_url = "https://open.umn.edu"
-        seeds = [
-            f"{base_url}/opentextbooks/",
-            f"{base_url}/opentextbooks/subjects",
-            f"{base_url}/opentextbooks/textbooks",
-            f"{base_url}/opentextbooks/textbooks/newest",
-        ]
-        visited: set[str] = set()
-        frontier: List[str] = []
-        for s in seeds:
-            frontier.append(s)
-            visited.add(s)
-        book_urls: set[str] = set()
-        steps = 0
-        while frontier and steps < max_frontier:
-            current = frontier.pop(0)
-            steps += 1
-            print(f"[OTL] Crawl {steps}: {current}")
-            soup = self.get_page_requests(current)
-            for u in self._collect_book_links_from_page(soup, base_url):
-                book_urls.add(u)
-            for nav in self._collect_nav_links_from_page(soup, base_url):
-                nav_clean = nav.split('&page=')[0]
-                if nav_clean not in visited:
-                    visited.add(nav_clean)
-                    frontier.append(nav_clean)
-            time.sleep(0.2)
-        print(f"[OTL] Crawl hoàn tất. Nav visited: {len(visited)}, tổng URL sách: {len(book_urls)}")
-        return sorted(book_urls)
-
-    def _collect_subject_display_names(self) -> List[str]:
-        base_url = "https://open.umn.edu"
-        names: list[str] = []
-        soup = self.get_page(f"{base_url}/opentextbooks/subjects")
-        if not soup:
-            return names
-        for a in soup.find_all('a', href=True):
-            href = (a.get('href') or '').strip()
-            text = (a.get_text() or '').strip()
-            if not text:
-                continue
-            if '/opentextbooks/subjects/' in href:
-                if text not in names:
-                    names.append(text)
-        return names
-
-    def scrape_open_textbook_library_book(self, url: str) -> Dict[str, Any]:
-        soup = self.get_page(url)
-        if not soup:
-            return None
-        try:
-            def _clean_description_noise(text: str) -> str:
-                if not text:
-                    return ''
-                noise_patterns = [
-                    r"Stay Updated[\s\S]*$",
-                    r"CENTER FOR OPEN EDUCATION[\s\S]*$",
-                    r"University of Minnesota[\s\S]*$",
-                    r"Creative Commons Attribution[\s\S]*$",
-                    r"Join Our Newsletter[\s\S]*$",
-                    r"Bluesky|Mastodon|LinkedIn|YouTube"
-                ]
-                cleaned = text
-                for pat in noise_patterns:
-                    cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
-                return re.sub(r"\s+", " ", cleaned).strip()
-
-            def _collect_official_subjects(soup_obj: BeautifulSoup) -> List[str]:
-                subjects: List[str] = []
-                for a in soup_obj.find_all('a', href=True):
-                    href = (a.get('href') or '').strip()
+            parent_name = a.get_text(strip=True)
+            ul = li.find('ul')
+            if ul:
+                for ca in ul.select('a[href]'):
+                    name = ca.get_text(strip=True)
+                    href = ca.get('href') or ''
                     if '/opentextbooks/subjects/' in href:
-                        name = (a.get_text() or '').strip().lower()
-                        if name and name not in subjects:
-                            subjects.append(name)
-                for sel in [
-                    '.field--name-field-subjects a',
-                    '.taxonomy-term a[href*="/opentextbooks/subjects/"]',
-                    'nav.breadcrumb a[href*="/opentextbooks/subjects/"]']:
-                    for a in soup_obj.select(sel):
-                        name = (a.get_text() or '').strip().lower()
-                        if name and name not in subjects:
-                            subjects.append(name)
-                return subjects
+                        full = urljoin(BASE_URL, href)
+                        leaves.append({
+                            'parent': parent_name,
+                            'name': name,
+                            'url': full,
+                            'slug': full.rstrip('/').split('/')[-1]
+                        })
+            else:
+                href = a.get('href') or ''
+                full = urljoin(BASE_URL, href)
+                leaves.append({
+                    'parent': parent_name,
+                    'name': parent_name,
+                    'url': full,
+                    'slug': full.rstrip('/').split('/')[-1]
+                })
+        print(f"[OTL] [Index-All] Found leaves: {len(leaves)}", flush=True)
+        return leaves
+    finally:
+        try:
+            driver.quit()
+        except Exception:
+            pass
 
-            def _extract_metadata_from_ldjson(soup_obj: BeautifulSoup) -> Dict[str, Any]:
-                meta: Dict[str, Any] = {}
-                for script in soup_obj.find_all('script', attrs={'type': 'application/ld+json'}):
-                    try:
-                        data = json.loads(script.string or '')
-                    except Exception:
+
+def live_scrape_all_subjects_selenium(index_url: str, max_parents: int | None = None, max_children: int | None = None) -> List[Dict[str, Any]]:
+    """Scrape all leaf subjects discovered from the index. Optional limits for testing.
+    max_parents limits number of distinct parents processed; max_children limits children per parent.
+    """
+    leaves = live_parse_all_subjects_index(index_url)
+    if max_parents is not None or max_children is not None:
+        filtered: List[Dict[str, str]] = []
+        seen_parent: List[str] = []
+        per_parent: Dict[str, int] = {}
+        for leaf in leaves:
+            parent = leaf.get('parent') or ''
+            if max_parents is not None:
+                if parent not in seen_parent:
+                    if len(seen_parent) >= max_parents:
                         continue
-                    def walk(obj):
-                        if isinstance(obj, dict):
-                            if obj.get('@type') in {'Book', 'CreativeWork'}:
-                                if isinstance(obj.get('isbn'), str):
-                                    meta.setdefault('isbn', obj['isbn'])
-                                if isinstance(obj.get('datePublished'), str):
-                                    meta.setdefault('date_published', obj['datePublished'])
-                                if isinstance(obj.get('inLanguage'), str):
-                                    meta.setdefault('language', obj['inLanguage'])
-                                pub = obj.get('publisher')
-                                if pub:
-                                    if isinstance(pub, dict) and 'name' in pub:
-                                        meta.setdefault('publisher', pub.get('name'))
-                                    elif isinstance(pub, str):
-                                        meta.setdefault('publisher', pub)
-                                lic = obj.get('license')
-                                if isinstance(lic, str):
-                                    meta.setdefault('license_url', lic)
-                            for v in obj.values():
-                                walk(v)
-                        elif isinstance(obj, list):
-                            for it in obj:
-                                walk(it)
-                    walk(data)
-                return meta
-
-            # Title
-            title = "Unknown Book"
-            h1 = soup.find('h1')
-            if h1:
-                title = h1.get_text(strip=True)
-            if title == "Unknown Book":
-                og_title = soup.find('meta', {'property': 'og:title'})
-                if og_title:
-                    title = og_title.get('content', '').strip() or title
-            if title == "Unknown Book":
-                page_title = soup.find('title')
-                if page_title:
-                    title = page_title.get_text(strip=True)
-            if title == "Unknown Book":
-                alt = soup.select_one('h1.page-title, .node__title, [itemprop="name"]')
-                if alt:
-                    t = alt.get_text(strip=True)
-                    if t:
-                        title = t
-
-            # Description
-            description = ""
-            desc_candidates = [
-                ('meta', {'name': 'description'}),
-                ('meta', {'property': 'og:description'}),
-            ]
-            for name, attrs in desc_candidates:
-                elem = soup.find(name, attrs)
-                if elem:
-                    if name == 'meta':
-                        description = elem.get('content', '').strip()
-                    else:
-                        description = elem.get_text(strip=True)
-                    if len(description) > 30:
-                        break
-
-            if len(description) < 30:
-                for selector in ['.book-description', '.field--name-body', '.description', '.content']:
-                    elem = soup.select_one(selector)
-                    if elem:
-                        description = elem.get_text('\n', strip=True)
-                        if len(description) > 30:
-                            break
-            description = _clean_description_noise(description)
-
-            # Authors
-            def _collect_authors_from_ldjson(soup_obj) -> List[str]:
-                names: List[str] = []
-                for script in soup_obj.find_all('script', attrs={'type': 'application/ld+json'}):
-                    try:
-                        data = json.loads(script.string or '')
-                    except Exception:
-                        continue
-                    def extract_from_obj(obj):
-                        if isinstance(obj, dict):
-                            if 'author' in obj:
-                                return extract_from_obj(obj['author'])
-                            if 'name' in obj and isinstance(obj['name'], str):
-                                return [obj['name']]
-                            if '@graph' in obj:
-                                return extract_from_obj(obj['@graph'])
-                        elif isinstance(obj, list):
-                            acc = []
-                            for it in obj:
-                                acc.extend(extract_from_obj(it) or [])
-                            return acc
-                        elif isinstance(obj, str):
-                            return [obj]
-                        return []
-                    for n in extract_from_obj(data) or []:
-                        if n and n not in names:
-                            names.append(n)
-                return names
-
-            def _cleanup_author_tokens(raw: str) -> List[str]:
-                tokens = []
-                if not raw:
-                    return tokens
-                text = raw.replace('By ', '').replace('by ', '').strip()
-                lines = [ln.strip() for ln in re.split(r'\n|\r', text) if ln.strip()]
-                pieces = []
-                for ln in lines or [text]:
-                    parts = [p.strip() for p in re.split(r' and |,', ln) if p.strip()]
-                    if len(parts) >= 2:
-                        first = parts[0]
-                        rest = ' '.join(parts[1:])
-                        org_keys = ['university', 'college', 'institute', 'school', 'academy', 'polytechnic', 'tech', 'state']
-                        if any(k in rest.lower() for k in org_keys):
-                            pieces.append(first)
-                            continue
-                    pieces.extend(parts)
-                cleaned = []
-                for p in pieces:
-                    if not p:
-                        continue
-                    org_keys = ['university', 'college', 'institute', 'school', 'academy', 'press']
-                    if any(k in p.lower() for k in org_keys):
-                        continue
-                    words = [w for w in re.split(r'\s+', p) if w]
-                    if len(words) >= 2 and 2 <= len(p) <= 120:
-                        cleaned.append(p)
-                seen = set()
-                out = []
-                for c in cleaned:
-                    if c not in seen:
-                        seen.add(c)
-                        out.append(c)
-                return out
-
-            authors: List[str] = []
-            for n in _collect_authors_from_ldjson(soup):
-                for a in _cleanup_author_tokens(n):
-                    if a not in authors:
-                        authors.append(a)
-            if not authors:
-                for meta_name in ['author', 'book:author']:
-                    for m in soup.find_all('meta', attrs={'name': meta_name}):
-                        val = (m.get('content') or '').strip()
-                        for a in _cleanup_author_tokens(val):
-                            if a not in authors:
-                                authors.append(a)
-                    for m in soup.find_all('meta', attrs={'property': meta_name}):
-                        val = (m.get('content') or '').strip()
-                        for a in _cleanup_author_tokens(val):
-                            if a not in authors:
-                                authors.append(a)
-            if not authors:
-                selector_candidates = [
-                    '.field--name-field-authors .field__item',
-                    '.field--name-field-contributors .field__item',
-                    '.contributors .field__item',
-                    '.contributors', '.contributor', '.authors', '[itemprop="author"] [itemprop="name"]',
-                    '[itemprop="author"]'
-                ]
-                for selector in selector_candidates:
-                    for elem in soup.select(selector):
-                        txt = elem.get_text(' ', strip=True)
-                        for a in _cleanup_author_tokens(txt):
-                            if a not in authors:
-                                authors.append(a)
-            if not authors:
-                contrib = soup.select_one('.contributors, .field--name-field-contributors')
-                if contrib:
-                    lines = [ln.strip() for ln in contrib.get_text('\n', strip=True).split('\n') if ln.strip()]
-                    for ln in lines:
-                        for a in _cleanup_author_tokens(ln):
-                            if a not in authors:
-                                authors.append(a)
-
-            def _collect_official_subjects_or_guess() -> List[str]:
-                subjects = _collect_official_subjects(soup)
-                return subjects if subjects else self.extract_subjects(title, description)
-
-            # Subject extraction from title/description as in OpenStax file
-            def _extract_subjects_from_text(text_title: str, text_desc: str) -> List[str]:
-                tx = f"{text_title} {text_desc}".lower()
-                subjects = []
-                subject_keywords = {
-                    'mathematics': ['math', 'algebra', 'calculus', 'geometry', 'statistics', 'mathematical', 'trigonometry'],
-                    'physics': ['physics', 'mechanics', 'thermodynamics', 'quantum', 'physical'],
-                    'chemistry': ['chemistry', 'organic', 'inorganic', 'biochemistry', 'chemical'],
-                    'biology': ['biology', 'anatomy', 'physiology', 'genetics', 'biological', 'microbiology'],
-                    'computer science': ['programming', 'computer', 'software', 'algorithm', 'coding'],
-                    'engineering': ['engineering', 'mechanical', 'electrical', 'civil'],
-                    'business': ['business', 'management', 'marketing', 'finance', 'economics', 'accounting', 'entrepreneurship'],
-                    'psychology': ['psychology', 'cognitive', 'behavioral', 'psychological'],
-                    'history': ['history', 'historical'],
-                    'literature': ['literature', 'english', 'writing', 'literary'],
-                    'medicine': ['medicine', 'medical', 'health', 'nursing'],
-                    'education': ['education', 'teaching', 'learning', 'educational'],
-                    'arts': ['art', 'music', 'painting', 'drawing', 'artistic'],
-                    'philosophy': ['philosophy', 'philosophical', 'ethics'],
-                    'government': ['government', 'political', 'politics', 'policy']
-                }
-                for subject, keywords in subject_keywords.items():
-                    if any(k in tx for k in keywords):
-                        subjects.append(subject)
-                return subjects if subjects else ['general']
-
-            # Use official taxonomy if available; otherwise, heuristic
-            subjects = _collect_official_subjects_or_guess() if callable(_collect_official_subjects) else _extract_subjects_from_text(title, description)
-
-            def _extract_pdf_link_from_soup(soup_obj) -> str:
-                base_url = "https://open.umn.edu"
-                for a in soup_obj.find_all('a', href=True):
-                    href = (a.get('href') or '').strip()
-                    text = (a.get_text() or '').strip().lower()
-                    if not href:
-                        continue
-                    href_lower = href.lower()
-                    is_pdf = href_lower.endswith('.pdf') or '/bitstreams/' in href_lower or 'format=pdf' in href_lower
-                    is_pdf_text = ('pdf' in text) or ('download' in text)
-                    if is_pdf or is_pdf_text:
-                        return urljoin(base_url, href)
-                return ''
-
-            pdf_url = _extract_pdf_link_from_soup(soup) or ''
-            pdf_path = ''
-            if pdf_url and str(os.getenv('OTL_DOWNLOAD_PDFS', '0')).lower() in {'1', 'true', 'yes'}:
-                try:
-                    safe_title = re.sub(r"[^\w\-\.]+", "_", title)[:120] or 'book'
-                    file_name = f"{safe_title}_{self.create_doc_hash(pdf_url, title)[:8]}.pdf"
-                    dest_path = os.path.join(self.pdf_output_dir, file_name)
-                    if not os.path.exists(dest_path):
-                        with self.session.get(pdf_url, stream=True, timeout=60) as r:
-                            r.raise_for_status()
-                            with open(dest_path, 'wb') as f:
-                                for chunk in r.iter_content(chunk_size=1024 * 256):
-                                    if chunk:
-                                        f.write(chunk)
-                    pdf_path = dest_path
-                except Exception as e:
-                    print(f"[OTL] Lỗi tải PDF {pdf_url}: {e}")
-
-            doc = {
-                'id': self.create_doc_hash(url, title),
-                'title': title,
-                'description': description[:500] + "..." if len(description) > 500 else description,
-                'authors': authors,
-                'subjects': subjects,
-                'source': 'Open Textbook Library',
-                'url': url,
-                'pdf_url': pdf_url or None,
-                'pdf_path': pdf_path or None,
-                'scraped_at': datetime.now().isoformat()
-            }
-            # Metadata extras
-            meta = _extract_metadata_from_ldjson(soup)
-            for k in ['license', 'license_url', 'language', 'publisher', 'isbn', 'date_published']:
-                if meta.get(k):
-                    doc[k] = meta[k]
-            return doc
-        except Exception as e:
-            print(f"Lỗi khi cào OTL {url}: {e}")
-            return None
+                    seen_parent.append(parent)
+            if max_children is not None:
+                cnt = per_parent.get(parent, 0)
+                if cnt >= max_children:
+                    continue
+                per_parent[parent] = cnt + 1
+            filtered.append(leaf)
+        leaves = filtered
+    print(f"[OTL] [All] Scrape leaves count: {len(leaves)}", flush=True)
+    docs: List[Dict[str, Any]] = []
+    for idx, leaf in enumerate(leaves, start=1):
+        name = leaf.get('name') or ''
+        url = leaf.get('url') or ''
+        if not name or not url:
+            continue
+        print(f"[OTL] [All] ({idx}/{len(leaves)}) Subject: {name} | {url}", flush=True)
+        for doc in live_scrape_leaf_subject_selenium(name, url):
+            docs.append(doc)
+    print(f"[OTL] [All] Done all leaves, total_docs={len(docs)}", flush=True)
+    return docs
 
 

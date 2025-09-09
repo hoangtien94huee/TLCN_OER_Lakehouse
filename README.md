@@ -1,262 +1,101 @@
-# Tệp README cho OER Scraper với Airflow
+# OER Lakehouse Scraper (Airflow + Selenium)
 
-## Tổng quan
+### Tổng quan
+- Scraper cho 2 nguồn: `OpenStax` và `Open Textbook Library (OTL)`.
+- Orchestrate bằng Apache Airflow (Docker), Selenium headless Chrome.
+- Log chi tiết, tuỳ biến tốc độ/throttle, upload MinIO theo chuẩn thư mục data lake.
 
-Dự án này sử dụng Apache Airflow để tự động cào dữ liệu tài liệu OER (Open Educational Resources) từ OpenStax hàng ngày. Hệ thống được thiết kế để:
-
-- ✅ Cào dữ liệu tự động hàng ngày lúc 00:00
-- ✅ Tránh trùng lặp tài liệu bằng hash và database
-- ✅ Chạy trong Docker container với Selenium headless
-- ✅ Lưu trữ dữ liệu có cấu trúc và log chi tiết
-- ✅ Tự động dọn dẹp file cũ (> 30 ngày)
-
-## Cấu trúc dự án
-
+### Cấu trúc thư mục
 ```
-├── Dockerfile              # Container setup với Chrome + Selenium
-├── docker-compose.yml      # Orchestration
-├── requirements.txt        # Python dependencies
-├── airflow.cfg            # Airflow configuration
-├── entrypoint.sh          # Container startup script
-├── selenium_scraper.py    # Core scraper logic
-├── oer_scraper_dag.py     # Airflow DAG định nghĩa workflow
-├── scraped_data/          # Dữ liệu đầu ra (JSON files)
-├── database/              # SQLite database cho tracking
-└── logs/                  # Airflow logs
+├── Dockerfile
+├── docker-compose.yml
+├── requirements.txt
+├── airflow.cfg
+├── entrypoint.sh
+├── dags/
+│   ├── oer_scraper_dag.py        # DAG cho OpenStax
+│   ├── otl_scraper_dag.py        # DAG cho Open Textbook Library (Selenium-only)
+│   ├── openstax_scraper.py       # Module scraper OpenStax (self-contained)
+│   └── otl_scraper.py            # Module scraper OTL (self-contained)
+├── scraped_data/                 # Lưu JSON tạm trong container
+├── database/
+└── logs/
 ```
 
-## Tính năng chính
-
-### 1. Tránh trùng lặp thông minh
-- Tạo hash cho mỗi document dựa trên title + description + URL
-- Lưu trữ hash trong SQLite database
-- Chỉ xử lý document mới hoặc đã thay đổi
-- Log chi tiết: mới/cập nhật/bỏ qua
-
-### 2. Selenium headless trong Docker
-- Chạy Chrome headless cho môi trường production
-- Tự động cài đặt ChromeDriver
-- Xử lý JavaScript-rendered content
-- Fallback sang requests nếu Selenium lỗi
-
-### 3. Airflow workflow
-- DAG chạy hàng ngày lúc 00:00
-- Retry logic khi có lỗi
-- Health checks
-- Cleanup tự động file cũ
-
-## Cài đặt và chạy
-
-### 1. Build và chạy container
-
+### Chạy nhanh (Docker)
 ```bash
-# Clone repository
-git clone <your-repo>
-cd tlcn
-
-# Build và chạy
 docker-compose up -d --build
-
-# Kiểm tra logs
-docker-compose logs -f
+# Airflow UI: http://localhost:8080 (admin/admin)
 ```
 
-### 2. Truy cập Airflow UI
+### DAGs
+- `oer_scraper_daily`: OpenStax
+- `otl_scraper_daily`: Open Textbook Library
 
-- URL: http://localhost:8080
-- Username: admin
-- Password: admin
+### Cấu hình MinIO (ENV hoặc Airflow Variables)
+- `MINIO_ENDPOINT`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`, `MINIO_BUCKET`, `MINIO_SECURE=false|true`
+- Đường dẫn upload OTL: `oer-raw/otl/{YYYY-MM-DD}/{filename}.json`
+- File local OTL: `scraped_data/open_textbook_library_{YYYY-MM-DD}.json`
 
-### 3. Kích hoạt DAG
+### OTL scraping modes (qua ENV/Variables/DAG Run conf)
+Chọn 1 trong các cách vào DAG `otl_scraper_daily`:
+- Leaf một subject: `SUBJECT_NAME`, `SUBJECT_URL`
+- Root + tự phát hiện child: `ROOT_SUBJECT_NAME`, `SUBJECTS_INDEX_URL`
+- Toàn bộ leaves: `SUBJECTS_INDEX_URL`
+- Tuỳ chọn giới hạn: `OTL_MAX_PARENTS`, `OTL_MAX_CHILDREN`
 
-1. Truy cập Airflow UI
-2. Tìm DAG "oer_scraper_daily"
-3. Bật DAG bằng toggle switch
-4. DAG sẽ chạy tự động hàng ngày
+### Throttling/Anti-bot (OTL)
+- Chờ hết “Retry later”: `OTL_WAIT_UNTIL_CLEAR=true`, `OTL_WAIT_MAX_MINUTES=30`
+- Nhịp cơ bản: `OTL_DELAY_BASE_SEC`, `OTL_DELAY_JITTER_SEC`
+- Backoff: `OTL_RETRY_BACKOFF_BASE_SEC`, `OTL_RETRY_BACKOFF_MAX_SEC`
+- Per-book/subject cooldown: `OTL_PER_BOOK_DELAY_SEC`, `OTL_SUBJECT_COOLDOWN_SEC`
+- User-Agent/Proxy: `OTL_FORCE_RANDOM_UA=true`, `OTL_USER_AGENT`, `OTL_PROXY`
+- Retry giữa trang sách: `OTL_BOOK_MAX_ATTEMPTS`, `OTL_RETRY_PDF_ON_MISS=true`
+- Slow preset: `OTL_SLOW_MODE=true` (đặt giá trị an toàn mặc định)
 
-### 4. Chạy thủ công (test)
-
-```bash
-# Trigger DAG ngay lập tức
-docker exec oer-airflow-scraper airflow dags trigger oer_scraper_daily
-```
-
-## Cấu trúc dữ liệu đầu ra
-
-### File JSON hàng ngày
+### Schema output (mỗi document)
 ```json
 {
-  "scraping_date": "2025-01-15",
-  "total_found": 50,
-  "new_documents": 5,
-  "updated_documents": 2,
-  "documents": [
-    {
-      "id": "abc123...",
-      "title": "College Algebra",
-      "description": "Comprehensive algebra textbook...",
-      "authors": ["Jay Abramson"],
-      "subjects": ["mathematics"],
-      "source": "OpenStax",
-      "url": "https://openstax.org/details/books/college-algebra",
-      "scraped_at": "2025-01-15T10:30:00"
-    }
-  ]
+  "id": "<md5(url_title)>",
+  "title": "...",
+  "description": "...",
+  "authors": ["..."],
+  "subjects": ["..."],
+  "source": "Open Textbook Library | OpenStax",
+  "url": "<ưu tiên PDF nếu có, nếu không là URL sách>",
+  "url_pdf": "<PDF nếu có>",
+  "scraped_at": "ISO8601"
 }
 ```
 
-### Database schema
-```sql
--- Tracking documents
-CREATE TABLE scraped_documents (
-    id TEXT PRIMARY KEY,
-    title TEXT NOT NULL,
-    url TEXT NOT NULL,
-    content_hash TEXT NOT NULL,
-    source TEXT NOT NULL,
-    scraped_at TIMESTAMP,
-    last_updated TIMESTAMP
-);
-
--- Logging runs
-CREATE TABLE scraping_logs (
-    id INTEGER PRIMARY KEY,
-    run_date DATE NOT NULL,
-    total_found INTEGER,
-    new_documents INTEGER,
-    updated_documents INTEGER,
-    status TEXT,
-    created_at TIMESTAMP
-);
-```
-
-## Monitoring và troubleshooting
-
-### 1. Kiểm tra logs
-```bash
-# Airflow logs
-docker-compose logs oer-scraper
-
-# Database logs
-docker exec oer-airflow-scraper sqlite3 /opt/airflow/database/scraped_documents.db ".tables"
-```
-
-### 2. Debug DAG
-```bash
-# List DAGs
-docker exec oer-airflow-scraper airflow dags list
-
-# Test task
-docker exec oer-airflow-scraper airflow tasks test oer_scraper_daily scrape_openstax_documents 2025-01-15
-```
-
-### 3. Kiểm tra scraping results
-```bash
-# Xem file output mới nhất
-ls -la scraped_data/
-
-# Đếm documents trong database
-docker exec oer-airflow-scraper sqlite3 /opt/airflow/database/scraped_documents.db "SELECT COUNT(*) FROM scraped_documents;"
-```
-
-## Cấu hình nâng cao
-
-### 1. Thay đổi schedule
-Sửa trong `oer_scraper_dag.py`:
-```python
-schedule_interval=timedelta(hours=12)  # Chạy 2 lần/ngày
-# hoặc
-schedule_interval='0 2 * * *'  # Chạy lúc 2:00 AM mỗi ngày
-```
-
-### 2. Thêm website khác
-Mở rộng `selenium_scraper.py`:
-```python
-def scrape_mit_opencourseware(self):
-    # Logic cào MIT OCW
-    pass
-
-def scrape_khan_academy(self):
-    # Logic cào Khan Academy
-    pass
-```
-
-### 3. Notification
-Thêm vào DAG args:
-```python
-default_args = {
-    'email': ['admin@company.com'],
-    'email_on_failure': True,
-    'email_on_success': True,
+### Ví dụ cấu hình DAG Run (OTL – toàn bộ leaves, siêu an toàn)
+```json
+{
+  "subjects_index_url": "https://open.umn.edu/opentextbooks/subjects",
+  "OTL_WAIT_UNTIL_CLEAR": "true",
+  "OTL_WAIT_MAX_MINUTES": "30",
+  "OTL_DELAY_BASE_SEC": "1.2",
+  "OTL_DELAY_JITTER_SEC": "0.6",
+  "OTL_RETRY_BACKOFF_BASE_SEC": "5",
+  "OTL_RETRY_BACKOFF_MAX_SEC": "60",
+  "OTL_PER_BOOK_DELAY_SEC": "0.8",
+  "OTL_SUBJECT_COOLDOWN_SEC": "4",
+  "OTL_BOOK_MAX_ATTEMPTS": "6",
+  "OTL_RETRY_PDF_ON_MISS": "true"
 }
 ```
 
-## Performance tuning
+### OpenStax
+- DAG: `oer_scraper_daily`
+- Tuỳ chọn giới hạn khi test: `OPENSTAX_MAX_BOOKS`
+- MinIO dùng cùng thông số trên; object key tương tự theo ngày nguồn OpenStax.
 
-### 1. Giảm delay giữa requests
-```python
-scraper = AdvancedOERScraper(delay=0.5)  # Từ 2.0 xuống 0.5
-```
+### Vận hành
+- Kích hoạt DAG trong Airflow UI, hoặc Trigger DAG Run và truyền conf như trên.
+- Logs chi tiết hiển thị tiến độ: phát hiện subject, phân trang/scroll, số sách, parse từng sách, phát hiện PDF.
 
-### 2. Tăng parallelism
-Sửa `airflow.cfg`:
-```ini
-parallelism = 32
-dag_concurrency = 16
-max_active_tasks_per_dag = 8
-```
+### Dọn dẹp
+- Task `cleanup_old_files` tự xoá JSON local > 30 ngày trong `scraped_data/`.
 
-### 3. Memory optimization
-```bash
-# Giới hạn memory cho container
-docker-compose.yml:
-  deploy:
-    resources:
-      limits:
-        memory: 2G
-```
-
-## Backup và restore
-
-### 1. Backup database
-```bash
-docker exec oer-airflow-scraper sqlite3 /opt/airflow/database/scraped_documents.db ".backup /opt/airflow/database/backup.db"
-```
-
-### 2. Backup scraped data
-```bash
-tar -czf scraped_data_backup_$(date +%Y%m%d).tar.gz scraped_data/
-```
-
-## Troubleshooting thường gặp
-
-### 1. Chrome/Selenium lỗi
-```bash
-# Kiểm tra Chrome version
-docker exec oer-airflow-scraper google-chrome --version
-
-# Test Selenium
-docker exec oer-airflow-scraper python -c "from selenium import webdriver; print('OK')"
-```
-
-### 2. Permission errors
-```bash
-# Fix permissions
-sudo chown -R $USER:$USER scraped_data/ database/ logs/
-```
-
-### 3. Database locked
-```bash
-# Stop container và restart
-docker-compose down
-docker-compose up -d
-```
-
-## Mở rộng
-
-Hệ thống có thể mở rộng để:
-- Cào nhiều website OER khác
-- Tích hợp với Elasticsearch/MongoDB
-- Thêm API endpoints
-- Machine learning cho phân loại nội dung
-- Real-time notifications qua Slack/Email
+### Troubleshooting ngắn
+- Gặp “Retry later” nhiều: bật `OTL_WAIT_UNTIL_CLEAR`, tăng backoff, thêm `OTL_PROXY`, giới hạn `OTL_MAX_PARENTS/CHILDREN`, chạy ngoài giờ cao điểm.

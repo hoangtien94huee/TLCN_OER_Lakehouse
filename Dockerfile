@@ -21,7 +21,10 @@ RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Do not install a fixed ChromeDriver. Selenium Manager will fetch a matching driver at runtime.
+# Install ChromeDriver - Use webdriver-manager approach instead
+RUN apt-get update && apt-get install -y chromium-driver && \
+    ln -sf /usr/bin/chromedriver /usr/local/bin/chromedriver && \
+    chmod +x /usr/local/bin/chromedriver
 
 # Create directories for data persistence
 RUN mkdir -p /opt/airflow/data \
@@ -47,6 +50,16 @@ RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
 COPY dags/ /opt/airflow/dags/
 COPY airflow.cfg /opt/airflow/
 
+# Copy entrypoint script
+COPY entrypoint.sh /opt/airflow/entrypoint.sh
+
+# Switch to root to set permissions and fix line endings
+USER root
+
+# Fix line endings and set execute permissions for entrypoint
+RUN sed -i 's/\r$//' /opt/airflow/entrypoint.sh && \
+    chmod +x /opt/airflow/entrypoint.sh
+
 # Set environment variables for production
 ENV AIRFLOW_HOME=/opt/airflow
 ENV PYTHONPATH="${PYTHONPATH}:/opt/airflow/dags"
@@ -54,13 +67,10 @@ ENV AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
 ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor
 ENV AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
 
+# Switch back to airflow user
+USER airflow
+
 # Expose port
 EXPOSE 8080
-
-# Start script
-COPY entrypoint.sh /opt/airflow/
-USER root
-RUN chmod +x /opt/airflow/entrypoint.sh
-USER airflow
 
 ENTRYPOINT ["/opt/airflow/entrypoint.sh"]

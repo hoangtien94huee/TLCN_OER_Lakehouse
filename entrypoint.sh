@@ -1,7 +1,4 @@
 #!/bin/bash
-
-#!/bin/bash
-
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL..."
 while ! pg_isready -h postgres -p 5432 -U airflow; do

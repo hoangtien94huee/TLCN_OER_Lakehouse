@@ -81,7 +81,7 @@ def _ensure_not_retry_later(driver) -> BeautifulSoup:
         print("[OTL] [Wait] 'Retry later' detected — waiting until it clears...", flush=True)
         start_ts = time.time()
         attempt = 1
-        while True:
+        while True: 
             if time.time() - start_ts > WAIT_MAX_MINUTES * 60:
                 print("[OTL] [Wait] Max wait time reached; proceeding.", flush=True)
                 return BeautifulSoup(driver.page_source, 'html.parser')
@@ -184,14 +184,13 @@ def parse_book_detail_html(html: str, book_url: str, subjects: List[str]) -> Dic
                     if a and a not in authors:
                         authors.append(a)
 
-    # Prefer PDF URL if present; else book URL
+    # Extract PDF URL if present; keep 'url' as the book detail page
     url_field = book_url
     pdf_url = ''
     for a in soup.select('#book-types a[href]'):
         label = (a.get_text(strip=True) or '').lower()
         if 'pdf' in label:
             pdf_url = urljoin(BASE_URL, a['href'])
-            url_field = pdf_url
             break
 
     doc = {
@@ -243,89 +242,6 @@ def _init_driver(headless: bool = True):
     except Exception:
         pass
     return driver
-
-
-def live_collect_book_urls(subject_url: str, timeout_sec: int = 120) -> List[str]:
-    """Open a subject page, paginate through all pages (Next) and return book URLs.
-    Falls back to scroll-based loading if pagination isn't present.
-    """
-    driver = _init_driver(headless=True)
-    book_urls: set[str] = set()
-    try:
-        # Ensure scroll mode param is present so the site exposes pagination URLs with scroll=true
-        def _with_scroll(u: str) -> str:
-            if 'scroll=true' in (u or ''):
-                return u
-            return f"{u}&scroll=true" if ('?' in u) else f"{u}?scroll=true"
-
-        current_url = _with_scroll(subject_url)
-        current_url = _with_cache_bust(current_url)
-        current_url = _with_cache_bust(current_url)
-        print(f"[OTL] [Leaf] Open subject listing: {current_url}", flush=True)
-        driver.get(current_url)
-        WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-
-        # Prefer explicit pagination via Next links to avoid missing items
-        visited_pages: set[str] = set()
-        page_no = 1
-        while True:
-            soup = _ensure_not_retry_later(driver)
-            for h2 in soup.select('div.row.short-description h2 > a[href]'):
-                href = (h2.get('href') or '').strip()
-                if not href:
-                    continue
-                full = urljoin(BASE_URL, href)
-                if '/opentextbooks/textbooks/' in full:
-                    book_urls.add(full.split('#')[0])
-            print(f"[OTL] [Leaf] Page {page_no} collected so far: {len(book_urls)}", flush=True)
-
-            next_a = soup.select_one('#pagination a[rel="next"][href]')
-            if not next_a:
-                break
-            next_url = urljoin(BASE_URL, next_a.get('href') or '')
-            next_url = _with_scroll(next_url)
-            next_url = _with_cache_bust(next_url)
-            if not next_url or next_url in visited_pages:
-                break
-            visited_pages.add(next_url)
-            page_no += 1
-            _sleep()
-            driver.get(next_url)
-            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-
-        # Fallback: try scroll-based load if pagination yielded nothing
-        if not book_urls:
-            last_count = 0
-            stable_rounds = 0
-            end_time = datetime.now().timestamp() + timeout_sec
-            while datetime.now().timestamp() < end_time:
-                html = driver.page_source
-                soup = BeautifulSoup(html, 'html.parser')
-                for h2 in soup.select('div.row.short-description h2 > a[href]'):
-                    href = (h2.get('href') or '').strip()
-                    if not href:
-                        continue
-                    full = urljoin(BASE_URL, href)
-                    if '/opentextbooks/textbooks/' in full:
-                        book_urls.add(full.split('#')[0])
-                driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                _sleep(0.4, 0.4)
-                if len(book_urls) == last_count:
-                    stable_rounds += 1
-                else:
-                    stable_rounds = 0
-                    last_count = len(book_urls)
-                print(f"[OTL] [Leaf] Listing progress: {last_count} books, stable_rounds={stable_rounds}", flush=True)
-                if stable_rounds >= 3:
-                    break
-        print(f"[OTL] [Leaf] Final listing count: {len(book_urls)}", flush=True)
-    finally:
-        try:
-            driver.quit()
-        except Exception:
-            pass
-    return sorted(book_urls)
 
 
 def live_scrape_leaf_subject_selenium(subject_name: str, subject_url: str) -> List[Dict[str, Any]]:

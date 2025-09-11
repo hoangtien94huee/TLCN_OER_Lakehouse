@@ -15,11 +15,14 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium.webdriver.chrome.service import Service
 
-# MinIO imports
-from minio import Minio
+# MinIO imports - available in Docker environment via requirements.txt
+try:
+    from minio import Minio  # type: ignore
+except ImportError:
+    Minio = None
+    print("Warning: MinIO library not found. MinIO features will be disabled.")
 
 class OpenStaxScraper:
     """Scraper nâng cao cho các tài liệu OER sử dụng Selenium"""
@@ -28,7 +31,7 @@ class OpenStaxScraper:
         # Session cho requests thông thường
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.127 Safari/537.36'
         })
         
         # Selenium setup
@@ -49,7 +52,7 @@ class OpenStaxScraper:
         self.minio_client = None
         self.minio_bucket = os.getenv('MINIO_BUCKET', 'oer-raw')
         self.minio_enable = str(os.getenv('MINIO_ENABLE', '0')).lower() in {'1', 'true', 'yes'}
-        if self.minio_enable:
+        if self.minio_enable and Minio is not None:
             try:
                 self.minio_client = Minio(
                     endpoint=os.getenv('MINIO_ENDPOINT', 'minio:9000'),
@@ -63,6 +66,9 @@ class OpenStaxScraper:
             except Exception as e:
                 print(f"[MinIO] Error initializing MinIO client: {e}")
                 self.minio_enable = False
+        elif self.minio_enable and Minio is None:
+            print("[MinIO] MinIO library not available, disabling MinIO features")
+            self.minio_enable = False
     
     def setup_selenium(self):
         """Thiết lập Selenium WebDriver"""
@@ -70,44 +76,31 @@ class OpenStaxScraper:
             print("Đang thiết lập Selenium...")
             
             chrome_options = Options()
-            chrome_options.add_argument("--headless")  # Chạy không hiển thị browser cho container
+            chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-software-rasterizer")
             chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-            chrome_options.add_argument("--remote-debugging-port=9222")
-            chrome_options.add_argument("--disable-background-timer-throttling")
-            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.82 Safari/537.36")
             
-            # Luôn sử dụng ChromeDriver đã cài sẵn trong container
+            # Sử dụng ChromeDriver đã cài sẵn trong Docker
             chromedriver_paths = [
                 '/usr/local/bin/chromedriver',
                 '/usr/bin/chromedriver',
                 'chromedriver'
             ]
-
-            driver_service = None
+            
             for path in chromedriver_paths:
                 try:
                     if os.path.exists(path) or path == 'chromedriver':
-                        driver_service = Service(path)
-                        self.driver = webdriver.Chrome(service=driver_service, options=chrome_options)
+                        service = Service(path)
+                        self.driver = webdriver.Chrome(service=service, options=chrome_options)
                         print(f"Sử dụng ChromeDriver tại: {path}")
                         break
                 except Exception as e:
                     print(f"Không thể sử dụng ChromeDriver tại {path}: {e}")
                     continue
-            
-            if not self.driver:
-                # Fallback sử dụng webdriver-manager
-                print("Đang thử sử dụng webdriver-manager...")
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                print("Sử dụng ChromeDriver từ webdriver-manager")
                 
             print("Selenium đã sẵn sàng!")
             
@@ -118,47 +111,83 @@ class OpenStaxScraper:
     
     def get_page_selenium(self, url: str) -> BeautifulSoup:
         """Lấy nội dung trang web bằng Selenium"""
-        try:
-            print(f"[Selenium] Đang cào: {url}")
-            self.driver.get(url)
-            
-            # Đợi trang load
-            WebDriverWait(self.driver, 15).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-            
-            # Đợi thêm cho JavaScript load content
-            time.sleep(3)
-            
-            # Scroll để trigger lazy loading và load thêm content
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            
-            # Scroll lên trên và xuống dưới để đảm bảo tất cả content được load
-            self.driver.execute_script("window.scrollTo(0, 0);")
-            time.sleep(1)
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
-            time.sleep(1)
-            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-            time.sleep(2)
-            
-            # Thử click vào các nút "Load more" hoặc "Show more" nếu có
+        max_retries = 3
+        
+        for attempt in range(max_retries):
             try:
-                load_more_buttons = self.driver.find_elements(By.XPATH, 
-                    "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or contains(text(), 'View all')]")
-                for button in load_more_buttons:
-                    if button.is_displayed():
-                        self.driver.execute_script("arguments[0].click();", button)
-                        time.sleep(2)
+                print(f"[Selenium] Đang cào: {url} (attempt {attempt + 1})")
+                
+                # Check if driver is still alive
+                if not self._is_driver_alive():
+                    print("Driver đã disconnect, đang restart...")
+                    self.setup_selenium()
+                    if not self.driver:
+                        print("Không thể restart driver")
+                        return None
+                
+                self.driver.get(url)
+                
+                # Đợi trang load
+                WebDriverWait(self.driver, 15).until(
+                    EC.presence_of_element_located((By.TAG_NAME, "body"))
+                )
+                
+                # Đợi thêm cho JavaScript load content
+                time.sleep(3)
+                
+                # Scroll để trigger lazy loading và load thêm content
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+                
+                # Scroll lên trên và xuống dưới để đảm bảo tất cả content được load
+                self.driver.execute_script("window.scrollTo(0, 0);")
+                time.sleep(1)
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight/2);")
+                time.sleep(1)
+                self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                time.sleep(2)
+                
+                # Thử click vào các nút "Load more" hoặc "Show more" nếu có
+                try:
+                    load_more_buttons = self.driver.find_elements(By.XPATH, 
+                        "//button[contains(text(), 'Load more') or contains(text(), 'Show more') or contains(text(), 'View all')]")
+                    for button in load_more_buttons:
+                        if button.is_displayed():
+                            self.driver.execute_script("arguments[0].click();", button)
+                            time.sleep(2)
+                except Exception as e:
+                    print(f"Không thể click Load more: {e}")
+                
+                html = self.driver.page_source
+                return BeautifulSoup(html, 'html.parser')
+                
             except Exception as e:
-                print(f"Không thể click Load more: {e}")
-            
-            html = self.driver.page_source
-            return BeautifulSoup(html, 'html.parser')
-            
-        except Exception as e:
-            print(f"Lỗi Selenium khi cào {url}: {e}")
-            return None
+                print(f"Lỗi Selenium attempt {attempt + 1}: {e}")
+                if "disconnected" in str(e).lower() or "devtools" in str(e).lower():
+                    print("DevTools disconnect detected, will retry...")
+                    if self.driver:
+                        try:
+                            self.driver.quit()
+                        except:
+                            pass
+                        self.driver = None
+                    
+                    if attempt < max_retries - 1:  # Don't sleep on last attempt
+                        time.sleep(2)
+                        continue
+                else:
+                    break
+        
+        print(f"Failed to scrape {url} after {max_retries} attempts")
+        return None
+    
+    def _is_driver_alive(self):
+        """Kiểm tra xem driver còn hoạt động không"""
+        try:
+            self.driver.current_url
+            return True
+        except:
+            return False
     
     def get_page_requests(self, url: str) -> BeautifulSoup:
         """Lấy nội dung trang web bằng requests (fallback)"""
@@ -403,7 +432,7 @@ class OpenStaxScraper:
                 # Lưu dữ liệu hiện tại vào MinIO
                 if documents:
                     print(f"Lưu emergency backup do ngắt quá trình: {len(documents)} tài liệu")
-                    self.save_to_minio(documents, "openstax", datetime.now().strftime("%Y-%m-%d"))
+                    self.save_to_minio(documents, "openstax", datetime.now().strftime("%Y-%m-%d"), "books_emergency")
                 raise
                 
             except Exception as e:
@@ -411,7 +440,7 @@ class OpenStaxScraper:
                 # Lưu dữ liệu hiện tại vào MinIO khi có lỗi
                 if documents:
                     print(f"Lưu emergency backup: {len(documents)} tài liệu đã cào được")
-                    self.save_to_minio(documents, "openstax", datetime.now().strftime("%Y-%m-%d"))
+                    self.save_to_minio(documents, "openstax", datetime.now().strftime("%Y-%m-%d"), "books_emergency")
                 continue
         
         return documents
@@ -462,7 +491,7 @@ class OpenStaxScraper:
                 # Lưu dữ liệu hiện tại vào MinIO
                 if documents:
                     print(f"Lưu emergency backup (fallback): {len(documents)} tài liệu")
-                    self.save_to_minio(documents, "openstax_fallback", datetime.now().strftime("%Y-%m-%d"))
+                    self.save_to_minio(documents, "openstax_fallback", datetime.now().strftime("%Y-%m-%d"), "books_fallback")
                 raise
                 
             except Exception as e:
@@ -470,7 +499,7 @@ class OpenStaxScraper:
                 # Lưu dữ liệu hiện tại vào MinIO khi có lỗi
                 if documents:
                     print(f"Lưu emergency backup (fallback): {len(documents)} tài liệu đã cào được")
-                    self.save_to_minio(documents, "openstax_fallback", datetime.now().strftime("%Y-%m-%d"))
+                    self.save_to_minio(documents, "openstax_fallback", datetime.now().strftime("%Y-%m-%d"), "books_fallback")
                 continue
         
         return documents
@@ -690,8 +719,8 @@ class OpenStaxScraper:
         
         print(f"Đã lưu {len(documents)} tài liệu vào {filepath}")
     
-    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "openstax", logical_date: str = None):
-        """Lưu dữ liệu vào MinIO"""
+    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "openstax", logical_date: str = None, file_type: str = "books"):
+        """Lưu dữ liệu vào MinIO với đường dẫn có tổ chức"""
         if not self.minio_enable or not self.minio_client or not documents:
             print("MinIO không được bật hoặc không có dữ liệu để lưu")
             return ""
@@ -699,10 +728,14 @@ class OpenStaxScraper:
         if logical_date is None:
             logical_date = datetime.now().strftime("%Y-%m-%d")
         
+        # Tạo đường dẫn có tổ chức cho OpenStax
+        timestamp = int(time.time())
+        object_name = f"{source}/{logical_date}/{file_type}_{timestamp}.jsonl"
+        
         # Tạo temporary file
         os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
         tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, f"{source}_{logical_date}_{int(time.time())}.jsonl")
+        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.jsonl")
         
         try:
             # Ghi dữ liệu vào temp file
@@ -710,15 +743,12 @@ class OpenStaxScraper:
                 for doc in documents:
                     f.write(json.dumps(doc, ensure_ascii=False) + "\n")
             
-            # Upload lên MinIO
-            object_name = f"{source}/{logical_date}/emergency_backup_{int(time.time())}.jsonl"
+            # Upload lên MinIO với organized path
             self.minio_client.fput_object(self.minio_bucket, object_name, tmp_path)
-            
-            print(f"[MinIO] Đã lưu emergency backup: s3://{self.minio_bucket}/{object_name}")
-            print(f"[MinIO] Tổng cộng {len(documents)} tài liệu được lưu")
-            
-            # Xóa temp file
             os.remove(tmp_path)
+            
+            print(f"[MinIO] OpenStax saved: s3://{self.minio_bucket}/{object_name}")
+            print(f"[MinIO] Total {len(documents)} books saved")
             
             return object_name
             

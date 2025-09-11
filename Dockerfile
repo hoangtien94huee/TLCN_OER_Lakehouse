@@ -14,17 +14,24 @@ RUN apt-get update && apt-get install -y \
     postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Google Chrome
+# Install Google Chrome (latest stable)
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list \
     && apt-get update \
     && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Install ChromeDriver - Use webdriver-manager approach instead
-RUN apt-get update && apt-get install -y chromium-driver && \
-    ln -sf /usr/bin/chromedriver /usr/local/bin/chromedriver && \
-    chmod +x /usr/local/bin/chromedriver
+# Install ChromeDriver compatible with latest Chrome
+RUN apt-get update && \
+    apt-get remove -y chromium-driver chromedriver || true && \
+    rm -f /usr/bin/chromedriver /usr/local/bin/chromedriver || true && \
+    wget -O /tmp/chromedriver.zip "https://storage.googleapis.com/chrome-for-testing-public/140.0.7339.82/linux64/chromedriver-linux64.zip" && \
+    unzip /tmp/chromedriver.zip -d /tmp/ && \
+    mv /tmp/chromedriver-linux64/chromedriver /usr/local/bin/chromedriver && \
+    chmod +x /usr/local/bin/chromedriver && \
+    rm -rf /tmp/chromedriver.zip && \
+    /usr/local/bin/chromedriver --version && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Create directories for data persistence
 RUN mkdir -p /opt/airflow/data \
@@ -48,7 +55,6 @@ RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
 
 # Copy the entire dags directory
 COPY dags/ /opt/airflow/dags/
-COPY airflow.cfg /opt/airflow/
 
 # Copy entrypoint script
 COPY entrypoint.sh /opt/airflow/entrypoint.sh
@@ -66,6 +72,8 @@ ENV PYTHONPATH="${PYTHONPATH}:/opt/airflow/dags"
 ENV AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
 ENV AIRFLOW__CORE__EXECUTOR=LocalExecutor
 ENV AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres:5432/airflow
+# Ensure ChromeDriver 140 is found first in PATH
+ENV PATH="/usr/local/bin:${PATH}"
 
 # Switch back to airflow user
 USER airflow

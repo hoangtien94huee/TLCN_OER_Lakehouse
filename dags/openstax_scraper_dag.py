@@ -53,7 +53,7 @@ def scrape_openstax_documents(**context):
         # Upload raw JSONL to MinIO (final backup)
         object_key = ""
         if documents:
-            object_key = openstax.save_to_minio(documents, 'openstax', execution_date)
+            object_key = openstax.save_to_minio(documents, 'openstax', execution_date, 'books_batch')
             
         print(f"[OpenStax] MinIO object: {object_key}")
         print(f"[OpenStax] Tổng cộng cào được: {len(documents)} documents")
@@ -189,7 +189,7 @@ def emergency_recovery(**context):
             openstax.save_to_json(recovered_docs, f"openstax_recovered_{execution_date}.json")
             
             # Tạo backup chính thức từ dữ liệu đã khôi phục
-            final_backup = openstax.save_to_minio(recovered_docs, 'openstax_recovered', execution_date)
+            final_backup = openstax.save_to_minio(recovered_docs, 'openstax_recovered', execution_date, 'books_recovered')
             
             print(f"[OpenStax] Đã khôi phục {len(recovered_docs)} documents")
             print(f"[OpenStax] Đã tạo final backup: {final_backup}")

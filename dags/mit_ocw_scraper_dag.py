@@ -46,7 +46,7 @@ def scrape_mit_ocw_documents(**context):
         use_selenium=True,
         output_dir=DATA_PATH,
         batch_size=25,
-        max_documents=30  # Không giới hạn - có thể thay đổi nếu cần
+        max_documents=200  # Không giới hạn - có thể thay đổi nếu cần
     )
     
     try:
@@ -56,7 +56,7 @@ def scrape_mit_ocw_documents(**context):
         # Upload raw data to MinIO (final backup)
         object_key = ""
         if documents:
-            object_key = mit_scraper.save_to_minio(documents, 'mit_ocw', execution_date)
+            object_key = mit_scraper.save_to_minio(documents, 'mit_ocw', execution_date, 'courses_batch')
             print(f"[MIT OCW] Đã lưu vào MinIO: {object_key}")
             
         print(f"[MIT OCW] Tổng cộng cào được: {len(documents)} documents")

@@ -3,10 +3,9 @@ apache-airflow==2.7.1
 sqlalchemy==1.4.53
 
 # Scraping dependencies  
-selenium==4.15.0
+selenium==4.27.1
 beautifulsoup4==4.12.2
 requests==2.31.0
-webdriver-manager==4.0.1
 minio==7.1.17
 psycopg2-binary==2.9.7
 

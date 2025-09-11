@@ -17,14 +17,17 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 
-# MinIO imports
-from minio import Minio
+# MinIO imports - available in Docker environment via requirements.txt
+try:
+    from minio import Minio  # type: ignore
+except ImportError:
+    Minio = None
+    print("Warning: MinIO library not found. MinIO features will be disabled.")
 
 class MITOCWScraper:
     
-    def __init__(self, delay=2, use_selenium=True, output_dir="scraped_data", batch_size=25, max_documents=None, **kwargs):
+    def __init__(self, delay=2, use_selenium=True, output_dir="scraped_data/mit_ocw", batch_size=25, max_documents=None, **kwargs):
         self.base_url = "https://ocw.mit.edu"
         self.source = "mit_ocw"
         self.delay = delay
@@ -35,7 +38,7 @@ class MITOCWScraper:
         self.driver = None
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.82 Safari/537.36'
         })
         
         # Batch processing
@@ -48,7 +51,7 @@ class MITOCWScraper:
         self.minio_client = None
         self.minio_bucket = os.getenv('MINIO_BUCKET', 'oer-raw')
         self.minio_enable = str(os.getenv('MINIO_ENABLE', '0')).lower() in {'1', 'true', 'yes'}
-        if self.minio_enable:
+        if self.minio_enable and Minio is not None:
             try:
                 self.minio_client = Minio(
                     endpoint=os.getenv('MINIO_ENDPOINT', 'minio:9000'),
@@ -62,6 +65,9 @@ class MITOCWScraper:
             except Exception as e:
                 print(f"[MinIO] Error initializing MinIO client: {e}")
                 self.minio_enable = False
+        elif self.minio_enable and Minio is None:
+            print("[MinIO] MinIO library not available, disabling MinIO features")
+            self.minio_enable = False
         
         # Setup Selenium nếu cần
         if self.use_selenium:
@@ -70,53 +76,30 @@ class MITOCWScraper:
     def _setup_selenium(self):
         """Setup Selenium WebDriver - sử dụng cùng logic với OpenStax"""
         try:
-            print("Đang thiết lập Selenium...")
-            
             chrome_options = Options()
-            chrome_options.add_argument("--headless")  # Chạy không hiển thị browser cho container
+            chrome_options.add_argument("--headless")
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-software-rasterizer")
             chrome_options.add_argument("--window-size=1920,1080")
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-            chrome_options.add_argument("--remote-debugging-port=9222")
-            chrome_options.add_argument("--disable-background-timer-throttling")
-            chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-            chrome_options.add_argument("--disable-renderer-backgrounding")
+            chrome_options.add_argument("--user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.82 Safari/537.36")
             
-            # Luôn sử dụng ChromeDriver đã cài sẵn trong container
-            chromedriver_paths = [
-                '/usr/local/bin/chromedriver',
-                '/usr/bin/chromedriver',
-                'chromedriver'
-            ]
-
-            driver_service = None
+            # Try ChromeDriver paths
+            chromedriver_paths = ['/usr/local/bin/chromedriver', '/usr/bin/chromedriver', 'chromedriver']
+            
             for path in chromedriver_paths:
                 try:
                     if os.path.exists(path) or path == 'chromedriver':
-                        driver_service = Service(path)
-                        self.driver = webdriver.Chrome(service=driver_service, options=chrome_options)
-                        print(f"Sử dụng ChromeDriver tại: {path}")
+                        service = Service(path)
+                        self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                        print(f"Selenium ready with: {path}")
                         break
-                except Exception as e:
-                    print(f"Không thể sử dụng ChromeDriver tại {path}: {e}")
+                except Exception:
                     continue
             
-            if not self.driver:
-                # Fallback sử dụng webdriver-manager
-                print("Đang thử sử dụng webdriver-manager...")
-                service = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service, options=chrome_options)
-                print("Sử dụng ChromeDriver từ webdriver-manager")
-                
-            print("Selenium đã sẵn sàng!")
-            
         except Exception as e:
-            print(f"Lỗi thiết lập Selenium: {e}")
-            print("Sẽ sử dụng requests thay thế")
+            print(f"Selenium setup failed: {e}")
             self.use_selenium = False
             self.driver = None
     
@@ -230,13 +213,7 @@ class MITOCWScraper:
                     
                     # Progress report
                     if (i + 1) % 25 == 0:
-                        print(f"\nPROGRESS REPORT:")
-                        print(f"   Thành công: {success_count}")
-                        print(f"   Lỗi: {error_count}")
-                        print(f"   Tiến độ: {i+1}/{len(course_list)}")
-                        print(f"   Tỷ lệ thành công: {success_count/(i+1)*100:.1f}%\n")
-                        if self.max_documents:
-                            print(f"   Giới hạn: {len(all_documents)}/{self.max_documents}")
+                        print(f"Progress: {i+1}/{len(course_list)} - Success: {success_count}, Errors: {error_count}")
                         
                 except KeyboardInterrupt:
                     print(f"\nTạm dừng bởi người dùng...")
@@ -252,15 +229,7 @@ class MITOCWScraper:
             if self.current_batch:
                 self.save_batch()
             
-            print(f"\nKẾT QUẢ CUỐI CÙNG:")
-            print(f"   Tổng courses: {len(all_documents)}")
-            print(f"   Thành công: {success_count}")
-            print(f"   Lỗi: {error_count}")
-            if self.max_documents:
-                print(f"   Giới hạn đặt: {self.max_documents}")
-                print(f"   Đã đạt giới hạn: {'Có' if len(all_documents) >= self.max_documents else 'Không'}")
-            else:
-                print(f"   Giới hạn: Không giới hạn")
+            print(f"\nKết quả: {len(all_documents)} courses | Success: {success_count} | Errors: {error_count}")
             
             # Lưu kết quả cuối cùng
             self._save_final_data(all_documents)
@@ -277,11 +246,10 @@ class MITOCWScraper:
         course_urls = set()
         
         if not self.driver:
-            print("Selenium không khả dụng, chuyển sang method fallback")
             return self._get_course_urls_fallback()
         
         try:
-            # Chỉ lấy từ search page với sort theo course number
+            # Chỉ dùng URL hiệu quả nhất
             search_url = "https://ocw.mit.edu/search/?s=department_course_numbers.sort_coursenum&type=course"
             print(f"Đang cào courses từ: {search_url}")
             
@@ -291,12 +259,12 @@ class MITOCWScraper:
             )
             time.sleep(3)
             
-            # Progressive scroll để load tất cả courses
+            # Progressive scroll để load courses
             self._progressive_scroll()
             
             # Extract URLs
             course_urls = self._extract_course_urls()
-            print(f"Tìm thấy {len(course_urls)} courses từ search page")
+            print(f"Tìm thấy {len(course_urls)} courses")
             
         except Exception as e:
             print(f"Lỗi lấy course URLs: {e}")
@@ -333,51 +301,72 @@ class MITOCWScraper:
     def _progressive_scroll(self):
         """Progressive scroll để load content"""
         try:
-            print("Đang scroll để load content...")
             last_height = self.driver.execute_script("return document.body.scrollHeight")
-            
             scroll_attempts = 0
-            max_scrolls = 20
+            max_scrolls = 5
             
             while scroll_attempts < max_scrolls:
+                # Scroll down
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(2)
                 
+                # Check if content loaded
                 new_height = self.driver.execute_script("return document.body.scrollHeight")
                 if new_height == last_height:
                     break
                     
                 last_height = new_height
                 scroll_attempts += 1
+                
+                # Try load more buttons
+                try:
+                    for selector in ['.load-more', '.show-more', 'button[contains(text(), "Load")]']:
+                        try:
+                            button = self.driver.find_element(By.CSS_SELECTOR, selector)
+                            if button.is_displayed():
+                                button.click()
+                                time.sleep(2)
+                                break
+                        except:
+                            continue
+                except:
+                    pass
             
-            print(f"Hoàn thành scroll sau {scroll_attempts} lần")
+            print(f"Scroll completed after {scroll_attempts} attempts")
             
         except Exception as e:
             print(f"Lỗi scroll: {e}")
     
     def _extract_course_urls(self) -> set:
-        """Extract course URLs từ page"""
+        """Extract course URLs - đơn giản hiệu quả"""
         course_urls = set()
         
         try:
-            course_selectors = [
-                'a[href*="/courses/"]',
-                '.course-card a',
-                '.course-link',
-                '.course-item a'
-            ]
+            # Wait for content
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.TAG_NAME, "a"))
+            )
+            time.sleep(2)
             
-            for selector in course_selectors:
+            # Get all links and filter
+            all_links = self.driver.find_elements(By.TAG_NAME, 'a')
+            
+            for link in all_links:
                 try:
-                    elements = self.driver.find_elements(By.CSS_SELECTOR, selector)
-                    for element in elements:
-                        href = element.get_attribute('href')
-                        if href and self._is_valid_course_url(href):
-                            course_urls.add(href)
-                except:
+                    href = link.get_attribute('href')
+                    if href and '/courses/' in href and self._is_valid_course_url(href):
+                        if href.startswith('/'):
+                            full_url = urljoin(self.base_url, href)
+                        else:
+                            full_url = href
+                        
+                        if 'ocw.mit.edu' in full_url or full_url.startswith(self.base_url):
+                            course_urls.add(full_url)
+                            
+                except Exception:
                     continue
             
-            print(f"Extracted {len(course_urls)} URLs")
+            print(f"Found {len(course_urls)} course URLs")
             
         except Exception as e:
             print(f"Lỗi extract URLs: {e}")
@@ -712,7 +701,7 @@ class MITOCWScraper:
         # Return array of subjects
         return subject_array
     
-    def _guess_subject_from_title(self, title: str) -> str:
+    # def _guess_subject_from_title(self, title: str) -> str:
         """Guess subject từ title"""
         title_lower = title.lower()
         
@@ -784,8 +773,8 @@ class MITOCWScraper:
         except Exception as e:
             print(f"Lỗi lưu dữ liệu cuối cùng: {e}")
     
-    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "mit_ocw", logical_date: str = None):
-        """Lưu dữ liệu vào MinIO"""
+    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "mit_ocw", logical_date: str = None, file_type: str = "courses"):
+        """Lưu dữ liệu vào MinIO với đường dẫn có tổ chức"""
         if not self.minio_enable or not self.minio_client or not documents:
             print("MinIO không được bật hoặc không có dữ liệu để lưu")
             return ""
@@ -793,10 +782,14 @@ class MITOCWScraper:
         if logical_date is None:
             logical_date = datetime.now().strftime("%Y-%m-%d")
         
+        # Tạo đường dẫn có tổ chức cho MIT OCW
+        timestamp = int(time.time())
+        object_name = f"{source}/{logical_date}/{file_type}_{timestamp}.jsonl"
+        
         # Tạo temporary file
         os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
         tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, f"{source}_{logical_date}_{int(time.time())}.jsonl")
+        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.jsonl")
         
         try:
             # Ghi dữ liệu vào temp file
@@ -804,14 +797,13 @@ class MITOCWScraper:
                 for doc in documents:
                     f.write(json.dumps(doc, ensure_ascii=False) + "\n")
             
-            # Upload lên MinIO
-            object_name = f"{source}/{logical_date}/data_{int(time.time())}.jsonl"
+            # Upload lên MinIO với organized path
             self.minio_client.fput_object(self.minio_bucket, object_name, tmp_path)
             os.remove(tmp_path)
-            print(f"[MinIO] Đã lưu data: s3://{self.minio_bucket}/{object_name}")
+            print(f"[MinIO] MIT OCW saved: s3://{self.minio_bucket}/{object_name}")
             return object_name
         except Exception as e:
-            print(f"[MinIO] Lỗi khi lưu vào MinIO: {e}")
+            print(f"[MinIO] Lỗi khi lưu MIT OCW: {e}")
             # Clean up temp file if upload failed
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)

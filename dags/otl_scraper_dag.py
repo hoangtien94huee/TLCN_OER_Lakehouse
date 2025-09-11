@@ -28,7 +28,7 @@ dag = DAG(
     'otl_scraper_daily',
     default_args=default_args,
     description='Daily scraping for Open Textbook Library',
-    schedule_interval=timedelta(days=1),
+    schedule_interval=timedelta(days=30),
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -171,9 +171,10 @@ def scrape_open_textbook_library_documents(**context):
             client = Minio(minio_endpoint, access_key=minio_access, secret_key=minio_secret, secure=minio_secure)
             if not client.bucket_exists(minio_bucket):
                 client.make_bucket(minio_bucket)
-            # Folder structure: oer-raw/otl/{YYYY-MM-DD}/{filename-with-date}.json
-            folder_prefix = f"otl/{execution_date}/"
-            object_key = f"{folder_prefix}{os.path.basename(out_path)}"
+            # Organized folder structure: oer-raw/otl/{YYYY-MM-DD}/textbooks_{timestamp}.json
+            import time
+            timestamp = int(time.time())
+            object_key = f"otl/{execution_date}/textbooks_{timestamp}.json"
             client.fput_object(minio_bucket, object_key, out_path, content_type='application/json')
             print(f"[OTL] Uploaded to MinIO: s3://{minio_bucket}/{object_key}")
         except S3Error as e:

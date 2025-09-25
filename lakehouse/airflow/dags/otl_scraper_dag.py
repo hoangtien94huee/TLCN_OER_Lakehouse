@@ -7,11 +7,12 @@ import json
 import os
 from minio import Minio
 from minio.error import S3Error
-from otl_scraper import (
+from src.scrapers.otl_scraper import (
     live_scrape_leaf_subject_selenium,
     live_scrape_root_subject_selenium,
     live_scrape_all_subjects_selenium,
 )
+from src.utils.bronze_storage import BronzeStorageManager
 
 # Cấu hình DAG riêng cho Open Textbook Library
 default_args = {
@@ -44,6 +45,9 @@ def setup_directories():
 def scrape_open_textbook_library_documents(**context):
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[OTL] Bắt đầu cào live (Selenium) cho ngày: {execution_date}")
+
+    # Khởi tạo Bronze Storage Manager
+    bronze_storage = BronzeStorageManager()
 
     # Optional throttling/backoff tuning (ENV → Variables → DAG conf)
     def _conf_get(key: str, default_value: str = '') -> str:
@@ -132,59 +136,74 @@ def scrape_open_textbook_library_documents(**context):
     if not (subject_name and subject_url) and not (root_subject_name and subjects_index_url) and not subjects_index_url:
         subjects_index_url = 'https://open.umn.edu/opentextbooks/subjects'
 
-    if subject_name and subject_url:
-        process_leaf_live(subject_name, subject_url)
-    elif root_subject_name and subjects_index_url:
-        max_children = int(max_children_str) if str(max_children_str).isdigit() else None
-        for doc in live_scrape_root_subject_selenium(root_subject_name, subjects_index_url, max_children=max_children):
-            documents.append(doc)
-    elif subjects_index_url:
-        max_children = int(max_children_str) if str(max_children_str).isdigit() else None
-        max_parents = int(max_parents_str) if str(max_parents_str).isdigit() else None
-        for doc in live_scrape_all_subjects_selenium(subjects_index_url, max_parents=max_parents, max_children=max_children):
-            documents.append(doc)
-    else:
-        raise RuntimeError("Provide one of: (SUBJECT_NAME+SUBJECT_URL) or (ROOT_SUBJECT_NAME+SUBJECTS_INDEX_URL) or (SUBJECTS_INDEX_URL)")
+    try:
+        if subject_name and subject_url:
+            process_leaf_live(subject_name, subject_url)
+        elif root_subject_name and subjects_index_url:
+            max_children = int(max_children_str) if str(max_children_str).isdigit() else None
+            for doc in live_scrape_root_subject_selenium(root_subject_name, subjects_index_url, max_children=max_children):
+                documents.append(doc)
+        elif subjects_index_url:
+            max_children = int(max_children_str) if str(max_children_str).isdigit() else None
+            max_parents = int(max_parents_str) if str(max_parents_str).isdigit() else None
+            for doc in live_scrape_all_subjects_selenium(subjects_index_url, max_parents=max_parents, max_children=max_children):
+                documents.append(doc)
+        else:
+            raise RuntimeError("Provide one of: (SUBJECT_NAME+SUBJECT_URL) or (ROOT_SUBJECT_NAME+SUBJECTS_INDEX_URL) or (SUBJECTS_INDEX_URL)")
 
-    # Save JSON file locally under DATA_PATH
-    os.makedirs(DATA_PATH, exist_ok=True)
-    out_path = os.path.join(DATA_PATH, f"open_textbook_library_{execution_date}.json")
-    with open(out_path, 'w', encoding='utf-8') as out:
-        json.dump({
-            'total_documents': len(documents),
-            'scraped_at': datetime.now().isoformat(),
-            'source': 'Open Textbook Library',
-            'documents': documents
-        }, out, ensure_ascii=False, indent=2)
-    print(f"[OTL] Saved to {out_path}")
+        # Save JSON file locally under DATA_PATH
+        os.makedirs(DATA_PATH, exist_ok=True)
+        out_path = os.path.join(DATA_PATH, f"open_textbook_library_{execution_date}.json")
+        with open(out_path, 'w', encoding='utf-8') as out:
+            json.dump({
+                'total_documents': len(documents),
+                'scraped_at': datetime.now().isoformat(),
+                'source': 'Open Textbook Library',
+                'documents': documents
+            }, out, ensure_ascii=False, indent=2)
+        print(f"[OTL] Saved to {out_path}")
 
-    # Optional MinIO upload
-    minio_endpoint = os.getenv('MINIO_ENDPOINT') or Variable.get('MINIO_ENDPOINT', default_var='')
-    minio_access = os.getenv('MINIO_ACCESS_KEY') or Variable.get('MINIO_ACCESS_KEY', default_var='')
-    minio_secret = os.getenv('MINIO_SECRET_KEY') or Variable.get('MINIO_SECRET_KEY', default_var='')
-    minio_bucket = os.getenv('MINIO_BUCKET') or Variable.get('MINIO_BUCKET', default_var='')
-    minio_secure = (os.getenv('MINIO_SECURE') or Variable.get('MINIO_SECURE', default_var='false')).lower() == 'true'
+        if documents:
+            # Lưu vào bronze layer với cấu trúc chuẩn
+            result = bronze_storage.save_scraped_data(
+                documents=documents,
+                source='otl',
+                execution_date=execution_date,
+                file_type='textbooks',
+                metadata={
+                    'scraper_config': {
+                        'subject_name': subject_name,
+                        'subject_url': subject_url,
+                        'root_subject_name': root_subject_name,
+                        'subjects_index_url': subjects_index_url
+                    },
+                    'total_processed': len(documents)
+                }
+            )
+            
+            print(f"[OTL] Đã lưu vào bronze layer:")
+            print(f"  - Data: {result.get('data_object_key')}")
+            print(f"  - Metadata: {result.get('metadata_object_key')}")
+            print(f"[OTL] Tổng cộng cào được: {len(documents)} documents")
+            
+            return {
+                'execution_date': execution_date,
+                'total_found': len(documents),
+                'bronze_data_key': result.get('data_object_key'),
+                'bronze_metadata_key': result.get('metadata_object_key')
+            }
+        else:
+            print(f"[OTL] Không có dữ liệu để lưu")
+            return {
+                'execution_date': execution_date,
+                'total_found': 0,
+                'bronze_data_key': None,
+                'bronze_metadata_key': None
+            }
 
-    object_key = ''
-    if minio_endpoint and minio_access and minio_secret and minio_bucket:
-        try:
-            client = Minio(minio_endpoint, access_key=minio_access, secret_key=minio_secret, secure=minio_secure)
-            if not client.bucket_exists(minio_bucket):
-                client.make_bucket(minio_bucket)
-            # Organized folder structure: oer-raw/otl/{YYYY-MM-DD}/textbooks_{timestamp}.json
-            import time
-            timestamp = int(time.time())
-            object_key = f"otl/{execution_date}/textbooks_{timestamp}.json"
-            client.fput_object(minio_bucket, object_key, out_path, content_type='application/json')
-            print(f"[OTL] Uploaded to MinIO: s3://{minio_bucket}/{object_key}")
-        except S3Error as e:
-            print(f"[OTL] MinIO upload failed: {e}")
-
-    return {
-        'execution_date': execution_date,
-        'total_found': len(documents),
-        'minio_object_key': object_key
-    }
+    except Exception as e:
+        print(f"[OTL] Lỗi khi cào dữ liệu: {e}")
+        raise
 
 def cleanup_old_files(**context):
     """Xóa các file JSON quá 30 ngày (so sánh theo date, an toàn timezone)."""
@@ -216,6 +235,100 @@ def cleanup_old_files(**context):
                 continue
     print(f"[OTL] Đã dọn dẹp {removed_files} file cũ")
 
+def check_bronze_data(**context):
+    """Kiểm tra và liệt kê các objects trong bronze layer"""
+    bronze_storage = BronzeStorageManager()
+    
+    try:
+        bronze_objects = bronze_storage.list_bronze_data(source='otl')
+        print(f"[OTL] Tìm thấy {len(bronze_objects)} files trong bronze layer:")
+        
+        # Hiển thị 5 files mới nhất
+        recent_objects = sorted(bronze_objects, key=lambda x: x['last_modified'], reverse=True)[:5]
+        for obj in recent_objects:
+            print(f"  - {obj['object_name']} ({obj['size']} bytes)")
+            
+        return {
+            'total_objects': len(bronze_objects),
+            'recent_objects': [obj['object_name'] for obj in recent_objects]
+        }
+        
+    except Exception as e:
+        print(f"[OTL] Lỗi kiểm tra bronze layer: {e}")
+        return {'total_objects': 0, 'recent_objects': []}
+
+def emergency_recovery(**context):
+    """Khôi phục từ data gần nhất nếu cần"""
+    bronze_storage = BronzeStorageManager()
+    
+    try:
+        latest_data = bronze_storage.get_latest_data('otl')
+        
+        if latest_data:
+            print(f"[OTL] Data gần nhất trong bronze layer: {latest_data['object_name']}")
+            print(f"[OTL] Emergency recovery system đã sẵn sàng")
+            return {'latest_data': latest_data['object_name']}
+        else:
+            print("[OTL] Không tìm thấy data nào trong bronze layer")
+            return {'latest_data': None}
+            
+    except Exception as e:
+        print(f"[OTL] Lỗi emergency recovery: {e}")
+        return {'latest_data': None}
+
+def validate_data_quality(**context):
+    """Kiểm tra chất lượng dữ liệu đã cào"""
+    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    bronze_storage = BronzeStorageManager()
+    
+    try:
+        # Kiểm tra bronze layer data
+        bronze_objects = bronze_storage.list_bronze_data(
+            source='otl',
+            start_date=execution_date,
+            end_date=execution_date
+        )
+        
+        if bronze_objects:
+            print(f"[OTL] Tìm thấy {len(bronze_objects)} objects cho ngày {execution_date}")
+            
+            # Kiểm tra chất lượng dữ liệu cơ bản
+            data_files = [obj for obj in bronze_objects if 'textbooks_' in obj['object_name']]
+            metadata_files = [obj for obj in bronze_objects if 'metadata_' in obj['object_name']]
+            
+            quality_score = 100
+            if not data_files:
+                quality_score -= 50
+                print("[OTL] Warning: Không tìm thấy data files")
+            if not metadata_files:
+                quality_score -= 20
+                print("[OTL] Warning: Không tìm thấy metadata files")
+            
+            return {
+                'date': execution_date,
+                'objects_found': len(bronze_objects),
+                'data_files': len(data_files),
+                'metadata_files': len(metadata_files),
+                'quality_score': quality_score,
+                'quality_check': 'passed' if quality_score >= 80 else 'warning' if quality_score >= 50 else 'failed'
+            }
+        else:
+            print(f"[OTL] Không tìm thấy objects nào cho ngày {execution_date}")
+            return {
+                'date': execution_date,
+                'objects_found': 0,
+                'quality_check': 'failed'
+            }
+            
+    except Exception as e:
+        print(f"[OTL] Lỗi kiểm tra chất lượng dữ liệu: {e}")
+        return {
+            'date': execution_date,
+            'objects_found': 0,
+            'quality_check': 'error',
+            'error': str(e)
+        }
+
 setup_task = PythonOperator(
     task_id='setup_directories',
     python_callable=setup_directories,
@@ -234,12 +347,35 @@ cleanup_task = PythonOperator(
     dag=dag,
 )
 
-health_check_task = BashOperator(
-    task_id='health_check',
-    bash_command='echo "OTL scraping pipeline completed successfully at $(date)"',
+check_bronze_task = PythonOperator(
+    task_id='check_bronze_data',
+    python_callable=check_bronze_data,
     dag=dag,
 )
 
-setup_task >> scrape_task >> cleanup_task >> health_check_task
+emergency_recovery_task = PythonOperator(
+    task_id='emergency_recovery',
+    python_callable=emergency_recovery,
+    dag=dag,
+)
+
+validate_data_quality_task = PythonOperator(
+    task_id='validate_data_quality',
+    python_callable=validate_data_quality,
+    dag=dag,
+)
+
+health_check_task = BashOperator(
+    task_id='health_check',
+    bash_command='echo "OTL scraping pipeline completed successfully - Data stored in bronze layer"',
+    dag=dag,
+)
+
+# Thiết lập dependencies
+setup_task >> emergency_recovery_task
+emergency_recovery_task >> scrape_task
+scrape_task >> [cleanup_task, check_bronze_task]
+[cleanup_task, check_bronze_task] >> validate_data_quality_task
+validate_data_quality_task >> health_check_task
 
 

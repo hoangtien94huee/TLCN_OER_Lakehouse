@@ -4,7 +4,8 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 import json
 import os
-from mit_ocw_scraper import MITOCWScraper
+from src.scrapers import MITOCWScraper
+from src.utils.bronze_storage import BronzeStorageManager
 
 # Cấu hình DAG
 default_args = {
@@ -36,9 +37,12 @@ def setup_directories():
     print(f"[MIT OCW] Đã tạo thư mục: {DATA_PATH}")
 
 def scrape_mit_ocw_documents(**context):
-    """Task cào documents từ MIT OCW với MinIO backup support"""
+    """Task cào documents từ MIT OCW với bronze layer storage"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[MIT OCW] Bắt đầu cào dữ liệu cho ngày: {execution_date}")
+    
+    # Khởi tạo Bronze Storage Manager
+    bronze_storage = BronzeStorageManager()
     
     # Khởi tạo scraper với cấu hình tối ưu
     mit_scraper = MITOCWScraper(
@@ -46,36 +50,57 @@ def scrape_mit_ocw_documents(**context):
         use_selenium=True,
         output_dir=DATA_PATH,
         batch_size=25,
-        max_documents=200  # Không giới hạn - có thể thay đổi nếu cần
+        max_documents=100  # Không giới hạn - có thể thay đổi nếu cần
     )
     
     try:
-        # Cào dữ liệu với error handling và auto backup
+        # Cào dữ liệu với error handling
         documents = mit_scraper.scrape_with_selenium()
         
-        # Upload raw data to MinIO (final backup)
-        object_key = ""
         if documents:
-            object_key = mit_scraper.save_to_minio(documents, 'mit_ocw', execution_date, 'courses_batch')
-            print(f"[MIT OCW] Đã lưu vào MinIO: {object_key}")
+            # Lưu vào bronze layer với cấu trúc chuẩn
+            result = bronze_storage.save_scraped_data(
+                documents=documents,
+                source='mit_ocw',
+                execution_date=execution_date,
+                file_type='courses',
+                metadata={
+                    'scraper_config': {
+                        'delay': 2.0,
+                        'use_selenium': True,
+                        'batch_size': 25,
+                        'max_documents': 200
+                    },
+                    'total_processed': len(documents)
+                }
+            )
             
-        print(f"[MIT OCW] Tổng cộng cào được: {len(documents)} documents")
-        
-        return {
-            'execution_date': execution_date,
-            'total_found': len(documents),
-            'minio_object_key': object_key
-        }
+            print(f"[MIT OCW] Đã lưu vào bronze layer:")
+            print(f"  - Data: {result.get('data_object_key')}")
+            print(f"  - Metadata: {result.get('metadata_object_key')}")
+            print(f"[MIT OCW] Tổng cộng cào được: {len(documents)} documents")
+            
+            return {
+                'execution_date': execution_date,
+                'total_found': len(documents),
+                'bronze_data_key': result.get('data_object_key'),
+                'bronze_metadata_key': result.get('metadata_object_key')
+            }
+        else:
+            print(f"[MIT OCW] Không có dữ liệu để lưu")
+            return {
+                'execution_date': execution_date,
+                'total_found': 0,
+                'bronze_data_key': None,
+                'bronze_metadata_key': None
+            }
         
     except KeyboardInterrupt:
         print("[MIT OCW] Task bị ngắt bởi người dùng")
-        # Emergency backup được thực hiện trong scraper
         raise
         
     except Exception as e:
         print(f"[MIT OCW] Lỗi khi cào dữ liệu: {e}")
-        # Emergency backup chỉ cần report lỗi, scraper tự xử lý
-        print(f"[MIT OCW] Emergency backup được xử lý bởi scraper")
         raise
         
     finally:
@@ -126,91 +151,89 @@ def cleanup_old_files(**context):
     print(f"[MIT OCW] Đã dọn dẹp {removed_files} files")
 
 def check_minio_backups(**context):
-    """Kiểm tra và liệt kê các backup trong MinIO"""
-    # Khởi tạo scraper chỉ để dùng MinIO methods
-    mit_scraper = MITOCWScraper(
-        minio_enable=True,
-        output_dir=DATA_PATH
-    )
+    """Kiểm tra và liệt kê các backup trong bronze layer"""
+    bronze_storage = BronzeStorageManager()
     
     try:
-        backups = mit_scraper.list_minio_backups('mit_ocw')
-        print(f"[MIT OCW] Tìm thấy {len(backups)} backup files trong MinIO:")
+        bronze_objects = bronze_storage.list_bronze_data(source='mit_ocw')
+        print(f"[MIT OCW] Tìm thấy {len(bronze_objects)} files trong bronze layer:")
         
-        # Hiển thị 5 backup mới nhất
-        recent_backups = sorted([b['object_name'] for b in backups], reverse=True)[:5]
-        for backup in recent_backups:
-            print(f"  - {backup}")
+        # Hiển thị 5 files mới nhất
+        recent_objects = sorted(bronze_objects, key=lambda x: x['last_modified'], reverse=True)[:5]
+        for obj in recent_objects:
+            print(f"  - {obj['object_name']} ({obj['size']} bytes)")
             
         return {
-            'total_backups': len(backups),
-            'recent_backups': recent_backups
+            'total_objects': len(bronze_objects),
+            'recent_objects': [obj['object_name'] for obj in recent_objects]
         }
         
     except Exception as e:
+        print(f"[MIT OCW] Lỗi kiểm tra bronze layer: {e}")
+        return {'total_objects': 0, 'recent_objects': []}
         print(f"[MIT OCW] Lỗi kiểm tra MinIO backups: {e}")
         return {'total_backups': 0, 'recent_backups': []}
 
 def emergency_recovery(**context):
     """Khôi phục từ backup gần nhất nếu cần"""
-    # Khởi tạo scraper chỉ để dùng MinIO methods
-    mit_scraper = MITOCWScraper(
-        minio_enable=True,
-        output_dir=DATA_PATH
-    )
+    bronze_storage = BronzeStorageManager()
     
     try:
-        backups = mit_scraper.list_minio_backups('mit_ocw')
+        latest_data = bronze_storage.get_latest_data('mit_ocw')
         
-        if backups:
-            # Lấy backup gần nhất
-            latest_backup = sorted(backups, key=lambda x: x['last_modified'], reverse=True)[0]
-            latest_backup_name = latest_backup['object_name']
-            
-            print(f"[MIT OCW] Backup gần nhất: {latest_backup_name}")
-            
-            # Có thể thêm logic khôi phục tự động nếu cần
-            print("[MIT OCW] Emergency recovery system đã sẵn sàng")
-            return {'latest_backup': latest_backup_name}
+        if latest_data:
+            print(f"[MIT OCW] Data gần nhất trong bronze layer: {latest_data['object_name']}")
+            print(f"[MIT OCW] Emergency recovery system đã sẵn sàng")
+            return {'latest_data': latest_data['object_name']}
         else:
-            print("[MIT OCW] Không tìm thấy backup nào")
-            return {'latest_backup': None}
+            print("[MIT OCW] Không tìm thấy data nào trong bronze layer")
+            return {'latest_data': None}
             
     except Exception as e:
         print(f"[MIT OCW] Lỗi emergency recovery: {e}")
-        return {'latest_backup': None}
+        return {'latest_data': None}
 
 def validate_data_quality(**context):
     """Kiểm tra chất lượng dữ liệu đã cào"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
-    
-    # Khởi tạo scraper chỉ để dùng MinIO methods
-    mit_scraper = MITOCWScraper(
-        minio_enable=True,
-        output_dir=DATA_PATH
-    )
+    bronze_storage = BronzeStorageManager()
     
     try:
-        # Kiểm tra MinIO backup
-        backups = mit_scraper.list_minio_backups('mit_ocw')
-        today_backups = [b for b in backups if execution_date.replace('-', '') in b['object_name']]
+        # Kiểm tra bronze layer data
+        bronze_objects = bronze_storage.list_bronze_data(
+            source='mit_ocw',
+            start_date=execution_date,
+            end_date=execution_date
+        )
         
-        if today_backups:
-            print(f"[MIT OCW] Tìm thấy {len(today_backups)} backup cho ngày {execution_date}")
+        if bronze_objects:
+            print(f"[MIT OCW] Tìm thấy {len(bronze_objects)} objects cho ngày {execution_date}")
             
-            # Có thể thêm logic kiểm tra chất lượng dữ liệu chi tiết hơn
-            # Ví dụ: kiểm tra số lượng documents, độ hoàn chỉnh của fields, v.v.
+            # Kiểm tra chất lượng dữ liệu cơ bản
+            data_files = [obj for obj in bronze_objects if 'courses_' in obj['object_name']]
+            metadata_files = [obj for obj in bronze_objects if 'metadata_' in obj['object_name']]
+            
+            quality_score = 100
+            if not data_files:
+                quality_score -= 50
+                print("[MIT OCW] Warning: Không tìm thấy data files")
+            if not metadata_files:
+                quality_score -= 20
+                print("[MIT OCW] Warning: Không tìm thấy metadata files")
             
             return {
                 'date': execution_date,
-                'backups_found': len(today_backups),
-                'quality_check': 'passed'
+                'objects_found': len(bronze_objects),
+                'data_files': len(data_files),
+                'metadata_files': len(metadata_files),
+                'quality_score': quality_score,
+                'quality_check': 'passed' if quality_score >= 80 else 'warning' if quality_score >= 50 else 'failed'
             }
         else:
-            print(f"[MIT OCW] Không tìm thấy backup nào cho ngày {execution_date}")
+            print(f"[MIT OCW] Không tìm thấy objects nào cho ngày {execution_date}")
             return {
                 'date': execution_date,
-                'backups_found': 0,
+                'objects_found': 0,
                 'quality_check': 'failed'
             }
             
@@ -218,7 +241,7 @@ def validate_data_quality(**context):
         print(f"[MIT OCW] Lỗi kiểm tra chất lượng dữ liệu: {e}")
         return {
             'date': execution_date,
-            'backups_found': 0,
+            'objects_found': 0,
             'quality_check': 'error',
             'error': str(e)
         }
@@ -262,7 +285,7 @@ validate_data_quality_task = PythonOperator(
 
 health_check_task = BashOperator(
     task_id='health_check',
-    bash_command='echo "MIT OCW scraping pipeline completed successfully"',
+    bash_command='echo "MIT OCW scraping pipeline completed successfully - Data stored in bronze layer"',
     dag=dag,
 )
 

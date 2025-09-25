@@ -1,0 +1,1040 @@
+{
+  "total_documents": 70,
+  "scraped_at": "2025-09-16T03:46:59.808970",
+  "source": "OpenStax",
+  "documents": [
+    {
+      "id": "9e225279df58c25388fee9728fd34d6d",
+      "title": "College Algebra 2E",
+      "description": "Study algebra online free by downloading OpenStax's College Algebra 2e book and using our accompanying online resources including an algebra study guide.",
+      "authors": [
+        "Jay Abramson"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/college-algebra-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/College-Algebra-2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:48:37.062386"
+    },
+    {
+      "id": "f4fed84502dcf9fcaf07484fc0b2d57f",
+      "title": "Microbiology",
+      "description": "Study microbiology online free by downloading OpenStax's Microbiology book and using our accompanying online resources including a biology study guide.",
+      "authors": [
+        "Nina Parker",
+        "Mark Schneegurt",
+        "Anh-Hue Thi Tu",
+        "Philip Lister",
+        "Brian M. Forster"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/microbiology",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Microbiology-WEB.pdf",
+      "scraped_at": "2025-09-11T08:48:47.799147"
+    },
+    {
+      "id": "e01aec4534eddde74499798458a0b54b",
+      "title": "Organic Chemistry",
+      "description": "John McMurry's Organic Chemistry is renowned as the most clearly written book available for organic chemistry. In John McMurry's words, \"I wrote this book because I love writing. I get great pleasure and satisfaction from taking a complicated subject, turning it around until I see it clearly from a new angle, and then explaining it in simple words.\" In Organic Chemistry: A Tenth Edition from OpenStax, McMurry continues this tradition while updating scientific discoveries, highlighting new applic...",
+      "authors": [
+        "John McMurry",
+        "Professor Emeritus"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/organic-chemistry",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/OrganicChemistry-WEB_lNotFqg.pdf",
+      "scraped_at": "2025-09-11T08:48:58.539137"
+    },
+    {
+      "id": "5c5c5364d9fdbd256781855dc4f94fbc",
+      "title": "Introduction Anthropology",
+      "description": "Designed to meet the scope and sequence of your course, OpenStax Introduction to Anthropology is a four-field text integrating diverse voices, engaging field activities, and meaningful themes like Indigenous experiences and social inequality to engage students and enrich learning. The text showcases the historical context of the discipline, with a strong focus on anthropology as a living and evolving field.  There is significant discussion of recent efforts to make the field more diverse—in its ...",
+      "authors": [
+        "Jennifer Hasty",
+        "David G. Lewis",
+        "Marjorie M. Snipes"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-anthropology",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/IntroductiontoAnthropology-WEB.pdf",
+      "scraped_at": "2025-09-11T08:49:09.384785"
+    },
+    {
+      "id": "81d216501c79de95e56c7115cad1e29d",
+      "title": "Algebra And Trigonometry 2E",
+      "description": "Study algebra online free by downloading OpenStax's Algebra and Trigonometry 2e book and using our accompanying online resources including an algebra study guide.",
+      "authors": [
+        "Jay Abramson"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/algebra-and-trigonometry-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Algebra-and-Trigonometry-2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:49:20.145899"
+    },
+    {
+      "id": "f84d9a68eba0dd13fb83890b4cd2fcf4",
+      "title": "University Physics Volume 2",
+      "description": "Study conceptual physics online free by downloading OpenStax's University Physics Volume 2 textbook and using our accompanying online resources.",
+      "authors": [
+        "Samuel J. Ling",
+        "William Moebs",
+        "Jeff Sanny"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/university-physics-volume-2",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/University_Physics_Volume_2_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:49:30.924552"
+    },
+    {
+      "id": "fc27cb4a82bd57f8bdc2559e1ae8b20f",
+      "title": "Introduction Computer Science",
+      "description": "Introduction to Computer Science provides a comprehensive foundation in core computer science concepts and principles, aligning with the scope and sequence of most introductory computer science courses. The offering serves as an engaging entry point for students pursuing diverse fields of study and employment, including computer science, business, engineering, data science, social sciences, and related disciplines. By addressing a broad learner audience—ranging from computer science majors to no...",
+      "authors": [
+        "Dr. Jean-Claude Franchitti"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-computer-science",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introduction_To_Computer_Science_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:49:41.732944"
+    },
+    {
+      "id": "453a238248ef29e7b904c7bb9cb6293f",
+      "title": "Principles Managerial Accounting",
+      "description": "Principles of Accounting meets scope and sequence requirements of a two-semester accounting course that covers financial and managerial accounting.",
+      "authors": [
+        "Mitchell Franklin",
+        "Patty Graybeal",
+        "Dixon Cooper"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-managerial-accounting",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/ManagerialAccounting-OP_x3x7rSO.pdf",
+      "scraped_at": "2025-09-11T08:49:52.489719"
+    },
+    {
+      "id": "fd04ae7c337b0a5042ea64f3ed91f92f",
+      "title": "College Success",
+      "description": "OpenStax College Success is a comprehensive and contemporary resource that serves First Year Experience, Student Success, and College Transition courses.",
+      "authors": [
+        "Amy Baldwin"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/college-success",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/College_Success_-_WEB_zQGCJTr.pdf",
+      "scraped_at": "2025-09-11T08:50:03.235797"
+    },
+    {
+      "id": "79278a03d184cd713a7de11eef960cf8",
+      "title": "Organizational Behavior",
+      "description": "This resource aligns to introductory courses in Organizational Behavior and emphasizes the impact of individuals and groups on organizational performance.",
+      "authors": [],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/organizational-behavior",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/OrganizationalBehavior-OP_TtwWIeQ.pdf",
+      "scraped_at": "2025-09-11T08:50:13.993051"
+    },
+    {
+      "id": "7e78bf0db66435c752a40b6bc91c4fd1",
+      "title": "Principles Marketing",
+      "description": "Study introduction to marketing online free by downloading OpenStax's Principles of Marketing textbook and using our accompanying online resources.",
+      "authors": [
+        "Dr. Maria Gomez Albrecht",
+        "Dr. Mark Green",
+        "Linda Hoffman"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-marketing",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Principles_Marketing-WEB.pdf",
+      "scraped_at": "2025-09-11T08:50:24.775479"
+    },
+    {
+      "id": "b9503b4831b1937db0f2a36218f8e1f1",
+      "title": "College Success Concise",
+      "description": "OpenStax College Success Concise is a comprehensive and contemporary resource that serves First Year Experience, Student Success, and College Transition courses.",
+      "authors": [
+        "Amy Baldwin"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/college-success-concise",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/College_Success_Concise.pdf",
+      "scraped_at": "2025-09-11T08:50:35.651909"
+    },
+    {
+      "id": "33b61a282f18e6aa788baddcb81680c7",
+      "title": "College Algebra Corequisite Support 2E",
+      "description": "College Algebra 2e with Corequisite Support integrates algebraic principles with foundational review and includes worked examples and guided practice.",
+      "authors": [
+        "Jay Abramson",
+        "Sharon North"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/college-algebra-corequisite-support-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/College-Algebra-Corequisite-Support-2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:50:46.439143"
+    },
+    {
+      "id": "ba4dadb10f98a781b344cdca66e025be",
+      "title": "Introduction Business",
+      "description": "Study business online free by downloading OpenStax's Introduction to Business textbook and using our accompanying online resources.",
+      "authors": [
+        "Lawrence J. Gitman",
+        "Carl McDaniel",
+        "Amit Shah",
+        "Monique Reece",
+        "Linda Koffel",
+        "Bethann Talsma",
+        "James C. Hyatt"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-business",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/IntroductionToBusiness-OP_8D04gAa.pdf",
+      "scraped_at": "2025-09-11T08:50:57.208457"
+    },
+    {
+      "id": "8261c4b06e73a3c04d0f5aa367f970a7",
+      "title": "Fundamentals Nursing",
+      "description": "Study microbiology online free by downloading OpenStax's Fundamentals of Nursing book and using our accompanying online resources.",
+      "authors": [
+        "Christy Bowen",
+        "Lindsay Draper",
+        "Heather Moore"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/fundamentals-nursing",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Fundamentals_of_Nursing_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:51:07.947253"
+    },
+    {
+      "id": "0a8e7b35674b1f0a1c405ac516eb3de3",
+      "title": "Chemistry 2E",
+      "description": "Study general chemistry online free by downloading OpenStax's Chemistry textbook and using our accompanying online resources.",
+      "authors": [
+        "Paul Flowers",
+        "Klaus Theopold",
+        "Richard Langley",
+        "William R. Robinson"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/chemistry-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Chemistry2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:51:18.678878"
+    },
+    {
+      "id": "fd56cbde16c673372b19d26ceea65c55",
+      "title": "American Government 3E",
+      "description": "American Government 3e aligns with the topics and objectives of many government courses. Faculty involved in the project have endeavored to make government workings, issues, debates, and impacts meaningful and memorable to students while maintaining the conceptual coverage and rigor inherent in the subject. With this objective in mind, the content of this textbook has been developed and arranged to provide a logical progression from the fundamental principles of institutional design at the found...",
+      "authors": [
+        "Glen Krutz",
+        "Sylvie Waskiewicz"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/american-government-3e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/AmericanGovernment3e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:51:29.398626"
+    },
+    {
+      "id": "cda983730417e26088e3d49127c2dc00",
+      "title": "Workplace Software Skills",
+      "description": "Workplace Software and Skills is designed to flexibly support a range of courses covering computer literacy, Microsoft Office, and Google Suite applications. The textbook covers both hard and soft skills that are applicable to a broad range of academic majors and careers. Chapters combine studio learning and guided practice with scaffolded activities designed to reinforce a student’s ability to perform higher-order tasks independently. Workplace Software and Skills leverages complementary produc...",
+      "authors": [
+        "Tammie Bolling",
+        "Angela Mitchell",
+        "Tanya Scott",
+        "Nyrobi Wheeler"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/workplace-software-skills",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Workplace_Software_and_Skills_-_WEB_IlfJtcP.pdf",
+      "scraped_at": "2025-09-11T08:51:40.211934"
+    },
+    {
+      "id": "ce16e0529f2324d9a54864e264e2546b",
+      "title": "Intermediate Algebra 2E",
+      "description": "Intermediate Algebra 2e meets scope and sequence requirements of a semester intermediate algebra course and builds on algebra fundamentals.",
+      "authors": [
+        "Lynn Marecek",
+        "Andrea Honeycutt Mathis"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/intermediate-algebra-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/IntermediateAlgebra2e-WEB_RlpFLLx.pdf",
+      "scraped_at": "2025-09-11T08:51:50.975533"
+    },
+    {
+      "id": "911fe050aab1003ee5bc61fdca44b087",
+      "title": "Introduction Sociology 3E",
+      "description": "Introduction to Sociology 3e aligns to the topics and objectives of many introductory sociology courses. It is arranged in a manner that provides foundational sociological theories and contexts, then progresses through various aspects of human and societal interactions. The new edition is focused on driving meaningful and memorable learning experiences related to critical thinking about society and culture. The text includes comprehensive coverage of core concepts, discussions and data relevant ...",
+      "authors": [
+        "Tonja R. Conerly",
+        "Kathleen Holmes",
+        "Asha Lal Tamang"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-sociology-3e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/IntroductiontoSociology3e-WEB_9QTqRGQ.pdf",
+      "scraped_at": "2025-09-11T08:52:01.725850"
+    },
+    {
+      "id": "5392f1ecf995490bc2166c63299185f7",
+      "title": "Pharmacology",
+      "description": "Pharmacology for Nurses is intended for nursing students in an introductory program. It provides a fundamental understanding of the therapeutic use of drugs, so the nurse can provide safe and effective care to the client. Along with a discussion of each body system, the text also reviews the pathophysiology of various disease processes and medications used in treatment. The table of contents presents 40 chapter topics, organized into 11 units. The first unit, consisting of 3 chapters, provides a...",
+      "authors": [
+        "Tina Barbour-Taylor",
+        "Leah Mueller (Sabato)",
+        "Donna Paris",
+        "Dorie Weaver"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/pharmacology",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Pharmacology-WEB.pdf",
+      "scraped_at": "2025-09-11T08:52:12.463329"
+    },
+    {
+      "id": "32107a3a422df8a17ba8b64812c9c458",
+      "title": "Writing Guide",
+      "description": "Study English composition online free by downloading OpenStax's Writing Guide with Handbook textbook and using our accompanying online resources.",
+      "authors": [
+        "Michelle Bachelor Robinson",
+        "Maria Jerskey",
+        "featuring Toby Fulwiler"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/writing-guide",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/WritingGuide-WEB.pdf",
+      "scraped_at": "2025-09-11T08:52:23.210217"
+    },
+    {
+      "id": "893c0264833a9dc68c325303a3298c6e",
+      "title": "Chemistry Atoms First 2E",
+      "description": "Study general chemistry online free by downloading OpenStax's Chemistry: Atoms First textbook and using our accompanying online resources.",
+      "authors": [
+        "Paul Flowers",
+        "Edward J. Neth",
+        "William R. Robinson",
+        "Klaus Theopold",
+        "Richard Langley"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/chemistry-atoms-first-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/ChemistryAtomsFirst2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:52:33.961835"
+    },
+    {
+      "id": "9397f081ce07f69cd6d07b0d8335fd20",
+      "title": "College Physics 2E",
+      "description": "Study conceptual physics online free by downloading OpenStax's College Physics textbook and using our accompanying online resources.",
+      "authors": [
+        "Paul Peter Urone",
+        "Roger Hinrichs"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/college-physics-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/College_Physics_2e-WEB_7Zesafu.pdf",
+      "scraped_at": "2025-09-11T08:52:44.725102"
+    },
+    {
+      "id": "bebccae7ca8b0341de573178770013bb",
+      "title": "Prealgebra 2E",
+      "description": "Prealgebra 2e meets scope and sequence requirements for a semester prealgebra or basic math course and introduces fundamental concepts of algebra.",
+      "authors": [
+        "Lynn Marecek",
+        "MaryAnne Anthony-Smith",
+        "Andrea Honeycutt Mathis"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/prealgebra-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Prealgebra2e-WEB_0qbw93r.pdf",
+      "scraped_at": "2025-09-11T08:52:55.594149"
+    },
+    {
+      "id": "d8621e49b0a0194b19baa15a8e516f60",
+      "title": "Principles Macroeconomics 3E",
+      "description": "Study macroeconomics online free by downloading OpenStax's Principles of Macroeconomics 3e textbook and using our accompanying online resources.",
+      "authors": [
+        "David Shapiro",
+        "Daniel MacDonald",
+        "San Bernardino",
+        "Steven A. Greenlaw"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-macroeconomics-3e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Macroeconomics3e-WEB_X69daYk.pdf",
+      "scraped_at": "2025-09-11T08:53:06.313662"
+    },
+    {
+      "id": "9aabbc3fdbdd416d7e07909bafcee427",
+      "title": "Calculus Volume 2",
+      "description": "Study calculus online free by downloading Volume 2 of OpenStax's college Calculus textbook and using our accompanying online resources.",
+      "authors": [
+        "Gilbert Strang",
+        "Edwin “Jed” Herman"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/calculus-volume-2",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Calculus_Volume_2_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:53:17.068441"
+    },
+    {
+      "id": "03358a586a9053c525f8a886236f982f",
+      "title": "Clinical Nursing Skills",
+      "description": "Clinical Nursing Skills is designed to equip nursing students with the practical knowledge and hands-on skills necessary to provide comprehensive patient care. The material emphasizes the application of clinical judgment in a variety of settings, ensuring that students are prepared to deliver high-quality care across different patient populations and clinical scenarios. The content utilizes concepts promoting the development of clinical judgment by building upon the systematic model developed by...",
+      "authors": [
+        "Christy Bowen"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/clinical-nursing-skills",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Clinical-Nursing-Skills-WEB.pdf",
+      "scraped_at": "2025-09-11T08:53:27.857781"
+    },
+    {
+      "id": "ae9cc5ec22b67dc44c3271a36bcedbed",
+      "title": "Astronomy 2E",
+      "description": "Designed to meet the scope and sequence of your course, Astronomy 2e is written in clear non-technical language, with the occasional touch of humor and a wide range of clarifying illustrations. It has many analogies drawn from everyday life to help non-science majors appreciate, on their own terms, what our modern exploration of the universe is revealing. The book can be used for either a one-semester or two-semester introductory course.The second edition has been updated according to new explor...",
+      "authors": [
+        "Andrew Fraknoi",
+        "David Morrison",
+        "Sidney Wolff",
+        "NOIRLab (Emerita)"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/astronomy-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Astronomy2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:53:38.595494"
+    },
+    {
+      "id": "3e56baa1e77bad906ad0ac69dbb06668",
+      "title": "Principles Microeconomics 3E",
+      "description": "Study microeconomics online free by downloading OpenStax's Principles of Microeconomics 3e textbook and using our accompanying online resources.",
+      "authors": [
+        "David Shapiro",
+        "Daniel MacDonald",
+        "San Bernardino",
+        "Steven A. Greenlaw"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-microeconomics-3e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Microeconomics3e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:53:49.347603"
+    },
+    {
+      "id": "054123c8a506cdc5626482b96bee22ac",
+      "title": "Elementary Algebra 2E",
+      "description": "Elementary Algebra 2e meets scope and sequence requirements for a semester elementary algebra course and expands on the fundamental concepts of algebra.",
+      "authors": [
+        "Lynn Marecek",
+        "MaryAnne Anthony-Smith",
+        "Andrea Honeycutt Mathis"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/elementary-algebra-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/ElementaryAlgebra2e-WEB_3zxfu3Z.pdf",
+      "scraped_at": "2025-09-11T08:54:00.191485"
+    },
+    {
+      "id": "e99ed17c2b5324719d40e830201b9026",
+      "title": "Lifespan Development",
+      "description": "Lifespan Development aligns to the topics and objectives of most introductory developmental psychology courses taught across departments. Grounded in foundational theories and scientific research, the text teaches students about core aspects of human development—physical, cognitive, social, emotional—across the lifespan. A primary goal of the book is to incorporate content, scholarship, and activities that explore a variety of perspectives that encourage all students to feel seen and included.Li...",
+      "authors": [
+        "Diana Riser",
+        "Rose Spielman",
+        "David Biek"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/lifespan-development",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Lifespan_Development_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:54:10.926975"
+    },
+    {
+      "id": "2fb76892a12c20002e25b5e58274f0d2",
+      "title": "Anatomy And Physiology 2E",
+      "description": "Learn about human anatomy and physiology online by downloading OpenStax's free Anatomy and Physiology 2e book and using our accompanying study guide.",
+      "authors": [
+        "J. Gordon Betts",
+        "Kelly A. Young",
+        "Long Beach",
+        "James A. Wise",
+        "Eddie Johnson",
+        "Brandon Poe",
+        "Dean H. Kruse",
+        "Oksana Korol",
+        "Jody E. Johnson",
+        "Mark Womble",
+        "Peter DeSaix"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/anatomy-and-physiology-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Anatomy_and_Physiology_2e_-_WEB_c9nD9QL.pdf",
+      "scraped_at": "2025-09-11T08:54:21.731475"
+    },
+    {
+      "id": "21aced5c030348e735908b39ec83d669",
+      "title": "Introduction Intellectual Property",
+      "description": "Study intellectual property online free by downloading OpenStax's Introduction to Intellectual Property textbook and using our accompanying online resources.",
+      "authors": [
+        "David Kline",
+        "Pulitzer Prize-nominated journalist",
+        "David Kappos",
+        "Former Director"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-intellectual-property",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introduction_to_Intellectual_Property_2PYaEdp.pdf",
+      "scraped_at": "2025-09-11T08:54:32.570325"
+    },
+    {
+      "id": "6216462c07e890cddd06ad351fdbe434",
+      "title": "Search | MIT OpenCourseWare | Free Online Course Materials",
+      "description": "MIT OpenCourseWare is a web based publication of virtually all MIT course content. OCW is open and available to the world and is a permanent MIT activity",
+      "authors": [],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introductory-business-statistics-2e",
+      "url_pdf": "",
+      "scraped_at": "2025-09-11T08:54:43.915532"
+    },
+    {
+      "id": "1032f6515bbac48425dc2e5877a43095",
+      "title": "Additive Manufacturing Essentials",
+      "description": "Additive Manufacturing Essentials is an introduction to the core principles, technologies, and methods in the field of additive manufacturing. Rooted in industry practice and innovation, the material presents examples and approaches from an array of companies, equipment producers, and software developers. The book is designed to support readers from an array of fields and areas of study, including engineering, science, management, operations, entrepreneurship, and education. With a focus on unde...",
+      "authors": [
+        "John E. Barnes",
+        "The Barnes Global Advisors",
+        "Timothy E. Simpson"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/additive-manufacturing-essentials",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Additive_Manufacturing_Essentials_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:54:55.489464"
+    },
+    {
+      "id": "19f11a4368946d00bee28fc53a35ea65",
+      "title": "Foundations Information Systems",
+      "description": "Study information systems online for free by downloading OpenStax's Information Systems book and using our accompanying online resources.",
+      "authors": [
+        "Dr. Mahesh S. Raisinghani"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/foundations-information-systems",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Foundations_of_Information_Systems_-_WEB_oNlbGYl.pdf",
+      "scraped_at": "2025-09-11T08:55:06.230922"
+    },
+    {
+      "id": "e052f072697b3ef79d90714905fb22c5",
+      "title": "Introductory Statistics 2E",
+      "description": "Study statistics online for free by downloading OpenStax's Introductory Statistics 2e book and using our accompanying online resources.",
+      "authors": [
+        "Barbara Illowsky",
+        "Susan Dean"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introductory-statistics-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introductory_Statistics_2e_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:55:16.634414"
+    },
+    {
+      "id": "770390784bc605328aaa0824f3f2d4cd",
+      "title": "Psychiatric Mental Health",
+      "description": "Psychiatric-Mental Health Nursing is designed to support a one-semester psychiatric-mental health nursing course offered at both two-year and four-year institutions. Serving students specializing in psychiatric nursing and those from other health disciplines, this learning resource integrates evidence-based practices with practical strategies for communication, readying students to build therapeutic relationships with patients and caregivers.Psychiatric-Mental Health Nursing uses a logical, them...",
+      "authors": [
+        "Rebecca Puchkors",
+        "Jeanne Saunders",
+        "David Sharp"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/psychiatric-mental-health",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Psychiatric-Mental_Health_Nursing-WEB.pdf",
+      "scraped_at": "2025-09-11T08:55:27.379125"
+    },
+    {
+      "id": "726ff9a940437937d4d77e415a8da3af",
+      "title": "Biology Ap Courses",
+      "description": "Study AP Biology online for free by downloading OpenStax's Biology for AP Courses textbook and using our accompanying AP study notes.",
+      "authors": [
+        "Julianne Zedalis",
+        "John Eggebrecht"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/biology-ap-courses",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/APBiology-OP_5meoFaG.pdf",
+      "scraped_at": "2025-09-11T08:55:38.398193"
+    },
+    {
+      "id": "2f20e72b31e080bb0707a97f603bac9c",
+      "title": "Principles Finance",
+      "description": "Designed to meet the scope and sequence of your course, Principles of Finance provides a strong foundation in financial applications using an innovative use-case approach to explore their role in business decision-making. An array of financial calculator and downloadable Microsoft Excel data exercises also engage students in experiential learning throughout. With flexible integration of technical instruction and data, this title prepares students for current practice and continual evolution. If ...",
+      "authors": [
+        "Julie Dahlquist",
+        "Rainford Knight"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-finance",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/PrinciplesofFinance-WEB.pdf",
+      "scraped_at": "2025-09-11T08:55:49.296751"
+    },
+    {
+      "id": "b5d3938a94c9e3283c67a71f863427e0",
+      "title": "University Physics Volume 3",
+      "description": "Study conceptual physics online free by downloading OpenStax's University Physics Volume 3 textbook and using our accompanying online resources.",
+      "authors": [
+        "Samuel J. Ling",
+        "Jeff Sanny",
+        "William Moebs"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/university-physics-volume-3",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/UniversityPhysicsVolume3-WEB.pdf",
+      "scraped_at": "2025-09-11T08:56:00.157039"
+    },
+    {
+      "id": "4f28028b176c206c63e67f27d082faff",
+      "title": "World History Volume 1",
+      "description": "World History, Volume 1: to 1500 is designed to meet the scope and sequence of a world history course to 1500 offered at both two-year and four-year institutions. Suitable for both majors and non majors World History, Volume 1: to 1500 introduces students to a global perspective of history couched in an engaging narrative. Concepts and assessments help students think critically about the issues they encounter so they can broaden their perspective of global history. A special effort has been made...",
+      "authors": [
+        "Ann Kordas",
+        "Ryan J. Lynch",
+        "Brooke Nelson",
+        "Julie Tatlock"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/world-history-volume-1",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/World_History_Volume_1-WEB.pdf",
+      "scraped_at": "2025-09-11T08:56:11.008823"
+    },
+    {
+      "id": "c2272d5f18f44653d02d71503daf88f6",
+      "title": "Principles Financial Accounting",
+      "description": "Principles of Accounting meets scope and sequence requirements of a two-semester accounting course that covers financial and managerial accounting.",
+      "authors": [
+        "Mitchell Franklin",
+        "Patty Graybeal",
+        "Dixon Cooper"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-financial-accounting",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/FinancialAccounting-OP_YioY6nY.pdf",
+      "scraped_at": "2025-09-11T08:56:21.790802"
+    },
+    {
+      "id": "158e8c96fbbf9933de265ceb7e75214d",
+      "title": "Introduction Philosophy",
+      "description": "Designed to meet the scope and sequence of your course, Introduction to Philosophy surveys logic, metaphysics, epistemology, theories of value, and history of philosophy thematically. To provide a strong foundation in global philosophical discourse, diverse primary sources and examples are central to the design, and the text emphasizes engaged reading, critical thinking, research, and analytical skill-building through guided activities.",
+      "authors": [
+        "Nathan Smith"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-philosophy",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introduction_to_Philosophy-WEB_cszrKYp.pdf",
+      "scraped_at": "2025-09-11T08:56:32.564312"
+    },
+    {
+      "id": "2af8fa77032dccbfe6b59c2224d01d6b",
+      "title": "Search | MIT OpenCourseWare | Free Online Course Materials",
+      "description": "MIT OpenCourseWare is a web based publication of virtually all MIT course content. OCW is open and available to the world and is a permanent MIT activity",
+      "authors": [],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/psychology-2e",
+      "url_pdf": "",
+      "scraped_at": "2025-09-11T08:56:43.126607"
+    },
+    {
+      "id": "6add6969c1d3b93cd70a2bed6fdc7770",
+      "title": "Business Law I Essentials",
+      "description": "Business Law I Essentials covers scope and sequence of courses on Business Law or the Legal Environment of Business, establishing foundational knowledge.",
+      "authors": [],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/business-law-i-essentials",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Business_Law_I_Essentials_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:56:53.910819"
+    },
+    {
+      "id": "edfc2df6718803513c48e01c67a08ca9",
+      "title": "Principles Management",
+      "description": "Principles of Management meets scope and sequence of introductory management courses and covers many areas such as human resource and strategic management.",
+      "authors": [],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-management",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/PrinciplesofManagement-OP_mGBMvoU.pdf",
+      "scraped_at": "2025-09-11T08:57:04.719495"
+    },
+    {
+      "id": "3bd758d000ce5ecc138e35b6c674c852",
+      "title": "Precalculus 2E",
+      "description": "Study precalculus online free by downloading OpenStax's Precalculus 2e textbook and using our accompanying online resources including a precalculus study guide.",
+      "authors": [
+        "Jay Abramson"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/precalculus-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Precalculus_2e-WEB.pdf",
+      "scraped_at": "2025-09-11T08:57:15.476451"
+    },
+    {
+      "id": "84901b48f2e5251b75a5406f981d81d7",
+      "title": "Medical Surgical Nursing",
+      "description": "Medical-Surgical Nursing is a comprehensive and engaging resource for nursing students, equipping them with the essential knowledge and skills required to provide high-quality care. Building on the foundational knowledge and skills acquired in previous nursing courses, this textbook expands students’ learning with concepts in medical-surgical nursing. The offering provides the background to ensure that nursing students are well-versed in both the science and art of nursing, capable of critical t...",
+      "authors": [
+        "Christy Bowen",
+        "Bridget Carey",
+        "Jessica Palozie",
+        "Maren Reinholdt"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/medical-surgical-nursing",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Medical-Surgical_Nursing-WEB.pdf",
+      "scraped_at": "2025-09-11T08:57:26.293683"
+    },
+    {
+      "id": "64e74105a4305b3f85692fe28bed7862",
+      "title": "Introduction Political Science",
+      "description": "Designed to meet the scope and sequence of your course, OpenStax Introduction to Political Science provides a strong foundation in global political systems, exploring how and why political realities unfold. Rich with examples of individual and national social action, this text emphasizes students’ role in the political sphere and equips them to be active and informed participants in civil society. Learn more about what this free, openly-licensed textbook has to offer you and your students.If you...",
+      "authors": [
+        "Mark Carl Rom",
+        "Masaki Hidaka",
+        "Rachel Bzostek Walker"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-political-science",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introduction_to_Political_Science_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:57:37.125338"
+    },
+    {
+      "id": "6f1b643a65cab1551ba2863c1bf6dd24",
+      "title": "Maternal Newborn Nursing",
+      "description": "Maternal-Newborn Nursing introduces students to the concepts and skills related to pregnancy, birth, postpartum, newborn care, reproductive health, and social determinants related to those topics. Written and thoroughly reviewed by experienced nurse educators, the material focuses on patient safety, mental health, and inclusive care, and offers robust real-world scenarios and situational patient education experiences to apply concepts to practice.Maternal-Newborn Nursing builds on the students’ ...",
+      "authors": [
+        "Amy Giles",
+        "Regina Prusinski",
+        "Laura Wallace"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/maternal-newborn-nursing",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Maternal-Newborn_Nursing-WEB.pdf",
+      "scraped_at": "2025-09-11T08:57:48.062888"
+    },
+    {
+      "id": "200975734470a889cbcf71d250cad6f6",
+      "title": "Introduction Python Programming",
+      "description": "Introduction to Python Programming provides a comprehensive foundation in programming concepts and skills, and it is aligned to the scope of most introductory courses. A wide array of scenarios, contexts, and problems reflect programming applications in many disciplines and careers. The offering is suitable for a diverse learner audience, including those pursuing computer science, business, science, social science, statistics, data science, and related areas of study and employment.Introduction ...",
+      "authors": [
+        "Udayan Das",
+        "Aubrey Lawson",
+        "Chris Mayfield",
+        "Narges Norouzi",
+        "UC Berkeley"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-python-programming",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introduction_to_Python_Programming_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:57:58.862792"
+    },
+    {
+      "id": "60d1b0f7de1adb93aa4c252535ca4141",
+      "title": "Search | MIT OpenCourseWare | Free Online Course Materials",
+      "description": "MIT OpenCourseWare is a web based publication of virtually all MIT course content. OCW is open and available to the world and is a permanent MIT activity",
+      "authors": [],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/american-government-4e",
+      "url_pdf": "",
+      "scraped_at": "2025-09-11T08:58:10.528082"
+    },
+    {
+      "id": "c1a30eeda654683184ecc4b422dffd76",
+      "title": "Business Ethics",
+      "description": "Study business online free by downloading OpenStax's Business Ethics textbook and using our accompanying online resources.",
+      "authors": [
+        "Stephen M. Byars",
+        "Kurt Stanberry"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/business-ethics",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/BusinessEthics-OP.pdf",
+      "scraped_at": "2025-09-11T08:58:21.294178"
+    },
+    {
+      "id": "2b7ef51205458f9ffc4e3b0719aa3f15",
+      "title": "Principles Economics 3E",
+      "description": "Study introduction to economics online free by downloading OpenStax's Principles of Economics 3e textbook and using our accompanying online resources.",
+      "authors": [
+        "Steven A. Greenlaw",
+        "David Shapiro",
+        "Daniel MacDonald",
+        "San Bernardino"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-economics-3e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Economics3e-WEB_AObkTqf.pdf",
+      "scraped_at": "2025-09-11T08:58:32.152420"
+    },
+    {
+      "id": "cda37d61db84581798ac04229caf750d",
+      "title": "Population Health",
+      "description": "Population Health for Nurses prepares nurses to develop interventions, policies, and practices that promote health equity and improved health outcomes across the health care delivery continuum. The text emphasizes the social determinants of health and how nurses can plan and implement health promotion and disease prevention interventions. It takes a holistic perspective, connecting human health behavior to the dynamic, ongoing interactions of the person, social factors, and the physical environm...",
+      "authors": [
+        "Jessica Ochs",
+        "Sherry L. Roper",
+        "Susan M. Schwartz"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/population-health",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Population_Health_for_Nurses_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:58:42.877464"
+    },
+    {
+      "id": "31a9c117af110df6bae6a0aebad8c8c4",
+      "title": "Introduction Behavioral Neuroscience",
+      "description": "Introduction to Behavioral Neuroscience aligns to the topics and objectives of introductory behavioral neuroscience courses taught in psychology, biology, neuroscience, and similar departments. This offering is intended for undergraduates with no presumed college-level science coursework, and presents the foundational principles of brain-behavior-environment interactions.In Introduction to Behavioral Neuroscience, students will begin to understand how the physiology of the nervous system and the...",
+      "authors": [
+        "Elizabeth D. Kirby",
+        "Melissa J. Glenn",
+        "Noah J. Sandstrom",
+        "Christina L. Williams"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/introduction-behavioral-neuroscience",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Introduction_to_Behavioral_Neuroscience-WEB.pdf",
+      "scraped_at": "2025-09-11T08:58:53.657298"
+    },
+    {
+      "id": "3e0458696096f0fbab0504d2f3300afc",
+      "title": "Concepts Biology",
+      "description": "Study biology online free by downloading OpenStax's Concepts of Biology book and using our accompanying online resources including a biology study guide.",
+      "authors": [
+        "Samantha Fowler",
+        "Rebecca Roush",
+        "James Wise"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/concepts-biology",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/ConceptsofBiology-WEB.pdf",
+      "scraped_at": "2025-09-11T08:59:04.502626"
+    },
+    {
+      "id": "af63a2455a8b62644f0671f125280703",
+      "title": "College Physics Ap Courses 2E",
+      "description": "Study AP Physics online free by downloading OpenStax's AP Physics Collection textbook and using our accompanying AP Physics study guide.",
+      "authors": [
+        "Gregg Wolfe",
+        "Erika Gasper",
+        "Science Writer",
+        "Santa Cruz",
+        "John Stoke",
+        "Julie Kretchman",
+        "David Anderson",
+        "Nathan Czuba",
+        "Sudhi Oberoi",
+        "Liza Pujji",
+        "Irina Lyublinskaya",
+        "Douglas Ingram"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/college-physics-ap-courses-2e",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/College_Physics_for_AP_Courses_2e-WEB_DkhNbxV.pdf",
+      "scraped_at": "2025-09-11T08:59:15.287646"
+    },
+    {
+      "id": "0566b932b8a4a63b0e18f85c7a701178",
+      "title": "Principles Data Science",
+      "description": "Study data science online free by downloading OpenStax's Principles of Data Science book and using our accompanying online resources.",
+      "authors": [
+        "Dr. Shaun V. Ault",
+        "Dr. Soohyun Nam Liao",
+        "Larry Musolino"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/principles-data-science",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Principles-of-Data-Science-WEB.pdf",
+      "scraped_at": "2025-09-11T08:59:26.035399"
+    },
+    {
+      "id": "08e9bde2f0cc4489d2ec1cb3c368bd0e",
+      "title": "Nutrition",
+      "description": "Nutrition for Nurses is structured to support the flexible integration of nutrition content across both system-based and nursing competency-based curricula. It can be used whether nutrition is taught as a standalone course or part of another nursing course. The table of contents for Nutrition for Nurses presents content in 20 chapters, organized into 9 thematic units.The text emphasizes evidence-based practice and holistic assessment to facilitate the integration of nutritional awareness for pre...",
+      "authors": [
+        "Emerald Charity Bilbrew",
+        "Jody Vogelzang",
+        "Kelli Whittington"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/nutrition",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Nutrition_for_Nurses-WEB.pdf",
+      "scraped_at": "2025-09-11T08:59:36.833076"
+    },
+    {
+      "id": "65d565039a1278407854daf1020d5bdf",
+      "title": "Contemporary Mathematics",
+      "description": "Contemporary Mathematics is designed to meet the scope and sequence requirements for a liberal arts mathematics course. This resource provides stand-alone sections with a focus on showing relevance in the features as well as the examples, exercises, and exposition. Contemporary Mathematics integrates technology applications, projects, and highlights a diverse group of contributors to mathematics, statistics, and related fields.",
+      "authors": [
+        "Donna Kirk"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/contemporary-mathematics",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/ContemporaryMathematics-WEB.pdf",
+      "scraped_at": "2025-09-11T08:59:47.583711"
+    },
+    {
+      "id": "cd12a41859c5fbceb5afa2df1ab19e6e",
+      "title": "University Physics Volume 1",
+      "description": "Study conceptual physics online free by downloading OpenStax's University Physics Volume 1 textbook and using our accompanying online resources.",
+      "authors": [
+        "William Moebs",
+        "Samuel J. Ling",
+        "Jeff Sanny"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/university-physics-volume-1",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/University_Physics_Volume_1_-_WEB.pdf",
+      "scraped_at": "2025-09-11T08:59:58.364457"
+    },
+    {
+      "id": "e35766cde64ba5966238dc33952f606c",
+      "title": "Us History",
+      "description": "Study U.S. History online free by downloading OpenStax's United States History textbook and using our accompanying online resources.",
+      "authors": [
+        "P. Scott Corbett",
+        "Volker Janssen",
+        "John M. Lund",
+        "Todd Pfannestiel",
+        "Sylvie Waskiewicz",
+        "Paul Vickery"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/us-history",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/US_History_-_WEB.pdf",
+      "scraped_at": "2025-09-11T09:00:09.100679"
+    },
+    {
+      "id": "d4425800343c85a23281399f3490e2cb",
+      "title": "Preparing For College Success",
+      "description": "OpenStax’s Preparing for College Success is a comprehensive resource that provides secondary students critical information to prepare for their “to and through” college journey.",
+      "authors": [
+        "Amy Baldwin"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/preparing-for-college-success",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Preparing-for-College-Success-WEB_s0m0YMs.pdf",
+      "scraped_at": "2025-09-11T09:00:19.819724"
+    },
+    {
+      "id": "06f7791b081a6a7dbaebc74fc7a29249",
+      "title": "Calculus Volume 3",
+      "description": "Study calculus online free by downloading Volume 3 of OpenStax's college Calculus textbook and using our accompanying online resources.",
+      "authors": [
+        "Gilbert Strang",
+        "Edwin “Jed” Herman"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/calculus-volume-3",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Calculus_Volume_3_-_WEB.pdf",
+      "scraped_at": "2025-09-11T09:00:30.538890"
+    },
+    {
+      "id": "9c400559be03e836e451e43f224a26a9",
+      "title": "Entrepreneurship",
+      "description": "Entrepreneurship is intended for use in introductory Entrepreneurship classes at the undergraduate level and focuses on both theory and application.",
+      "authors": [
+        "Michael Laverty",
+        "Chris Littel"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/entrepreneurship",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Entrepreneurship-WEB_qNSArxT.pdf",
+      "scraped_at": "2025-09-11T09:00:41.320119"
+    },
+    {
+      "id": "f9235c4f2b7f7b11bfe9238ebbf4c5f7",
+      "title": "Calculus Volume 1",
+      "description": "Study calculus online free by downloading volume 1 of OpenStax's college Calculus textbook and using our accompanying online resources.",
+      "authors": [
+        "Gilbert Strang",
+        "Edwin “Jed” Herman"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/calculus-volume-1",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/Calculus_Volume_1_-_WEB_68M1Z5W.pdf",
+      "scraped_at": "2025-09-11T09:00:52.186951"
+    },
+    {
+      "id": "a203e930edd8ab192f5f383360c7f968",
+      "title": "World History Volume 2",
+      "description": "World History, Volume 2: from 1400 is designed to meet the scope and sequence of a world history course from 1400 offered at both two-year and four-year institutions. Suitable for both majors and non majors World History, Volume 2: from 1400 introduces students to a global perspective of history couched in an engaging narrative. Concepts and assessments help students think critically about the issues they encounter so they can broaden their perspective of global history. A special effort has bee...",
+      "authors": [
+        "Ann Kordas",
+        "Ryan J. Lynch",
+        "Brooke Nelson",
+        "Julie Tatlock"
+      ],
+      "subject": "Details",
+      "source": "OpenStax",
+      "url": "https://openstax.org/details/books/world-history-volume-2",
+      "url_pdf": "https://assets.openstax.org/oscms-prodcms/media/documents/World_History_Volume_2-WEB_LdwoslB.pdf",
+      "scraped_at": "2025-09-11T09:01:02.934673"
+    }
+  ]
+}

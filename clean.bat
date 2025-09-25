@@ -17,15 +17,9 @@ if exist "scraped_data" rmdir /s /q scraped_data
 if exist "dags\__pycache__" rmdir /s /q dags\__pycache__
 
 echo.
-echo 4. Removing old database files...
-if exist "database\airflow.db" del database\airflow.db
-if exist "database\scraped_documents.db" del database\scraped_documents.db
-
-echo.
-echo 5. Recreating necessary directories...
+echo 4. Recreating necessary directories...
 mkdir logs 2>nul
 mkdir scraped_data 2>nul
-mkdir database 2>nul
 
 echo.
 echo ✅ Cleanup completed! Ready for fresh deployment.

@@ -1,0 +1,1320 @@
+{
+  "total_found": 60,
+  "scraped_at": "2025-09-17T06:29:03.532673",
+  "source": "MIT OCW",
+  "documents": [
+    {
+      "id": "4a5021f08c086202cfaf9609970ab5de",
+      "title": "Introduction to Civil and Environmental Engineering Design I",
+      "description": "In this sophomore design course, you will be challenged with three design tasks: a first concerning water resources/treatment, a second concerning structural design, and a third focusing on the conceptual (re)design of a large system, Boston's Back Bay. The first two tasks require the design, fabrication and testing of hardware. Several laboratory experiments will be carried out and lectures will be presented to introduce students to the conceptual and experimental basis for design in both domains.  \n  \nThis course was based in large part on the Fall 2005 offering of 1.101, developed by Prof. Harold Hemond.",
+      "authors": [
+        "Prof. Heidi Nepf",
+        "Prof. Herbert Einstein",
+        "Prof. Louis Bucciarelli"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Environmental Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-101-introduction-to-civil-and-environmental-engineering-design-i-fall-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:22.505882"
+    },
+    {
+      "id": "f6cdc080acd12934006eac59e9969bf8",
+      "title": "Transportation Systems",
+      "description": "Approaching transportation as a complex, large-scale, integrated, open system (CLIOS), this course strives to be an interdisciplinary systems subject in the \"open\" sense. It introduces qualitative modeling ideas and various techniques and philosophies of modeling complex transportation enterprises. It also introduces conceptual frameworks for qualitative analysis, such as frameworks for regional strategic planning, institutional change analysis, and new technology development and deployment. And it covers transportation as a large-scale, integrated system that interacts directly with the social, political, and economic aspects of contemporary society. Fundamental elements and issues shaping traveler and freight transportation systems are covered, along with underlying principles governing transportation planning, investment, operations, and maintenance.",
+      "authors": [
+        "Prof. Joseph Sussman",
+        "Joseph Sussman\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil",
+        "Environmental Engineering\n\n\nUrban Studies"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and PlanningEngineering Systems Division",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-221j-transportation-systems-fall-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:26.131428"
+    },
+    {
+      "id": "25382cc9e05236ddd6d4b833c1336417",
+      "title": "Carrier Systems",
+      "description": "Carrier systems involve the design, operation and management of transportation networks, assets, personnel, freight and passengers. In this course, we will present models and tools for analyzing, optimizing, planning, managing and controlling carrier systems.",
+      "authors": [
+        "Prof. Cynthia Barnhart",
+        "Prof. Nigel Wilson",
+        "Cynthia Barnhart\n\n\nProf"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Business",
+        "Operations Management",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-224j-carrier-systems-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:30.400701"
+    },
+    {
+      "id": "f53d064b416c303d7b598b1a434a5e16",
+      "title": "Transport Processes in the Environment",
+      "description": "This class serves as an introduction to mass transport in environmental flows, with emphasis given to river and lake systems. The class will cover the derivation and solutions to the differential form of mass conservation equations. Class topics to be covered will include: molecular and turbulent diffusion, boundary layers, dissolution, bed-water exchange, air-water exchange and particle transport.",
+      "authors": [
+        "Prof. Heidi Nepf",
+        "Heidi Nepf\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Chemical Engineering",
+        "Transport Processes",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Hydrology and Water Resource Systems"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-061-transport-processes-in-the-environment-fall-2008/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:34.799392"
+    },
+    {
+      "id": "8bf33a22c5bc9d4438cb04582a8d1db1",
+      "title": "Introduction to Civil and Environmental Engineering Design I",
+      "description": "This sophomore-level course is a project-oriented introduction to the principles and practice of engineering design. Design projects and exercises are chosen that relate to the built and natural environments. Emphasis is placed on achieving function and sustainability through choice of materials and processes, compatibility with natural cycles, and the use of active or adaptive systems. The course also encourages development of hands-on skills, teamwork, and communication; exercises and projects engage students in the building, implementation, and testing of their designs.",
+      "authors": [
+        "Prof. Harold Hemond",
+        "Prof. Heidi Nepf",
+        "Prof. Louis Bucciarelli"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Environmental Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-101-introduction-to-civil-and-environmental-engineering-design-i-fall-2005/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:39.512815"
+    },
+    {
+      "id": "dcab60260796d4b9d8e1f2cfe5141fd5",
+      "title": "Water Quality Control",
+      "description": "The course material emphasizes mathematical models for predicting distribution and fate of effluents discharged into lakes, reservoirs, rivers, estuaries, and oceans. It also focuses on formulation and structure of models as well as analytical and simple numerical solution techniques. Also discussed are the role of element cycles, such as oxygen, nitrogen, and phosphorus, as water quality indicators; offshore outfalls and diffusion; salinity intrusion in estuaries; and thermal stratification, eutrophication, and sedimentation processes in lakes and reservoirs. This course is a core requirement for the Environmental MEng program.",
+      "authors": [
+        "Dr. Eric Adams",
+        "Eric Adams\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Hydrodynamics and Coastal Engineering",
+        "Hydrology and Water Resource Systems"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-77-water-quality-control-spring-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:43.250909"
+    },
+    {
+      "id": "6693b78f9dba4392de10f8fc232905cb",
+      "title": "Introduction to Network Models",
+      "description": "This course provides an introduction to complex networks and their structure and function, with examples from engineering, applied mathematics, and social sciences. Topics include spectral graph theory, notions of centrality, random graph models, contagion phenomena, cascades and diffusion, and opinion dynamics.",
+      "authors": [
+        "Dr. Amir Ajorlou",
+        "Amir Ajorlou\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Systems Engineering",
+        "Computational Modeling and Simulation"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-022-introduction-to-network-models-fall-2018/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:46.768316"
+    },
+    {
+      "id": "3e24863b4bdf54aa34ddf012aea2adca",
+      "title": "Foundations of Software Engineering",
+      "description": "This is a foundation subject in modern software development techniques for engineering and information technology. The design and development of component-based software (using C# and .NET) is covered; data structures and algorithms for modeling, analysis, and visualization; basic problem-solving techniques; web services; and the management and maintenance of software. Includes a treatment of topics such as sorting and searching algorithms; and numerical simulation techniques. Foundation for in-depth exploration of image processing, computational geometry, finite element methods, network methods and e-business applications. This course is a core requirement for the Information Technology M. Eng. program.\n\nThis class was also offered in Course 13 (Department of Ocean Engineering) as 13.470J. In 2005, ocean engineering subjects became part of Course 2 (Department of Mechanical Engineering), and the 13.470J designation was dropped in lieu of 2.159J.",
+      "authors": [
+        "Prof. Kevin Amaratunga",
+        "Kevin Amaratunga\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringMechanical Engineering",
+        "Engineering",
+        "Computer Science",
+        "Software Design and Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-124j-foundations-of-software-engineering-fall-2000/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:50.141180"
+    },
+    {
+      "id": "fd4fc0b5d1d719f97129c2a9d88bc34b",
+      "title": "Logistical and Transportation Planning Methods",
+      "description": "The class will cover quantitative techniques of Operations Research with emphasis on applications in transportation systems analysis (urban, air, ocean, highway, pick-up and delivery systems) and in the planning and design of logistically oriented urban service systems (e.g., fire and police departments, emergency medical services, emergency repair services). It presents a unified study of functions of random variables, geometrical probability, multi-server queueing theory, spatial location theory, network analysis and graph theory, and relevant methods of simulation. There will be discussion focused on the difficulty of implementation, among other topics.",
+      "authors": [
+        "Richard C. Larson",
+        "Prof. Amedeo R. Odoni",
+        "Prof. Arnold Barnett"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringElectrical Engineering and Computer ScienceSloan School of ManagementAeronautics and AstronauticsEngineering Systems Division",
+        "Engineering",
+        "Systems Engineering",
+        "Systems Optimization",
+        "Mathematics",
+        "Probability and Statistics",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning",
+        "Urban Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-203j-logistical-and-transportation-planning-methods-fall-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:52.829961"
+    },
+    {
+      "id": "1432737d4cf37581e92d1012db4921f5",
+      "title": "Soil Behavior",
+      "description": "This class presents a detailed study of soil properties with emphasis on interpretation of field and laboratory test data and their use in soft-ground construction engineering. Topics to be covered include: consolidation and secondary compression; basic strength principles; stress-strain strength behavior of clays, emphasizing effects of sample disturbance, anisotropy, and strain rate; strength and compression of granular soils; and engineering properties of compacted soils. Some knowledge of field and laboratory testing is assumed for all students.",
+      "authors": [
+        "Prof. Charles Ladd",
+        "Dr. Lucy C. Jen",
+        "Prof. Andrew Whittle"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Geotechnical Engineering",
+        "Science",
+        "Earth Science",
+        "Geology"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-322-soil-behavior-spring-2005/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:25:56.633632"
+    },
+    {
+      "id": "6775aa0a53444131b06bf6a601706452",
+      "title": "Transportation Policy, Strategy, and Management",
+      "description": "This class surveys the current concepts, theories, and issues in strategic management of transportation organizations. It provides transportation logistics and engineering systems students with an overview of the operating context, leadership challenges, strategies, and management tools that are used in today's public and private transportation organizations. The following concepts, tools, and issues are presented in both public and private sector cases: alternative models of decision-making, strategic planning (e.g., use of SWOT analysis and scenario development), stakeholder valuation and analysis, government-based regulation and cooperation within the transportation enterprise, disaster communications, systems safety, change management, and the impact of globalization.",
+      "authors": [
+        "Prof. Joseph Coughlin",
+        "Joseph Coughlin\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Business",
+        "Operations Management",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-223j-transportation-policy-strategy-and-management-fall-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:01.334384"
+    },
+    {
+      "id": "482a9a4d223468c4fc7d8d5bc035b20a",
+      "title": "Introduction to Computers and Engineering Problem Solving",
+      "description": "This course presents the fundamentals of object-oriented software design and development, computational methods and sensing for engineering, and scientific and managerial applications. It cover topics, including design of classes, inheritance, graphical user interfaces, numerical methods, streams, threads, sensors, and data structures. Students use Java{{< sup \"®\" >}} programming language to complete weekly software assignments. **How is 1.00 different from other intro programming courses offered at MIT?** 1.00 is a first course in programming. It assumes no prior experience, and it focuses on the use of computation to solve problems in engineering, science and management. The audience for 1.00 is non-computer science majors. 1.00 does not focus on writing compilers or parsers or computing tools where the computer is the system; it focuses on engineering problems where the computer is part of the system, or is used to model a physical or logical system. 1.00 teaches the Java programming language, and it focuses on the design and development of object-oriented software for technical problems. 1.00 is taught in an active learning style. Lecture segments alternating with laboratory exercises are used in every class to allow students to put concepts into practice immediately; this teaching style generates questions and feedback, and allows the teaching staff and students to interact when concepts are first introduced to ensure that core ideas are understood. Like many MIT classes, 1.00 has weekly assignments, which are programs based on actual engineering, science or management applications. The weekly assignments build on the class material from the previous week, and require students to put the concepts taught in the small in-class labs into a larger program that uses multiple elements of Java together.",
+      "authors": [
+        "Dr. George Kocur",
+        "Dr. Christopher Cassa",
+        "Prof. Marta C. Gonzalez"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Computer Science",
+        "Programming Languages",
+        "Software Design and Engineering",
+        "Systems Engineering",
+        "Computational Science and Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-00-introduction-to-computers-and-engineering-problem-solving-spring-2012/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:05.106629"
+    },
+    {
+      "id": "b4d0ac0e93dcda0a311ee1e29b2d8e38",
+      "title": "Environmental Engineering Masters of Engineering Project",
+      "description": "This class is one of the core requirements for the Environmental Masters of Engineering program. It is designed to teach about environmental engineering through the use of case studies, computer software tools, and seminars from industrial experts. Case studies provide the basis for group projects as well as individual theses. Past case studies have included the MMR Superfund site on Cape Cod; restoration of the Florida Everglades; dredging of Boston Harbor; local watershed trading programs; appropriate wastewater treatment technology for Brazil; point-of-use water treatment for Nepal, Brownfields Development in Providence, RI, and water resource planning for the island of Cyprus. This class spans the entire academic year: students must register for the Fall term, IAP, and the Spring term.",
+      "authors": [
+        "Daniele Lantagne",
+        "Dr. Eric Adams",
+        "Dr. Peter Shanahan"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Environmental Management",
+        "Hydrology and Water Resource Systems"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-782-environmental-engineering-masters-of-engineering-project-fall-2003-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:09.791067"
+    },
+    {
+      "id": "542a921b7d6137787c170aea680a814c",
+      "title": "Mechanics of Material Systems: An Energy Approach",
+      "description": "1.033 provides an introduction to continuum mechanics and material modeling of engineering materials based on first energy principles: deformation and strain; momentum balance, stress and stress states; elasticity and elasticity bounds; plasticity and yield design. The overarching theme is a unified mechanistic language using thermodynamics, which allows understanding, modeling and design of a large range of engineering materials. This course is offered both to undergraduate (1.033) and graduate (1.57) students.",
+      "authors": [
+        "Prof. Franz-Josef Ulm",
+        "Josef Ulm\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Energy",
+        "Technology",
+        "Engineering",
+        "Materials Science and Engineering",
+        "Mechanical Engineering",
+        "Solid Mechanics",
+        "Science",
+        "Physics",
+        "Thermodynamics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-033-mechanics-of-material-systems-an-energy-approach-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:13.963550"
+    },
+    {
+      "id": "7063ece37c755f9d79dbb355620e4e96",
+      "title": "Project Management",
+      "description": "1.040 covers three important aspects of construction project management:\n\n*   the theory, methods and quantitative tools used to effectively plan, organize, and control construction projects;\n*   efficient management methods revealed through practice and research; and\n*   hands-on, practical project management knowledge from on-site situations and field trips.\n\nThe course relies on a basic project management framework in which the project life-cycle is broken into organizing, planning, monitoring, controlling and learning from old and current construction projects. Within the framework, students learn the methodologies and tools necessary for each aspect of the process as well as the theories upon which these are built. By the end of the term they are able to adapt and apply the framework to effectively manage a construction project in an Architecture/Engineering/Construction (A/E/C) organization.",
+      "authors": [
+        "Dr. Nathaniel Osgood",
+        "Nathaniel Osgood\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Business",
+        "Project Management",
+        "Engineering",
+        "Civil Engineering",
+        "Construction Management"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-040-project-management-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:18.244684"
+    },
+    {
+      "id": "32fc9c503159af11105c7a6154c90bca",
+      "title": "Transportation Flow Systems",
+      "description": "Design, operation, and management of traffic flows over complex transportation networks are the foci of this course. It covers two major topics: traffic flow modeling and traffic flow operations. Sub-topics include deterministic and probabilistic models, elements of queuing theory, and traffic assignment. Concepts are illustrated through various applications and case studies. This is a half-term subject offered during the second half of the semester.",
+      "authors": [
+        "Prof. Ismail Chabini",
+        "Prof. Amedeo R. Odoni",
+        "Ismail Chabini\n\n\nProf"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Systems Engineering",
+        "Computational Modeling and Simulation",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-225j-transportation-flow-systems-fall-2002/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:21.784243"
+    },
+    {
+      "id": "51411861ce81a52031df6a2e778a65f2",
+      "title": "Solid Mechanics Laboratory",
+      "description": "This course introduces students to basic properties of structural materials and behavior of simple structural elements and systems through a series of experiments. Students learn experimental technique, data collection, reduction and analysis, and presentation of results. Students generally take this subject during the same semester as [1.050](/courses/1-050-solid-mechanics-fall-2004), Solid Mechanics.",
+      "authors": [
+        "Prof. Louis Bucciarelli",
+        "Louis Bucciarelli\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Structural Engineering",
+        "Mechanical Engineering",
+        "Solid Mechanics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-105-solid-mechanics-laboratory-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:25.471927"
+    },
+    {
+      "id": "88ea971b44b6e16cdbadd59c24f34b5f",
+      "title": "Solid Mechanics",
+      "description": "1.050 is a sophomore-level engineering mechanics course, commonly labelled \"Statics and Strength of Materials\" or \"Solid Mechanics I.\" This course introduces students to the fundamental principles and methods of structural mechanics. Topics covered include: static equilibrium, force resultants, support conditions, analysis of determinate planar structures (beams, trusses, frames), stresses and strains in structural elements, states of stress (shear, bending, torsion), statically indeterminate systems, displacements and deformations, introduction to matrix methods, elastic stability, and approximate methods. Design exercises are used to encourage creative student initiative and systems thinking.",
+      "authors": [
+        "Prof. Louis Bucciarelli",
+        "Louis Bucciarelli\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Aerospace Engineering",
+        "Structural Mechanics",
+        "Materials Science and Engineering",
+        "Mechanical Engineering",
+        "Solid Mechanics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-050-solid-mechanics-fall-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:28.182437"
+    },
+    {
+      "id": "9b311c7ca43697a76a5476085327ebf1",
+      "title": "Ecology I: The Earth System",
+      "description": "We will cover fundamentals of ecology, considering Earth as an integrated dynamic system. Topics include coevolution of the biosphere, geosphere, atmosphere and oceans; photosynthesis and respiration; the hydrologic, carbon and nitrogen cycles. We will examine the flow of energy and materials through ecosystems; regulation of the distribution and abundance of organisms; structure and function of ecosystems, including evolution and natural selection; metabolic diversity; productivity; trophic dynamics; models of population growth, competition, mutualism and predation. This course is designated as Communication-Intensive; instruction and practice in oral and written communication provided. Biology is a recommended prerequisite.",
+      "authors": [
+        "Prof. Edward DeLong",
+        "Prof. Penny Chisholm",
+        "Penny Chisholm\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringBiology",
+        "Science",
+        "Biology",
+        "Ecology",
+        "Earth Science"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-018j-ecology-i-the-earth-system-fall-2009/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:31.469587"
+    },
+    {
+      "id": "ed4dcaae5441ae91269b3d4478302c76",
+      "title": "Mechanics and Design of Concrete Structures",
+      "description": "The main objective of 1.054/1.541 is to provide students with a rational basis of the design of reinforced concrete members and structures through advanced understanding of material and structural behavior. This course is offered to undergraduate (1.054) and graduate students (1.541). Topics covered include: Strength and Deformation of Concrete under Various States of Stress; Failure Criteria; Concrete Plasticity; Fracture Mechanics Concepts; Fundamental Behavior of Reinforced Concrete Structural Systems and their Members; Basis for Design and Code Constraints; High-performance Concrete Materials and their use in Innovative Design Solutions; Slabs: Yield Line Theory; Behavior Models and Nonlinear Analysis; and Complex Systems: Bridge Structures, Concrete Shells, and Containments.\n\n_Professor Oral Buyukozturk thanks Tzu-Yang Yu, a graduate student at MIT, for his valuable assistance in preparing course documents._",
+      "authors": [
+        "Prof. Oral Buyukozturk",
+        "Oral Buyukozturk\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Structural Engineering",
+        "Mechanical Engineering",
+        "Mechanical Design"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-054-mechanics-and-design-of-concrete-structures-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:35.284677"
+    },
+    {
+      "id": "db596ee86e19def92a4e0418da68340b",
+      "title": "Database, Internet, and Systems Integration Technologies",
+      "description": "This course addresses information technology fundamentals, including project management and software processes, data modeling, UML, relational databases and SQL. Topics covered include internet technologies, such as XML, web services, and service-oriented architectures. This course provides an introduction to security and presents the fundamentals of telecommunications and includes a project that involves requirements / design, data model, database implementation, website, security and data network. No prior programming experience required.",
+      "authors": [
+        "Dr. George Kocur",
+        "George Kocur\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Business",
+        "Information Technology",
+        "Engineering",
+        "Computer Science",
+        "Data Mining",
+        "Software Design and Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-264j-database-internet-and-systems-integration-technologies-fall-2013/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:39.712225"
+    },
+    {
+      "id": "e526d8dae864049efe74933209b548c1",
+      "title": "Structural Engineering Design",
+      "description": "This course aims at providing students with a solid background on the principles of structural engineering design. Students will be exposed to the theories and concepts of both concrete and steel design and analysis both at the element and system levels. Hands-on design experience and skills will be gained and learned through problem sets and a comprehensive design project. An understanding of real-world open-ended design issues will be developed. Besides regular lectures, weekly recitations and project discussion sessions will be held.",
+      "authors": [
+        "Prof. Oral Buyukozturk",
+        "Oral Buyukozturk\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Structural Engineering",
+        "Mechanical Engineering",
+        "Mechanical Design"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-051-structural-engineering-design-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:43.007113"
+    },
+    {
+      "id": "5897eb8d1f9349e109b5f2dd54e73f7b",
+      "title": "Motion Based Design",
+      "description": "This course presents a rational basis for the preliminary design of motion-sensitive structures. Topics covered include: analytical and numerical techniques for establishing the optimal stiffness distribution, the role of damping in controlling motion, tuned mass dampers, base isolation systems, and active structural control. Examples illustrating the application of the motion-based design paradigm to building structures subjected to seismic excitation are discussed.",
+      "authors": [
+        "Prof. Jerome Connor",
+        "Jerome Connor\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Structural Engineering",
+        "Fine Arts",
+        "Architecture",
+        "Architectural Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-561-motion-based-design-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:46.476309"
+    },
+    {
+      "id": "fe27a786946011034d1a8ee78ce855f6",
+      "title": "Project Management",
+      "description": "1.040 Project Management focuses on the management and implementation of construction projects, primarily infrastructure projects. A project refers to a temporary piece of work undertaken to create a unique product or service. Whereas operations are continuous and repeating, projects are finite and have an end date. Projects bring form or function to ideas or need. Some notable projects include the Manhattan Project (developing the first nuclear weapon); the Human Genome Project (mapping the human genome); and the Central Artery Project (Boston's \"Big Dig\"). The field of project management deals with the planning, execution, and controlling of projects.\n\nThe course is divided into three parts:\n\nPart 1: project finance  \nPart 2: project evaluation  \nPart 3: project organization\n\nThis course will cover the basic tools, skills, and knowledge necessary to successfully manage a project through its inception, design, planning, construction, and transition phases. There will be several guest lectures discussing current projects, and a construction site visit to MIT's Media Lab extension.",
+      "authors": [
+        "Prof. Fred Moavenzadeh",
+        "Fred Moavenzadeh\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Business",
+        "Project Management",
+        "Engineering",
+        "Civil Engineering",
+        "Construction Management"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-040-project-management-spring-2009/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:50.468118"
+    },
+    {
+      "id": "6a35c4e7116178e98c98c354a5f7a036",
+      "title": "Project Evaluation",
+      "description": "_1.011 Project Evaluation_ covers methodologies for evaluating civil engineering projects, which typically are large-scale and long-lived and involve many economic, financial, social and environmental factors. The course places an emphasis on dealing with uncertainty. Students learn basic techniques of engineering economics, including net present value analysis, life-cycle costing, benefit-cost analysis, and other approaches to project evaluation. Examples are drawn from both contemporary and historical projects in various fields, including transportation systems, urban development, energy and environmental projects, water resource management, telecommunications systems, and other elements of the public and private projects and programs.",
+      "authors": [
+        "Prof. Joseph Sussman",
+        "Carl D. Martland",
+        "Joseph Sussman\n\n\nCarl"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Business",
+        "Project Management",
+        "Engineering",
+        "Civil Engineering",
+        "Construction Management",
+        "Social Science",
+        "Economics",
+        "Financial Economics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-011-project-evaluation-spring-2011/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:55.393944"
+    },
+    {
+      "id": "f2febe46daf5eddef207a1aba741b34f",
+      "title": "Engineering Mechanics I",
+      "description": "This subject provides an introduction to the mechanics of materials and structures. You will be introduced to and become familiar with all relevant physical properties and fundamental laws governing the behavior of materials and structures and you will learn how to solve a variety of problems of interest to civil and environmental engineers. While there will be a chance for you to put your mathematical skills obtained in 18.01, 18.02, and eventually 18.03 to use in this subject, the emphasis is on the physical understanding of why a material or structure behaves the way it does in the engineering design of materials and structures.",
+      "authors": [
+        "Prof. Franz-Josef Ulm",
+        "Prof. Markus Buehler",
+        "Josef Ulm\n\n\nProf"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Aerospace Engineering",
+        "Structural Mechanics",
+        "Civil Engineering",
+        "Structural Engineering",
+        "Mechanical Engineering",
+        "Solid Mechanics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-050-engineering-mechanics-i-fall-2007/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:26:59.075253"
+    },
+    {
+      "id": "c6b6e6dddf8810f6ea857271b06a060d",
+      "title": "Probability and Statistics in Engineering",
+      "description": "This class covers quantitative analysis of uncertainty and risk for engineering applications. Fundamentals of probability, random processes, statistics, and decision analysis are covered, along with random variables and vectors, uncertainty propagation, conditional distributions, and second-moment analysis. System reliability is introduced. Other topics covered include Bayesian analysis and risk-based decision, estimation of distribution parameters, hypothesis testing, simple and multiple linear regressions, and Poisson and Markov processes. There is an emphasis placed on real-world applications to engineering problems.",
+      "authors": [
+        "Prof. Daniele Veneziano",
+        "Daniele Veneziano\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Mathematics",
+        "Probability and Statistics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-151-probability-and-statistics-in-engineering-spring-2005/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:01.929364"
+    },
+    {
+      "id": "89922bad7940cef7efa02419bfff7405",
+      "title": "Advanced Soil Mechanics",
+      "description": "This class presents the application of principles of soil mechanics. It considers the following topics: the origin and nature of soils; soil classification; the effective stress principle; hydraulic conductivity and seepage; stress-strain-strength behavior of cohesionless and cohesive soils and application to lateral earth stresses; bearing capacity and slope stability; consolidation theory and settlement analysis; and laboratory and field methods for evaluation of soil properties in design practice.",
+      "authors": [
+        "Prof. Charles Ladd",
+        "Dr. Lucy C. Jen",
+        "Charles Ladd\n\n\nDr"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Geotechnical Engineering",
+        "Science",
+        "Earth Science",
+        "Geology"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-361-advanced-soil-mechanics-fall-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:05.659793"
+    },
+    {
+      "id": "592a8d59b420544f79967f966e706eec",
+      "title": "Environmental Engineering Masters of Engineering Project",
+      "description": "This class is one of the core requirements for the Environmental Masters of Engineering program, in conjunction with 1.133 Masters of Engineering Concepts of Engineering Practice. It is designed to teach about environmental engineering through the use of case studies, computer software tools, and seminars from industrial experts. Case studies provide the basis for group projects as well as individual theses. Recent 1.782 projects include the MMR Superfund site on Cape Cod, appropriate wastewater treatment technology for Brazil and Honduras, point-of-use water treatment and safe storage procedures for Nepal and Ghana, Brownfields Development in Providence, RI, and water resource planning for the island of Cyprus and refugee settlements in Thailand. This class spans the entire academic year; students must register for the Fall and Spring terms.",
+      "authors": [
+        "Dr. Eric Adams",
+        "Dr. Peter Shanahan",
+        "Susan Murcott"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Hydrology and Water Resource Systems"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-782-environmental-engineering-masters-of-engineering-project-fall-2007-spring-2008/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:08.297480"
+    },
+    {
+      "id": "4834f3a3c61e95b0ba85691320908eb8",
+      "title": "Computing and Data Analysis for Environmental Applications",
+      "description": "This subject is a computer-oriented introduction to probability and data analysis. It is designed to give students the knowledge and practical experience they need to interpret lab and field data. Basic probability concepts are introduced at the outset because they provide a systematic way to describe uncertainty. They form the basis for the analysis of quantitative data in science and engineering. The MATLAB® programming language is used to perform virtual experiments and to analyze real-world data sets, many downloaded from the web. Programming applications include display and assessment of data sets, investigation of hypotheses, and identification of possible casual relationships between variables. This is the first semester that two courses, Computing and Data Analysis for Environmental Applications (1.017) and Uncertainty in Engineering (1.010), are being jointly offered and taught as a single course.",
+      "authors": [
+        "Prof. Dennis McLaughlin"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Computer Science",
+        "Data Mining",
+        "Environmental Engineering",
+        "Mathematics",
+        "Probability and Statistics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-017-computing-and-data-analysis-for-environmental-applications-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:12.130054"
+    },
+    {
+      "id": "a2505b439d7cd45eadb909a40789db55",
+      "title": "Aquatic Chemistry",
+      "description": "This course details the quantitative treatment of chemical processes in aquatic systems such as lakes, oceans, rivers, estuaries, groundwaters, and wastewaters. It includes a brief review of chemical thermodynamics that is followed by discussion of acid-base, precipitation-dissolution, coordination, and reduction-oxidation reactions. Emphasis is on equilibrium calculations as a tool for understanding the variables that govern the chemical composition of aquatic systems and the fate of inorganic pollutants.\n\nThis course is offered through The [MIT/WHOI Joint Program](http://web.mit.edu/mit-whoi/www/). The MIT/WHOI Joint Program is one of the premier marine science graduate programs in the world. It draws on the complementary strengths and approaches of two great institutions: the Massachusetts Institute of Technology (MIT) and the Woods Hole Oceanographic Institution (WHOI).",
+      "authors": [
+        "Dr. Jeff Seewald",
+        "Dr. Jim Moffett",
+        "Dr. Meg Tivey"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Hydrodynamics and Coastal Engineering",
+        "Hydrology and Water Resource Systems",
+        "Science",
+        "Chemistry"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-76-aquatic-chemistry-fall-2005/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:14.740199"
+    },
+    {
+      "id": "693b5305aef82e49363deff3d6dcc2bc",
+      "title": "Advanced Geotechnical Engineering",
+      "description": "1.364 examines site characterization and geotechnical aspects of the design and construction of foundation systems. Topics include: site investigation (with emphasis on in situ testing), shallow (footings and raftings) and deep (piles and caissons) foundations, excavation support systems, groundwater control, slope stability, soil improvement (compaction, soil reinforcement, etc.), and construction monitoring. This course is a core requirement for the Geotechnical Master of Engineering program at MIT.",
+      "authors": [
+        "Prof. Andrew Whittle",
+        "Andrew Whittle\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Geotechnical Engineering",
+        "Structural Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-364-advanced-geotechnical-engineering-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:18.956488"
+    },
+    {
+      "id": "c4312f1259935ca83e08e42e7f27b2fb",
+      "title": "The Impact of Globalization on the Built Environment",
+      "description": "The course is designed to provide a better understanding of the built environment, globalization, the current financial crisis and the impact of these factors on the rapidly changing and evolving international architecture, engineering, construction fields.\n\nWe will, hopefully, obtain a better understanding of how these forces of globalization and the current financial crisis are having an impact on the built environment and how they will affect firms and your future career opportunities. We will also identify, review and discuss best practices and lessons that can be learned from recent events.\n\nWe will explore the \"international built environment\" in detail, examining how it functions and asking what are the managerial, entrepreneurial and professional opportunities, challenges and risks in it, especially growing crossover and multi-disciplinary opportunities; and we will seek to understand what makes this \"built environment\" so different from other sectors.",
+      "authors": [
+        "Mr. Derish M. Wolff",
+        "Prof. Fred Moavenzadeh",
+        "Fred Moavenzadeh\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and PlanningEngineering Systems Division",
+        "Business",
+        "Globalization",
+        "Engineering",
+        "Civil Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-463j-the-impact-of-globalization-on-the-built-environment-fall-2009/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:23.014490"
+    },
+    {
+      "id": "1c1340d13b25212ecc3a127a9e2d1ff5",
+      "title": "E-Commerce and the Internet in Real Estate and Construction",
+      "description": "1.464 examines the long term effects of information technology on business strategy in the real estate and construction industry. Considerations include: supply chain, allocation of risk, impact on contract obligations and security, trends toward consolidation, and the convergence of information transparency and personal effectiveness. Resources are drawn from the world of dot.com entrepreneurship and \"old economy\" responses.",
+      "authors": [
+        "Dr. John Macomber",
+        "John Macomber\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Business",
+        "Information Technology",
+        "Operations Management",
+        "Real Estate"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-464-e-commerce-and-the-internet-in-real-estate-and-construction-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:25.917376"
+    },
+    {
+      "id": "265211ba3923b644bc632f4f71def949",
+      "title": "Atmospheric Chemistry",
+      "description": "This course provides a detailed overview of the chemical transformations that control the abundances of key trace species in the Earth's atmosphere. Emphasizes the effects of human activity on air quality and climate. Topics include photochemistry, kinetics, and thermodynamics important to the chemistry of the atmosphere; stratospheric ozone depletion; oxidation chemistry of the troposphere; photochemical smog; aerosol chemistry; and sources and sinks of greenhouse gases and other climate forcers.",
+      "authors": [
+        "Prof. Jesse Kroll",
+        "Jesse Kroll\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil",
+        "Environmental Engineering\n\n\nChemical Engineering\n\n\nEarth"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringChemical EngineeringEarth, Atmospheric, and Planetary Sciences",
+        "Energy",
+        "Climate",
+        "Science",
+        "Earth Science",
+        "Atmospheric Science"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-84j-atmospheric-chemistry-fall-2013/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:30.010835"
+    },
+    {
+      "id": "d9578ca1effa3c0407e662a88bef7423",
+      "title": "Land, Water, Food, and Climate",
+      "description": "This reading seminar examines land, water, food, and climate in a changing world, with an emphasis on key scientific questions about the connections between natural resources and food production. Students read and discuss papers on a range of topics, including water and land resources, climate change, demography, agroecology, biotechnology, trade, and food security. The readings are supplemented by short lectures that provide context and summarize main points. The seminar provides a broad perspective on one of the defining global issues of this century. Students consider scientific controversies as well as areas of general agreement and examine practical solutions for addressing critical problems.",
+      "authors": [
+        "Prof. Dennis McLaughlin"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Energy",
+        "Climate",
+        "Renewables",
+        "Science",
+        "Earth Science",
+        "Climate Studies",
+        "Environmental Science",
+        "Sustainability"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-74-land-water-food-and-climate-fall-2020/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:33.528338"
+    },
+    {
+      "id": "69fa96438ef2b4f6fdfe34fece8dcd5a",
+      "title": "Ecology II: Engineering for Sustainability",
+      "description": "This course provides a review of physical, chemical, ecological, and economic principles used to examine interactions between humans and the natural environment. Mass balance concepts are applied to ecology, chemical kinetics, hydrology, and transportation; energy balance concepts are applied to building design, ecology, and climate change; and economic and life cycle concepts are applied to resource evaluation and engineering design. Numerical models are used to integrate concepts and to assess environmental impacts of human activities. Problem sets involve development of MATLAB® models for particular engineering applications. Some experience with computer programming is helpful but not essential.",
+      "authors": [
+        "Prof. Dennis McLaughlin"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Science",
+        "Biology",
+        "Ecology",
+        "Earth Science",
+        "Environmental Science",
+        "Sustainability"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-020-ecology-ii-engineering-for-sustainability-spring-2008/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:37.122682"
+    },
+    {
+      "id": "1369245258d9abdcd53f01d7eccf22bf",
+      "title": "Strategic Management in the Design and Construction Value Chain",
+      "description": "This course provides an overview of key concepts in strategic management in the construction, real estate, and architecture industries. Topics include supply chain analysis, market segmentation, vertical integration, competitive advantage, and industry transformation. This course is of interest to students seeking more understanding of the business dynamics of real estate and construction; seeking to provide value in firms which they may join; or seeking to build a foundation for their own entrepreneurial pursuits.",
+      "authors": [
+        "Dr. John Macomber",
+        "John Macomber\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Business",
+        "Operations Management",
+        "Supply Chain Management",
+        "Engineering",
+        "Civil Engineering",
+        "Construction Management"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-46-strategic-management-in-the-design-and-construction-value-chain-fall-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:40.938124"
+    },
+    {
+      "id": "c59c2f323dd5e42ca8d52b89337ee796",
+      "title": "Environmental Microbiology",
+      "description": "This class provides a general introduction to the diverse roles of microorganisms in natural and artificial environments. It will cover topics including: cellular architecture, energetics, and growth; evolution and gene flow; population and community dynamics; water and soil microbiology; biogeochemical cycling; and microorganisms in biodeterioration and bioremediation.",
+      "authors": [
+        "Prof. Martin Polz",
+        "Martin Polz\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Science",
+        "Biology",
+        "Microbiology",
+        "Earth Science",
+        "Environmental Science"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-89-environmental-microbiology-fall-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:44.306645"
+    },
+    {
+      "id": "0b6c67f1c970bb47d4d829198efa008e",
+      "title": "Waste Containment and Remediation Technology",
+      "description": "1.34 focuses on the geotechnical aspects of hazardous waste management, with specific emphasis on the design of land-based waste containment structures and hazardous waste remediation. Topics include: introduction to hazardous waste, definition of hazardous waste, regulatory requirements, waste characteristics, geo-chemistry, and contaminant transport; the design and operation of waste containment structures, landfills, impoundments, and mine-waste disposal; the characterization and remediation of contaminated sites, the superfund law, preliminary site assessment, site investigation techniques, and remediation technologies; and monitoring requirements.",
+      "authors": [
+        "Dr. Peter Shanahan",
+        "Peter Shanahan\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Geotechnical Engineering",
+        "Environmental Engineering",
+        "Environmental Management"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-34-waste-containment-and-remediation-technology-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:47.790187"
+    },
+    {
+      "id": "7ba8ed2c3a66d90e3a9adef7517dd35e",
+      "title": "Structural Analysis and Control",
+      "description": "This course uses computer-based methods for the analysis of large-scale structural systems. Topics covered include: modeling strategies for complex structures; application to tall buildings, cable-stayed bridges, and tension structures; introduction to the theory of active structural control; design of classical feedback control systems for civil structures; and simulation studies using customized computer software.",
+      "authors": [
+        "Prof. Jerome Connor",
+        "Jerome Connor\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Structural Engineering",
+        "Systems Engineering",
+        "Computational Modeling and Simulation"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-571-structural-analysis-and-control-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:52.754614"
+    },
+    {
+      "id": "ccc3dd257d60e823a2bd5d638533c602",
+      "title": "Transportation Policy and Environmental Limits",
+      "description": "Through a combination of lectures, cases, and class discussions this subject examines the economic and political conflict between transportation and the environment. It investigates the role of government regulation, green business and transportation policy as facilitators of economic development and environmental sustainability. It analyzes a variety of international policy problems including government-business relations; the role of interest groups, non-governmental organizations, and the public and media in the regulation of the automobile; sustainable development; global warming; the politics of risk and siting of transport facilities; environmental justice; equity; and transportation and public health in the urban metropolis. It provides students with an opportunity to apply transportation and planning methods to developing policy alternatives in the context of environmental politics.",
+      "authors": [
+        "Frederick Salvucci",
+        "Prof. Joseph Coughlin",
+        "Joseph Coughlin\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and PlanningEngineering Systems Division",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Environmental Engineering",
+        "Science",
+        "Earth Science",
+        "Environmental Science",
+        "Social Science",
+        "Public Administration",
+        "Environmental Policy",
+        "Public Policy"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-253j-transportation-policy-and-environmental-limits-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:27:56.646504"
+    },
+    {
+      "id": "a3d9786e1aeb97bd8dab504c93da2344",
+      "title": "Urban Transportation Planning",
+      "description": "This course examines the policy, politics, planning, and engineering of transportation systems in urban areas, with a special focus on the Boston area. It covers the role of the federal, state, and local government and the MPO, public transit in the era of the automobile, analysis of current trends and pattern breaks; analytical tools for transportation planning, traffic engineering, and policy analysis; the contribution of transportation to air pollution, social costs, and climate change; land use and transportation interactions, and more. Transportation sustainability is a central theme throughout the course, as well as consideration of if and how it is possible to resolve the tension between the three E's (environment, economy, and equity). The goal of this course is to elicit discussion, stimulate independent thinking, and encourage students to understand and challenge the \"conventional wisdom\" of transportation planning.",
+      "authors": [
+        "Frederick Salvucci",
+        "Environmental Engineering\n\n\nUrban Studies"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and Planning",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Social Science",
+        "Public Administration",
+        "Public Policy",
+        "Urban Studies",
+        "Transportation Planning",
+        "Urban Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-252j-urban-transportation-planning-fall-2016/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:00.768343"
+    },
+    {
+      "id": "166e0a0b88b1b171f6edc78fbebdf927",
+      "title": "Groundwater Hydrology",
+      "description": "This course covers fundamentals of subsurface flow and transport, emphasizing the role of groundwater in the hydrologic cycle, the relation of groundwater flow to geologic structure, and the management of contaminated groundwater. The class includes laboratory and computer demonstrations.",
+      "authors": [
+        "Prof. Charles Harvey",
+        "Charles Harvey\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Hydrology and Water Resource Systems",
+        "Science",
+        "Earth Science",
+        "Geology"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-72-groundwater-hydrology-fall-2005/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:04.091465"
+    },
+    {
+      "id": "a8ab581e6b5d5e6c177289cd46f90d83",
+      "title": "Chemicals in the Environment: Fate and Transport",
+      "description": "This core class in the Environmental M.Eng. program is for all students interested in the behavior of chemicals in the environment. The emphasis is on man-made chemicals; their movement through water, air, and soil; and their eventual fate. Physical transport, as well as chemical and biological sources and sinks, are discussed. Linkages to health effects, sources and control, and policy aspects are discussed and debated.",
+      "authors": [
+        "Prof. Harold Hemond",
+        "Janet Chuang"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Chemical Engineering",
+        "Transport Processes",
+        "Environmental Engineering",
+        "Hydrology and Water Resource Systems",
+        "Science",
+        "Chemistry",
+        "Earth Science",
+        "Environmental Science"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-725j-chemicals-in-the-environment-fate-and-transport-fall-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:07.863522"
+    },
+    {
+      "id": "6474e7ecd798defb5ce4053bd0445597",
+      "title": "Uncertainty in Engineering",
+      "description": "This course gives an introduction to probability and statistics, with emphasis on engineering applications. Course topics include events and their probability, the total probability and Bayes' theorems, discrete and continuous random variables and vectors, uncertainty propagation and conditional analysis. Second-moment representation of uncertainty, random sampling, estimation of distribution parameters (method of moments, maximum likelihood, Bayesian estimation), and simple and multiple linear regression. Concepts illustrated with examples from various areas of engineering and everyday life.",
+      "authors": [
+        "Prof. Daniele Veneziano",
+        "Daniele Veneziano\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Mathematics",
+        "Probability and Statistics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-010-uncertainty-in-engineering-fall-2008/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:13.025158"
+    },
+    {
+      "id": "3d39e73a8fa214c76820f2e3af27c88f",
+      "title": "Transportation Systems Analysis: Demand and Economics",
+      "description": "The main objective of this course is to give broad insight into the different facets of transportation systems, while providing a solid introduction to transportation demand and cost analyses. As part of the core in the Master of Science in Transportation program, the course will not focus on a specific transportation mode but will use the various modes to apply the theoretical and analytical concepts presented in the lectures and readings.\n\nIntroduces transportation systems analysis, stressing demand and economic aspects. Covers the key principles governing transportation planning, investment, operations and maintenance. Introduces the microeconomic concepts central to transportation systems. Topics covered include economic theories of the firm, the consumer, and the market, demand models, discrete choice analysis, cost models and production functions, and pricing theory. Application to transportation systems include congestion pricing, technological change, resource allocation, market structure and regulation, revenue forecasting, public and private transportation finance, and project evaluation; covering urban passenger transportation, freight, aviation and intelligent transportation systems.",
+      "authors": [
+        "Michael Frumin",
+        "Prof. Moshe Ben-Akiva",
+        "Environmental Engineering\n\n\nUrban Studies"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and PlanningEngineering Systems Division",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Social Science",
+        "Economics",
+        "Financial Economics",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-201j-transportation-systems-analysis-demand-and-economics-fall-2008/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:15.979645"
+    },
+    {
+      "id": "c35ce110373e994fb8c8cdbbbd32d883",
+      "title": "Transit Management",
+      "description": "This course discusses management methods of relevance to public transportation systems. Topics include strategic planning management, labor relations, maintenance planning and administration, financing, marketing and fare policy, and management information and decision support systems. The course shows how these general management tasks are dealt with in the transit industry and presents alternative strategies. It also identifies alternative arrangements for service provision, including different ways of involving the private sector in public transportation.",
+      "authors": [
+        "Prof. Nigel Wilson",
+        "Nigel Wilson\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil",
+        "Environmental Engineering\n\n\nUrban Studies"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and PlanningEngineering Systems Division",
+        "Business",
+        "Operations Management",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-259j-transit-management-fall-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:19.411574"
+    },
+    {
+      "id": "0de03b850fc9b83cea31c35ff3009e38",
+      "title": "Engineering Mechanics II",
+      "description": "This subject provides an introduction to fluid mechanics. Students are introduced to and become familiar with all relevant physical properties and fundamental laws governing the behavior of fluids and learn how to solve a variety of problems of interest to civil and environmental engineers. While there is a chance to put skills from calculus and differential equations to use in this subject, the emphasis is on physical understanding of why a fluid behaves the way it does. The aim is to make the students think as a fluid. In addition to relating a working knowledge of fluid mechanics, the subject prepares students for higher-level subjects in fluid dynamics.",
+      "authors": [
+        "Prof. David Gonzalez-Rodriguez",
+        "Prof. Ole Madsen",
+        "Ole Madsen\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Mechanical Engineering",
+        "Fluid Mechanics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-060-engineering-mechanics-ii-spring-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:23.612328"
+    },
+    {
+      "id": "85b41f43ab10fa060555d6cf14c6fce4",
+      "title": "Water and Wastewater Treatment Engineering",
+      "description": "This course is an overview of engineering approaches to protecting water quality with an emphasis on fundamental principals. Theory and conceptual design of systems for treating municipal wastewater and drinking water are discussed, as well as reactor theory, process kinetics, and models. Physical, chemical, and biological processes are presented, including sedimentation, filtration, biological treatment, disinfection, and sludge processing. Finally, there is discussion of engineered and natural processes for wastewater treatment.",
+      "authors": [
+        "Dr. Peter Shanahan",
+        "Peter Shanahan\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Hydrology and Water Resource Systems"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-85-water-and-wastewater-treatment-engineering-spring-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:28.266361"
+    },
+    {
+      "id": "8c1ece5beaf6d54df57806761cbfb355",
+      "title": "Civil Engineering Materials Laboratory",
+      "description": "This course introduces the concepts, techniques, and devices used to measure engineering properties of materials. There is an emphasis on measurement of load-deformation characteristics and failure modes of both natural and fabricated materials. Weekly experiments include data collection, data analysis, and interpretation and presentation of results.",
+      "authors": [
+        "Dr. John Germaine",
+        "John Germaine\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Materials Science and Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-103-civil-engineering-materials-laboratory-spring-2004/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:31.125820"
+    },
+    {
+      "id": "e4c67cde66bb0dcda7e80c7b6b7eb8bf",
+      "title": "Public Transportation Systems",
+      "description": "This course discusses the evolution and role of urban public transportation modes, systems, and services, focusing on bus and rail. It covers various topics, including current practice and new methods for data collection and analysis, performance monitoring, route design, frequency determination, vehicle and crew scheduling, effect of pricing policy and service quality on ridership.",
+      "authors": [
+        "Prof. Nigel Wilson",
+        "Dr. Gabriel E. Sanchez-Martinez",
+        "Dr. Neema Nassir"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and Planning",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-258j-public-transportation-systems-spring-2017/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:34.668195"
+    },
+    {
+      "id": "f43b30b870bdf55e466ab6c8df03a12b",
+      "title": "Airline Schedule Planning",
+      "description": "Explores a variety of models and optimization techniques for the solution of airline schedule planning and operations problems. Schedule design, fleet assignment, aircraft maintenance routing, crew scheduling, passenger mix, and other topics are covered. Recent models and algorithms addressing issues of model integration, robustness, and operations recovery are introduced. Modeling and solution techniques designed specifically for large-scale problems, and state-of-the-art applications of these techniques to airline problems are detailed.",
+      "authors": [
+        "Prof. Cynthia Barnhart",
+        "Cynthia Barnhart\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil",
+        "Environmental Engineering\n\n\nAeronautics"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringAeronautics and AstronauticsEngineering Systems Division",
+        "Engineering",
+        "Systems Engineering",
+        "Systems Optimization",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-206j-airline-schedule-planning-spring-2003/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:38.071034"
+    },
+    {
+      "id": "faba8fc340b09aac2b0e11b40efcab66",
+      "title": "Water Resource Systems",
+      "description": "This subject is concerned with quantitative methods for analyzing large-scale water resource problems. Topics covered include the design and management of facilities for river basin development, flood control, water supply, groundwater remediation, and other activities related to water resources. Simulation models and optimization methods are often used to support analyses of water resource problems. In this subject we will be constructing simulation models with the MATLAB® programming language and solving numerical optimization problems with the GAMS optimization package.",
+      "authors": [
+        "Prof. Dennis McLaughlin"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Aquatic Sciences and Water Quality Control",
+        "Hydrodynamics and Coastal Engineering",
+        "Hydrology and Water Resource Systems"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-731-water-resource-systems-fall-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:41.657099"
+    },
+    {
+      "id": "8b33ee577e7ed506e2d26c58b0a44ee4",
+      "title": "An Introduction to Intelligent Transportation Systems",
+      "description": "Intelligent Transportation Systems (ITS) represent a major transition in transportation on many dimensions. This course considers ITS as a lens through which one can view many transportation and societal issues. ITS is an international program intended to improve the effectiveness and efficiency of surface transportation systems through advanced technologies in information systems, communications, and sensors. In the United States, ITS represents the major post-Interstate-era program for advancing surface transportation in highways and public transportation, and is potentially comparable to the air traffic control system in impact. The readings for the class come primarily from the instructor's own text: Sussman, Joseph. [_Perspectives on Intelligent Transportation Systems (ITS)_](http://www.springeronline.com/sgw/cda/frontpage/0,11855,4-40109-22-35352196-0,00.html). New York, NY: Springer, 2005. ISBN: 0387232575.",
+      "authors": [
+        "Prof. Joseph Sussman",
+        "Joseph Sussman\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringEngineering Systems Division",
+        "Engineering",
+        "Civil Engineering",
+        "Transportation Engineering",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-212j-an-introduction-to-intelligent-transportation-systems-spring-2005/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:44.438527"
+    },
+    {
+      "id": "de3174c222c36f6a37e9f41a6a30af06",
+      "title": "Computer Algorithms in Systems Engineering",
+      "description": "This course covers concepts of computation used in analysis of engineering systems. It includes the following topics: data structures, relational database representations of engineering data, algorithms for the solution and optimization of engineering system designs (greedy, dynamic programming, branch and bound, graph algorithms, nonlinear optimization), and introduction to complexity analysis. Object-oriented, efficient implementations of algorithms are emphasized.",
+      "authors": [
+        "Dr. George Kocur",
+        "George Kocur\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Computer Science",
+        "Algorithms and Data Structures",
+        "Systems Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-204-computer-algorithms-in-systems-engineering-spring-2010/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:48.431600"
+    },
+    {
+      "id": "aa9069f73f2e5809801bd05c4b0de7b7",
+      "title": "Advanced Fluid Dynamics of the Environment",
+      "description": "Designed to familiarize students with theories and analytical tools useful for studying research literature, this course is a survey of fluid mechanical problems in the water environment. Because of the inherent nonlinearities in the governing equations, we shall emphasize the art of making analytical approximations not only for facilitating calculations but also for gaining deeper physical insight. The importance of scales will be discussed throughout the course in lectures and homeworks. Mathematical techniques beyond the usual preparation of first-year graduate students will be introduced as a part of the course. Topics vary from year to year.",
+      "authors": [
+        "Prof. Chiang Mei",
+        "Guangda Li"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Environmental Engineering",
+        "Hydrodynamics and Coastal Engineering",
+        "Mechanical Engineering",
+        "Fluid Mechanics",
+        "Ocean Engineering",
+        "Hydrodynamics"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-63-advanced-fluid-dynamics-of-the-environment-fall-2002/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:52.192720"
+    },
+    {
+      "id": "8925a19b4b54287c8e8faae09aa3f247",
+      "title": "Masters of Engineering Concepts of Engineering Practice",
+      "description": "This course is a core requirement for the Masters in Engineering program, designed to teach students about the roles of today's professional engineer and expose them to team-building skills through lectures, team workshops, and seminars. Topics include: written and oral communication, job placement skills, trends in the engineering and construction industry, risk analysis and risk management, managing public information, proposal preparation, project evaluation, project management, liability, professional ethics, and negotiation. The course draws on relevant large-scale projects to illustrate each component of the subject.",
+      "authors": [
+        "Dr. Eric Adams",
+        "Eric Adams\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Business",
+        "Project Management",
+        "Engineering",
+        "Civil Engineering"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-133-masters-of-engineering-concepts-of-engineering-practice-fall-2007/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:56.059449"
+    },
+    {
+      "id": "a40fc7fd2862cddf21d1e7f713df203f",
+      "title": "Introduction to Transportation Systems",
+      "description": "1.201J/11.545J/ESD.210J is required for all first-year Master of Science in Transportation students. It would be of interest to, as well as accessible to, students in Urban Studies and Planning, Political Science, Technology and Policy, Management, and various engineering departments. It is a good subject for those who plan to take only one subject in transportation and serves as an entry point to other transportation subjects as well.\n\nThe subject focuses on fundamental principles of transportation systems, introduces transportation systems components and networks, and addresses how one invests in and operates them effectively. The tie between transportation and related systems is emphasized.",
+      "authors": [
+        "Prof. Joseph Sussman",
+        "Prof. Nigel Wilson",
+        "Joseph Sussman\n\n\nProf"
+      ],
+      "subject": [
+        "Civil and Environmental EngineeringUrban Studies and PlanningEngineering Systems Division",
+        "Social Science",
+        "Urban Studies",
+        "Transportation Planning"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-201j-introduction-to-transportation-systems-fall-2006/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:28:59.484370"
+    },
+    {
+      "id": "f051c77da99d33aab9f964fd6dd59759",
+      "title": "Introduction to Civil Engineering Design",
+      "description": "1.012 introduces students to the theory, tools, and techniques of engineering design and creative problem-solving, as well as design issues and practices in civil engineering. The course includes several design cases, with an emphasis on built facilities (e.g., buildings, bridges and roads). Project design explicitly concerns technical approaches as well as consideration of the existing built environment, natural environment, economic and social factors, and expected life span. A large design case is introduced, which is used in the subsequent specialty area design subjects (1.031, 1.041, 1.051) and the capstone design subject (1.013).",
+      "authors": [
+        "Prof. Herbert Einstein",
+        "Herbert Einstein\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+      ],
+      "subject": [
+        "Civil and Environmental Engineering",
+        "Engineering",
+        "Civil Engineering",
+        "Construction Management"
+      ],
+      "source": "MIT",
+      "url": "https://ocw.mit.edu/courses/1-012-introduction-to-civil-engineering-design-spring-2002/",
+      "url_pdf": "",
+      "scraped_at": "2025-09-17T06:29:03.524091"
+    }
+  ]
+}

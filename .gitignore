@@ -1,20 +1,50 @@
 # Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.pytest_cache/
+*.egg-info/
 
-# Airflow/Logs/Data
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# Airflow/Logs/Data - Runtime folders
 logs/
 scraped_data/
 scraped_pdfs/
 airflow.db
+spark_data/
 
 # Docker
 *.env
 .env
-.dockerignore
 
 # IDE/OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+
+# OS specific
+*.swp
+*.swo
+*~
+
+# Test coverage
+.coverage
+htmlcov/
+.tox/
+
+# Documentation builds
+docs/_build/

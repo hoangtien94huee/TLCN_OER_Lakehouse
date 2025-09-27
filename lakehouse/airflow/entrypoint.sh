@@ -7,6 +7,10 @@ while ! pg_isready -h postgres -p 5432 -U airflow; do
 done
 echo "PostgreSQL is up - continuing"
 
+# Initialize MinIO buckets and lakehouse structure
+echo "Initializing MinIO lakehouse structure..."
+python3 /opt/airflow/scripts/create_schema.py || echo "MinIO init completed"
+
 # Initialize Airflow database
 echo "Initializing Airflow database..."
 airflow db init

@@ -4,7 +4,7 @@ FROM apache/airflow:2.7.1-python3.10
 # Switch to root user to install system dependencies
 USER root
 
-# Install system dependencies for Chrome, Selenium, PostgreSQL, and Java (for Spark)
+# Install system dependencies for Chrome, Selenium, PostgreSQL, Java (for Spark), and SASL
 RUN apt-get update && apt-get install -y \
     wget \
     gnupg \
@@ -13,22 +13,15 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     postgresql-client \
     openjdk-11-jdk \
+    libsasl2-dev \
+    libsasl2-modules \
+    libsasl2-modules-gssapi-mit \
+    build-essential \
+    python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME for Spark
+# Set JAVA_HOME for Spark client connectivity
 ENV JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
-
-# Install Apache Spark 3.5.0
-RUN wget -q https://archive.apache.org/dist/spark/spark-3.5.0/spark-3.5.0-bin-hadoop3.tgz \
-    && tar -xzf spark-3.5.0-bin-hadoop3.tgz -C /opt/ \
-    && mv /opt/spark-3.5.0-bin-hadoop3 /opt/spark \
-    && rm spark-3.5.0-bin-hadoop3.tgz \
-    && chown -R airflow:root /opt/spark
-
-# Set Spark environment variables
-ENV SPARK_HOME=/opt/spark
-ENV PATH=$PATH:$SPARK_HOME/bin:$SPARK_HOME/sbin
-ENV PYSPARK_PYTHON=/usr/local/bin/python
 
 # Install Google Chrome (latest stable)
 RUN wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
@@ -54,23 +47,16 @@ RUN mkdir -p /opt/airflow/data \
     && mkdir -p /opt/airflow/logs \
     && mkdir -p /opt/airflow/scraped_data \
     && mkdir -p /opt/airflow/database \
-    && mkdir -p /opt/airflow/spark_data \
-    && mkdir -p /opt/airflow/spark_jars
+    && mkdir -p /opt/airflow/spark_data
 
-# Download Iceberg JARs for Spark integration
-RUN wget -q https://repo1.maven.org/maven2/org/apache/iceberg/iceberg-spark-runtime-3.5_2.12/1.4.3/iceberg-spark-runtime-3.5_2.12-1.4.3.jar \
-    -O /opt/airflow/spark_jars/iceberg-spark-runtime-3.5_2.12-1.4.3.jar \
-    && wget -q https://repo1.maven.org/maven2/com/amazonaws/aws-java-sdk-bundle/1.12.565/aws-java-sdk-bundle-1.12.565.jar \
-    -O /opt/airflow/spark_jars/aws-java-sdk-bundle-1.12.565.jar \
-    && wget -q https://repo1.maven.org/maven2/org/apache/hadoop/hadoop-aws/3.3.4/hadoop-aws-3.3.4.jar \
-    -O /opt/airflow/spark_jars/hadoop-aws-3.3.4.jar
+# Note: Iceberg JARs are installed in Spark cluster containers, not here
+# Airflow only needs PySpark client to submit jobs to remote Spark cluster
 
 # Set permissions
 RUN chown -R airflow:root /opt/airflow/data \
     && chown -R airflow:root /opt/airflow/scraped_data \
     && chown -R airflow:root /opt/airflow/database \
-    && chown -R airflow:root /opt/airflow/spark_data \
-    && chown -R airflow:root /opt/airflow/spark_jars
+    && chown -R airflow:root /opt/airflow/spark_data
 
 # Switch back to airflow user
 USER airflow
@@ -78,12 +64,14 @@ USER airflow
 # Copy requirements file
 COPY requirements.txt /opt/airflow/
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r /opt/airflow/requirements.txt
+# Install Python dependencies (force no hash check to avoid mismatch)
+RUN pip install --no-cache-dir --no-deps -r /opt/airflow/requirements.txt || \
+    pip install --no-cache-dir --force-reinstall -r /opt/airflow/requirements.txt
 
-# Copy source code and dags
+# Copy source code, dags, and scripts
 COPY src/ /opt/airflow/src/
 COPY dags/ /opt/airflow/dags/
+COPY scripts/ /opt/airflow/scripts/
 
 # Copy entrypoint script
 COPY entrypoint.sh /opt/airflow/entrypoint.sh

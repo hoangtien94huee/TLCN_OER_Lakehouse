@@ -4,7 +4,7 @@ Open Textbook Library Scraper - Bronze Layer
 =============================================
 
 Standalone script to scrape Open Textbook Library and store to MinIO bronze layer.
-Based on building-lakehouse pattern.
+Based on building-lakehouse pattern with advanced Selenium support.
 """
 
 import os
@@ -12,10 +12,25 @@ import json
 import time
 import hashlib
 import requests
+import random
+import re
 from datetime import datetime
 from typing import List, Dict, Any
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
+
+# Selenium imports for live mode
+try:
+    from selenium import webdriver
+    from selenium.webdriver.chrome.options import Options
+    from selenium.webdriver.chrome.service import Service
+    from selenium.webdriver.common.by import By
+    from selenium.webdriver.support.ui import WebDriverWait
+    from selenium.webdriver.support import expected_conditions as EC
+    SELENIUM_AVAILABLE = True
+except ImportError:
+    SELENIUM_AVAILABLE = False
+    print("Warning: Selenium library not found")
 
 # MinIO imports
 try:
@@ -26,26 +41,113 @@ except ImportError:
     MINIO_AVAILABLE = False
     print("Warning: MinIO library not found")
 
+# Configuration constants
+BASE_URL = "https://open.umn.edu"
+
+# Throttling/backoff configuration via ENV (safe defaults)
+DEFAULT_DELAY_BASE_SEC = float(os.getenv('OTL_DELAY_BASE_SEC', '0.8'))
+DEFAULT_DELAY_JITTER_SEC = float(os.getenv('OTL_DELAY_JITTER_SEC', '0.4'))
+RETRY_BACKOFF_BASE_SEC = float(os.getenv('OTL_RETRY_BACKOFF_BASE_SEC', '2.0'))
+RETRY_BACKOFF_MAX_SEC = float(os.getenv('OTL_RETRY_BACKOFF_MAX_SEC', '10.0'))
+WAIT_UNTIL_CLEAR = (os.getenv('OTL_WAIT_UNTIL_CLEAR', 'false').lower() in ['1','true','yes'])
+WAIT_MAX_MINUTES = int(os.getenv('OTL_WAIT_MAX_MINUTES', '15'))
+PER_BOOK_DELAY_SEC = float(os.getenv('OTL_PER_BOOK_DELAY_SEC', '0.6'))
+SUBJECT_COOLDOWN_SEC = float(os.getenv('OTL_SUBJECT_COOLDOWN_SEC', '3.0'))
+FORCE_RANDOM_UA = (os.getenv('OTL_FORCE_RANDOM_UA', 'true').lower() in ['1','true','yes'])
+CUSTOM_UA = os.getenv('OTL_USER_AGENT', '').strip()
+PROXY_SERVER = os.getenv('OTL_PROXY', '').strip()
+BOOK_MAX_ATTEMPTS = int(os.getenv('OTL_BOOK_MAX_ATTEMPTS', '4'))
+RETRY_PDF_ON_MISS = (os.getenv('OTL_RETRY_PDF_ON_MISS', 'true').lower() in ['1','true','yes'])
+
+# Helper functions
+def _sleep(base_sec: float = DEFAULT_DELAY_BASE_SEC, jitter_sec: float = DEFAULT_DELAY_JITTER_SEC) -> None:
+    delay = max(0.0, base_sec) + max(0.0, jitter_sec) * random.random()
+    time.sleep(delay)
+
+def _backoff_sleep(attempt_index: int) -> None:
+    delay = RETRY_BACKOFF_BASE_SEC * (2 ** max(0, attempt_index - 1))
+    time.sleep(min(delay, RETRY_BACKOFF_MAX_SEC))
+
+def _with_cache_bust(url: str) -> str:
+    if not url:
+        return url
+    ts = str(int(time.time() * 1000))
+    return f"{url}&ts={ts}" if ('?' in url) else f"{url}?ts={ts}"
+
+def _pick_user_agent() -> str:
+    if CUSTOM_UA:
+        return CUSTOM_UA
+    ua_pool = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.127 Safari/537.36',
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.127 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    ]
+    return random.choice(ua_pool)
+
+def _md5_id(url: str, title: str) -> str:
+    return hashlib.md5(f"{url}_{title}".encode("utf-8")).hexdigest()
+
+def _ensure_not_retry_later(driver) -> BeautifulSoup:
+    """Ensure current page is not a 'Retry later' placeholder"""
+    soup = BeautifulSoup(driver.page_source, 'html.parser')
+    text = soup.get_text()
+    if 'Retry later' not in text:
+        return soup
+    
+    if WAIT_UNTIL_CLEAR:
+        print("[OTL] [Wait] 'Retry later' detected — waiting until it clears...")
+        start_ts = time.time()
+        attempt = 1
+        while True: 
+            if time.time() - start_ts > WAIT_MAX_MINUTES * 60:
+                print("[OTL] [Wait] Max wait time reached; proceeding.")
+                return BeautifulSoup(driver.page_source, 'html.parser')
+            _backoff_sleep(attempt)
+            attempt += 1
+            try:
+                driver.refresh()
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            except Exception:
+                pass
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            if 'Retry later' not in soup.get_text():
+                print("[OTL] [Wait] Cleared; continue.")
+                return soup
+    else:
+        print("[OTL] [Leaf] Hit 'Retry later', applying backoff...")
+        for attempt in range(1, 4):
+            _backoff_sleep(attempt)
+            try:
+                driver.refresh()
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            except Exception:
+                pass
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            if 'Retry later' not in soup.get_text():
+                break
+        return soup
+
 class OTLScraperStandalone:
     """Standalone Open Textbook Library scraper for bronze layer"""
     
     def __init__(self):
-        self.base_url = "https://open.umn.edu/opentextbooks"
+        self.base_url = BASE_URL + "/opentextbooks"
         self.source = "otl"
-        self.delay = float(os.getenv('SCRAPING_DELAY_BASE', 1.5))
+        self.delay = DEFAULT_DELAY_BASE_SEC
         self.max_books = int(os.getenv('MAX_DOCUMENTS', 50))
+        self.use_selenium = SELENIUM_AVAILABLE
         
         # MinIO setup
-        self.minio_client = self._setup_minio() if MINIO_AVAILABLE else None
         self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
+        self.minio_client = self._setup_minio() if MINIO_AVAILABLE else None
         
         # HTTP session
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': _pick_user_agent()
         })
         
-        print(f"🚀 OTL Scraper initialized - Max books: {self.max_books}")
+        print(f"OTL Scraper initialized - Max books: {self.max_books}, Selenium: {self.use_selenium}")
     
     def _setup_minio(self):
         """Setup MinIO client"""
@@ -60,17 +162,324 @@ class OTLScraperStandalone:
             # Ensure bucket exists
             if not client.bucket_exists(self.bucket):
                 client.make_bucket(self.bucket)
-                print(f"✅ Created bucket: {self.bucket}")
+                print(f"Created bucket: {self.bucket}")
             
             return client
         except Exception as e:
-            print(f"❌ MinIO setup failed: {e}")
+            print(f"MinIO setup failed: {e}")
             return None
     
-    def get_textbooks_list(self) -> List[Dict[str, Any]]:
-        """Get list of textbooks from OTL browse page"""
+    def _init_driver(self, headless: bool = True):
+        """Initialize Selenium Chrome driver with anti-detection features"""
+        if not SELENIUM_AVAILABLE:
+            return None
+            
         try:
-            print("🔍 Fetching OTL textbooks list...")
+            options = Options()
+            if headless:
+                options.add_argument("--headless")
+            options.add_argument("--no-sandbox")
+            options.add_argument("--disable-dev-shm-usage")
+            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--blink-settings=imagesEnabled=false")
+            options.add_argument("--disable-blink-features=AutomationControlled")
+            options.add_experimental_option('excludeSwitches', ['enable-automation'])
+            options.add_experimental_option('useAutomationExtension', False)
+
+            ua = _pick_user_agent() if FORCE_RANDOM_UA or CUSTOM_UA else None
+            if ua:
+                options.add_argument(f"--user-agent={ua}")
+
+            if PROXY_SERVER:
+                options.add_argument(f"--proxy-server={PROXY_SERVER}")
+            
+            try:
+                prefs = {"profile.managed_default_content_settings.images": 2}
+                options.add_experimental_option("prefs", prefs)
+            except Exception:
+                pass
+            
+            # Try ChromeDriver paths
+            chromedriver_paths = ['/usr/local/bin/chromedriver', '/usr/bin/chromedriver', 'chromedriver']
+            
+            driver = None
+            for path in chromedriver_paths:
+                try:
+                    if os.path.exists(path) or path == 'chromedriver':
+                        service = Service(path)
+                        driver = webdriver.Chrome(service=service, options=options)
+                        print(f"Selenium ready with: {path}")
+                        break
+                except Exception:
+                    continue
+            
+            if not driver:
+                driver = webdriver.Chrome(options=options)
+            
+            try:
+                driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
+                    "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+                })
+            except Exception:
+                pass
+            
+            return driver
+        except Exception as e:
+            print(f"Selenium setup failed: {e}")
+            return None
+    
+    def parse_book_detail_html(self, html: str, book_url: str, subjects: List[str]) -> Dict[str, Any]:
+        """Parse a book detail HTML into the required output schema"""
+        soup = BeautifulSoup(html, 'html.parser')
+
+        # Title
+        title = ''
+        h1 = soup.select_one('#info h1') or soup.find('h1')
+        if h1:
+            title = h1.get_text(strip=True)
+        if not title:
+            title_tag = soup.find('title')
+            title = (title_tag.get_text(strip=True) if title_tag else '').strip()
+
+        # Description
+        description = ''
+        about = soup.select_one('#AboutBook')
+        if about:
+            p = about.find('p')
+            if p:
+                description = p.get_text('\n', strip=True)
+
+        # Authors
+        authors: List[str] = []
+        for p in soup.find_all('p'):
+            txt = (p.get_text(' ', strip=True) or '')
+            if txt.lower().startswith('contributors:'):
+                raw = txt.split(':', 1)[1].strip()
+                parts = [re.sub(r'\s+', ' ', x).strip() for x in re.split(r',| and ', raw) if x.strip()]
+                for a in parts:
+                    if a and a not in authors:
+                        authors.append(a)
+                break
+        
+        if not authors:
+            for meta_name in ['author', 'book:author']:
+                for m in soup.find_all('meta', attrs={'name': meta_name}):
+                    val = (m.get('content') or '').strip()
+                    if val and val not in authors:
+                        authors.append(val)
+        
+        # Heuristic: authors appear as plain <p> lines inside #info above metadata fields
+        if not authors:
+            info_div = soup.select_one('#info')
+            if info_div:
+                started_block = False
+                for p in info_div.find_all('p'):
+                    txt = (p.get_text(' ', strip=True) or '')
+                    if not txt:
+                        continue
+                    ltxt = txt.lower()
+                    # Skip reviews and star rows
+                    if 'review' in ltxt:
+                        continue
+                    # If this looks like a metadata field, stop after we started authors block
+                    meta_prefixes = (
+                        'copyright year', 'publisher', 'language', 'isbn', 'license',
+                        'format', 'pages', 'doi', 'edition'
+                    )
+                    if any(ltxt.startswith(pref) for pref in meta_prefixes) or ':' in txt:
+                        if started_block:
+                            break
+                        else:
+                            continue
+                    # Treat as author line(s)
+                    started_block = True
+                    parts = [re.sub(r'\s+', ' ', x).strip() for x in re.split(r',| and ', txt) if x.strip()]
+                    for a in parts:
+                        if a and a not in authors:
+                            authors.append(a)
+
+        # Extract PDF URL if present
+        pdf_url = ''
+        for a in soup.select('#book-types a[href]'):
+            label = (a.get_text(strip=True) or '').lower()
+            if 'pdf' in label:
+                pdf_url = urljoin(BASE_URL, a['href'])
+                break
+
+        doc = {
+            'id': _md5_id(book_url, title or book_url),
+            'title': title,
+            'description': description,
+            'authors': authors,
+            'subject': subjects or [],
+            'source': 'Open Textbook Library',
+            'url': book_url,
+            'url_pdf': pdf_url or '',
+            'scraped_at': datetime.now().isoformat()
+        }
+        return doc
+    
+    def get_textbooks_list_selenium(self, subject_name: str = "All", subject_url: str = None) -> List[Dict[str, Any]]:
+        """Get list of textbooks using Selenium with advanced features"""
+        results = []
+        driver = self._init_driver(headless=True)
+        
+        if not driver:
+            print("Selenium not available, falling back to requests method")
+            return self.get_textbooks_list_fallback()
+        
+        try:
+            if not subject_url:
+                subject_url = f"{self.base_url}/subjects"
+            
+            print(f"[OTL] Starting scrape for subject: {subject_name}")
+            
+            # Collect listing URLs with pagination first, fallback to scroll
+            def _with_scroll(u: str) -> str:
+                if 'scroll=true' in (u or ''):
+                    return u
+                return f"{u}&scroll=true" if ('?' in u) else f"{u}?scroll=true"
+
+            current_url = _with_scroll(subject_url)
+            urls: List[str] = []
+            visited_pages: set[str] = set()
+            page_no = 1
+            
+            while len(urls) < self.max_books:
+                driver.get(current_url)
+                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                soup = _ensure_not_retry_later(driver)
+                
+                # Find textbook URLs
+                for h2 in soup.select('div.row.short-description h2 > a[href]'):
+                    href = (h2.get('href') or '').strip()
+                    if not href:
+                        continue
+                    full = urljoin(BASE_URL, href)
+                    if '/opentextbooks/textbooks/' in full and full not in urls:
+                        urls.append(full)
+                        if len(urls) >= self.max_books:
+                            break
+                
+                print(f"[OTL] Page {page_no} listing count so far: {len(urls)}")
+                
+                # Check for next page
+                next_a = soup.select_one('#pagination a[rel="next"][href]')
+                if not next_a or len(urls) >= self.max_books:
+                    break
+                    
+                next_url = _with_scroll(urljoin(BASE_URL, next_a.get('href') or ''))
+                next_url = _with_cache_bust(next_url)
+                if not next_url or next_url in visited_pages:
+                    break
+                    
+                visited_pages.add(next_url)
+                page_no += 1
+                current_url = next_url
+                _sleep()
+
+            # Fallback to scroll if pagination failed
+            if not urls:
+                print("[OTL] Pagination failed, using scroll fallback")
+                last_count = 0
+                stable_rounds = 0
+                while len(urls) < self.max_books:
+                    soup = BeautifulSoup(driver.page_source, 'html.parser')
+                    for h2 in soup.select('div.row.short-description h2 > a[href]'):
+                        href = (h2.get('href') or '').strip()
+                        if not href:
+                            continue
+                        full = urljoin(BASE_URL, href)
+                        if '/opentextbooks/textbooks/' in full and full not in urls:
+                            urls.append(full)
+                            if len(urls) >= self.max_books:
+                                break
+                    
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                    _sleep(0.4, 0.4)
+                    
+                    if len(urls) == last_count:
+                        stable_rounds += 1
+                    else:
+                        stable_rounds = 0
+                        last_count = len(urls)
+                    
+                    if stable_rounds >= 3:
+                        break
+
+            print(f"[OTL] Found {len(urls)} book URLs for subject '{subject_name}'")
+
+            # Visit each book and parse
+            for idx, url in enumerate(urls, start=1):
+                if len(results) >= self.max_books:
+                    break
+                    
+                print(f"[OTL] Scraping book {idx}/{len(urls)}: {url}")
+                
+                # Per-book delay and cache-busting
+                if PER_BOOK_DELAY_SEC > 0:
+                    time.sleep(PER_BOOK_DELAY_SEC + DEFAULT_DELAY_JITTER_SEC * random.random())
+                
+                attempts = 0
+                doc = None
+                while attempts < max(1, BOOK_MAX_ATTEMPTS):
+                    attempts += 1
+                    driver.get(_with_cache_bust(url))
+                    try:
+                        WebDriverWait(driver, 12).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                    except Exception:
+                        pass
+                    
+                    # Ensure not stuck on retry page
+                    soup = _ensure_not_retry_later(driver)
+                    
+                    # Give the page a moment for dynamic blocks
+                    _sleep(0.4, 0.4)
+                    
+                    # Scroll to trigger lazy loads
+                    try:
+                        driver.execute_script("var el=document.getElementById('Formats'); if(el){el.scrollIntoView({behavior:'instant',block:'center'});} else {window.scrollTo(0, document.body.scrollHeight);} ")
+                        WebDriverWait(driver, 4).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                    except Exception:
+                        pass
+                    
+                    html = driver.page_source
+                    doc_try = self.parse_book_detail_html(html, url, [subject_name])
+                    missing_title = not (doc_try.get('title') or '').strip()
+                    missing_pdf = not bool(doc_try.get('url_pdf'))
+                    
+                    if not missing_title and (not RETRY_PDF_ON_MISS or not missing_pdf):
+                        doc = doc_try
+                        break
+                    
+                    # If missing title or pdf, backoff and retry
+                    _backoff_sleep(attempts)
+                
+                if not doc:
+                    doc = self.parse_book_detail_html(driver.page_source, url, [subject_name])
+                
+                if doc:
+                    results.append(doc)
+                    has_pdf = 'url_pdf' in doc and bool(doc['url_pdf'])
+                    print(f"[OTL] Parsed book {idx}/{len(urls)} | title='{doc.get('title','')}' | pdf={has_pdf}")
+
+            print(f"[OTL] Selenium scraping completed: {len(results)} textbooks")
+            return results
+            
+        except Exception as e:
+            print(f"[OTL] Error in Selenium scraping: {e}")
+            return results
+        finally:
+            try:
+                driver.quit()
+            except Exception:
+                pass
+    
+    def get_textbooks_list_fallback(self) -> List[Dict[str, Any]]:
+        """Fallback method using requests"""
+        try:
+            print("Fetching OTL textbooks list with requests fallback...")
             
             textbooks = []
             page = 1
@@ -80,7 +489,7 @@ class OTLScraperStandalone:
                 if page > 1:
                     browse_url += f"?page={page}"
                 
-                print(f"📄 Fetching page {page}...")
+                print(f"Fetching page {page}...")
                 response = self.session.get(browse_url, timeout=30)
                 response.raise_for_status()
                 
@@ -133,7 +542,7 @@ class OTLScraperStandalone:
                         page_books += 1
                         
                     except Exception as e:
-                        print(f"⚠️ Error extracting textbook: {e}")
+                        print(f"Error extracting textbook: {e}")
                         continue
                 
                 if page_books == 0:
@@ -142,233 +551,99 @@ class OTLScraperStandalone:
                 page += 1
                 time.sleep(self.delay)
             
-            print(f"✅ Found {len(textbooks)} textbooks")
+            print(f"Found {len(textbooks)} textbooks")
             return textbooks
             
         except Exception as e:
-            print(f"❌ Error fetching textbooks list: {e}")
+            print(f"Error fetching textbooks list: {e}")
             return []
     
-    def scrape_textbook_details(self, textbook: Dict[str, Any]) -> Dict[str, Any]:
-        """Scrape detailed information for a textbook"""
+    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "otl", logical_date: str = None, file_type: str = "textbooks"):
+        """Save data to MinIO with organized path structure"""
+        if not self.minio_client or not documents:
+            print("MinIO not available or no documents to save")
+            return ""
+        
+        if logical_date is None:
+            logical_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # Create organized path for OTL
+        timestamp = int(time.time())
+        object_name = f"bronze/{source}/{logical_date}/{file_type}_{timestamp}.jsonl"
+        
+        # Create temporary file
+        os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
+        tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
+        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.jsonl")
+        
         try:
-            time.sleep(self.delay)
+            # Write data to temp file
+            with open(tmp_path, 'w', encoding='utf-8') as f:
+                for doc in documents:
+                    f.write(json.dumps(doc, ensure_ascii=False) + "\n")
             
-            print(f"📖 Scraping: {textbook['title']}")
+            # Upload to MinIO with organized path
+            self.minio_client.fput_object(self.bucket, object_name, tmp_path)
+            os.remove(tmp_path)
             
-            response = self.session.get(textbook['url'], timeout=30)
-            soup = BeautifulSoup(response.content, 'html.parser')
+            print(f"[MinIO] OTL saved: s3://{self.bucket}/{object_name}")
+            print(f"[MinIO] Total {len(documents)} textbooks saved")
             
-            # Extract detailed information
-            textbook_details = {
-                'id': hashlib.md5(textbook['url'].encode()).hexdigest(),
-                'title': textbook['title'],
-                'url': textbook['url'],
-                'source': self.source,
-                'description': self._extract_description(soup),
-                'authors': self._extract_authors(soup),
-                'subjects': self._extract_subjects(soup),
-                'isbn': self._extract_isbn(soup),
-                'publisher': self._extract_publisher(soup),
-                'publication_date': self._extract_publication_date(soup),
-                'language': self._extract_language(soup),
-                'format': 'textbook',
-                'license': self._extract_license(soup),
-                'download_links': self._extract_download_links(soup),
-                'reviews': self._extract_reviews(soup),
-                'raw_data': {
-                    'scraped_at': datetime.now().isoformat(),
-                    'scraper_version': '1.0'
-                }
-            }
-            
-            return textbook_details
+            return object_name
             
         except Exception as e:
-            print(f"⚠️ Error scraping textbook {textbook.get('title', 'Unknown')}: {e}")
-            return None
-    
-    def _extract_description(self, soup) -> str:
-        """Extract textbook description"""
-        desc_elem = soup.find('div', class_='description') or \
-                   soup.find('div', class_='summary') or \
-                   soup.find('div', id='description')
-        if desc_elem:
-            return desc_elem.get_text().strip()
-        return ""
-    
-    def _extract_authors(self, soup) -> List[str]:
-        """Extract author names"""
-        authors = []
-        
-        # Try different selectors
-        author_elems = soup.find_all('span', class_='author') or \
-                      soup.find_all('div', class_='author') or \
-                      soup.find_all('a', href=lambda x: x and '/author/' in str(x))
-        
-        for elem in author_elems:
-            author_name = elem.get_text().strip()
-            if author_name and author_name not in authors:
-                authors.append(author_name)
-        
-        # Try metadata approach
-        if not authors:
-            meta_elem = soup.find('meta', {'name': 'author'})
-            if meta_elem:
-                authors.append(meta_elem.get('content', '').strip())
-        
-        return authors
-    
-    def _extract_subjects(self, soup) -> List[str]:
-        """Extract subject areas"""
-        subjects = []
-        
-        # Look for subject tags/categories
-        subject_elems = soup.find_all('a', href=lambda x: x and '/subject/' in str(x)) or \
-                       soup.find_all('span', class_='subject') or \
-                       soup.find_all('div', class_='subject')
-        
-        for elem in subject_elems:
-            subject = elem.get_text().strip()
-            if subject and subject not in subjects:
-                subjects.append(subject)
-        
-        return subjects
-    
-    def _extract_isbn(self, soup) -> str:
-        """Extract ISBN if available"""
-        # Look for ISBN in various places
-        isbn_elem = soup.find(string=lambda x: x and 'ISBN' in str(x))
-        if isbn_elem:
-            import re
-            isbn_match = re.search(r'ISBN[:\s]*([0-9\-]+)', isbn_elem)
-            if isbn_match:
-                return isbn_match.group(1)
-        return ""
-    
-    def _extract_publisher(self, soup) -> str:
-        """Extract publisher information"""
-        pub_elem = soup.find('span', class_='publisher') or \
-                  soup.find('div', class_='publisher')
-        if pub_elem:
-            return pub_elem.get_text().strip()
-        return ""
-    
-    def _extract_publication_date(self, soup) -> str:
-        """Extract publication date"""
-        date_elem = soup.find('time') or \
-                   soup.find('span', class_='date') or \
-                   soup.find('div', class_='date')
-        if date_elem:
-            return date_elem.get('datetime') or date_elem.get_text().strip()
-        return ""
-    
-    def _extract_language(self, soup) -> str:
-        """Extract language"""
-        lang_elem = soup.find('span', class_='language')
-        if lang_elem:
-            return lang_elem.get_text().strip().lower()
-        return "en"  # Default to English
-    
-    def _extract_license(self, soup) -> str:
-        """Extract license information"""
-        license_elem = soup.find('a', href=lambda x: x and 'creativecommons.org' in str(x)) or \
-                      soup.find('span', class_='license')
-        if license_elem:
-            return license_elem.get_text().strip()
-        return "Open License"
-    
-    def _extract_download_links(self, soup) -> List[Dict[str, str]]:
-        """Extract download links"""
-        downloads = []
-        
-        # Look for download links
-        download_elems = soup.find_all('a', href=lambda x: x and any(ext in str(x) for ext in ['.pdf', '.epub', '.mobi', '.zip']))
-        
-        for elem in download_elems:
-            href = elem.get('href', '')
-            if href:
-                # Determine format
-                format_type = 'pdf'
-                if '.epub' in href:
-                    format_type = 'epub'
-                elif '.mobi' in href:
-                    format_type = 'mobi'
-                elif '.zip' in href:
-                    format_type = 'archive'
-                
-                downloads.append({
-                    'format': format_type,
-                    'url': href if href.startswith('http') else urljoin(self.base_url, href),
-                    'text': elem.get_text().strip()
-                })
-        
-        return downloads
-    
-    def _extract_reviews(self, soup) -> List[Dict[str, str]]:
-        """Extract reviews if available"""
-        reviews = []
-        
-        review_elems = soup.find_all('div', class_='review') or \
-                      soup.find_all('article', class_='review')
-        
-        for elem in review_elems:
-            review_text = elem.get_text().strip()
-            if review_text:
-                reviews.append({
-                    'text': review_text,
-                    'date': datetime.now().isoformat()
-                })
-        
-        return reviews
-    
-    def save_to_bronze(self, data: List[Dict[str, Any]]):
-        """Save data to bronze layer (MinIO)"""
-        if not data:
-            return
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"bronze/otl/batch_{timestamp}.json"
-        
-        # Save locally first
-        local_path = f"/tmp/{filename.replace('/', '_')}"
-        with open(local_path, 'w', encoding='utf-8') as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        
-        # Upload to MinIO if available
-        if self.minio_client:
+            print(f"[MinIO] Error saving to MinIO: {e}")
+            # Still try to remove temp file
             try:
-                self.minio_client.fput_object(self.bucket, filename, local_path)
-                print(f"💾 Saved to MinIO: {filename} ({len(data)} records)")
-                os.remove(local_path)
-            except Exception as e:
-                print(f"❌ MinIO upload failed: {e}")
-                print(f"📁 Data saved locally: {local_path}")
-        else:
-            print(f"📁 Data saved locally: {local_path}")
+                os.remove(tmp_path)
+            except:
+                pass
+            return ""
     
     def run(self):
-        """Main execution function"""
-        print("🚀 Starting OTL scraping...")
+        """Main execution function for bronze layer scraping"""
+        print("Starting OTL bronze layer scraping...")
         
-        # Get textbooks list
-        textbooks = self.get_textbooks_list()
-        if not textbooks:
-            print("❌ No textbooks found")
-            return
+        start_time = time.time()
+        documents = []
         
-        # Scrape textbook details
-        scraped_data = []
-        for idx, textbook in enumerate(textbooks):
-            details = self.scrape_textbook_details(textbook)
-            if details:
-                scraped_data.append(details)
+        try:
+            # Use Selenium scraping if available, otherwise fallback
+            if self.use_selenium:
+                documents = self.get_textbooks_list_selenium("All")
+            else:
+                documents = self.get_textbooks_list_fallback()
+            
+            # Save to MinIO bronze layer
+            if documents:
+                print("Saving to bronze layer...")
+                self.save_to_minio(documents, "otl", datetime.now().strftime("%Y-%m-%d"))
+            
+        except KeyboardInterrupt:
+            print("\n=== INTERRUPTED BY USER ===")
+            # Save current data to MinIO
+            if documents:
+                print(f"Saving emergency backup: {len(documents)} textbooks scraped")
+                self.save_to_minio(documents, "otl", datetime.now().strftime("%Y-%m-%d"), "emergency")
+            print("Data saved before exit.")
+            raise
+            
+        except Exception as e:
+            print(f"\n=== CRITICAL ERROR: {e} ===")
+            # Save current data to MinIO
+            if documents:
+                print(f"Saving emergency backup: {len(documents)} textbooks scraped")
+                self.save_to_minio(documents, "otl", datetime.now().strftime("%Y-%m-%d"), "error")
+            print("Data saved before error report.")
+            raise
         
-        # Save all data
-        if scraped_data:
-            self.save_to_bronze(scraped_data)
-        
-        print(f"✅ OTL scraping completed! Scraped {len(scraped_data)} textbooks")
+        # Statistics
+        end_time = time.time()
+        print(f"\nSTATISTICS")
+        print("=" * 30)
+        print(f"Time: {end_time - start_time:.1f} seconds")
+        print(f"OTL: {len(documents)} textbooks")
+        print(f"Bronze layer scraping completed!")
 
 def main():
     """Entry point for standalone execution"""

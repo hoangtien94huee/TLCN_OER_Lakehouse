@@ -25,14 +25,16 @@ class MinIOUtilsStandalone:
     """Standalone MinIO utilities for OER Lakehouse"""
     
     def __init__(self):
+        self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
+        
         if not MINIO_AVAILABLE:
-            print("❌ MinIO not available")
+            print(" MinIO not available")
+            self.client = None
             return
         
         self.client = self._setup_minio()
-        self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
         
-        print(f"🚀 MinIO Utils initialized for bucket: {self.bucket}")
+        print(f"MinIO Utils initialized for bucket: {self.bucket}")
     
     def _setup_minio(self):
         """Setup MinIO client"""
@@ -43,11 +45,11 @@ class MinIOUtilsStandalone:
             secure = os.getenv('MINIO_SECURE', '0') == '1'
             
             client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
-            print(f"✅ MinIO client connected to {endpoint}")
+            print(f" MinIO client connected to {endpoint}")
             return client
             
         except Exception as e:
-            print(f"❌ MinIO setup failed: {e}")
+            print(f" MinIO setup failed: {e}")
             return None
     
     def create_bucket(self, bucket_name: str = None):
@@ -60,14 +62,14 @@ class MinIOUtilsStandalone:
         try:
             if not self.client.bucket_exists(bucket_name):
                 self.client.make_bucket(bucket_name)
-                print(f"✅ Created bucket: {bucket_name}")
+                print(f"Created bucket: {bucket_name}")
             else:
-                print(f"✅ Bucket already exists: {bucket_name}")
+                print(f"Bucket already exists: {bucket_name}")
             
             return True
             
         except Exception as e:
-            print(f"❌ Error creating bucket {bucket_name}: {e}")
+            print(f" Error creating bucket {bucket_name}: {e}")
             return False
     
     def setup_lakehouse_structure(self):
@@ -110,12 +112,12 @@ class MinIOUtilsStandalone:
                     len(placeholder_content.encode('utf-8')),
                     content_type='application/json'
                 )
-            
-            print(f"✅ Lakehouse structure created in bucket {self.bucket}")
+        
+            print(f"Lakehouse structure created in bucket {self.bucket}")
             return True
             
         except Exception as e:
-            print(f"❌ Error setting up lakehouse structure: {e}")
+            print(f"Error setting up lakehouse structure: {e}")
             return False
     
     def list_objects(self, prefix: str = "", max_objects: int = 100) -> List[Dict[str, Any]]:
@@ -140,7 +142,7 @@ class MinIOUtilsStandalone:
             return objects
             
         except Exception as e:
-            print(f"❌ Error listing objects: {e}")
+            print(f"Error listing objects: {e}")
             return []
     
     def get_bucket_stats(self) -> Dict[str, Any]:
@@ -149,7 +151,7 @@ class MinIOUtilsStandalone:
             return {}
         
         try:
-            print("📊 Calculating bucket statistics...")
+            print("Calculating bucket statistics...")
             
             stats = {
                 'bucket_name': self.bucket,
@@ -215,7 +217,7 @@ class MinIOUtilsStandalone:
             return stats
             
         except Exception as e:
-            print(f"❌ Error calculating bucket stats: {e}")
+            print(f"Error calculating bucket stats: {e}")
             return {}
     
     def cleanup_old_files(self, prefix: str, days_old: int = 30):
@@ -235,11 +237,11 @@ class MinIOUtilsStandalone:
                     print(f"🗑️ Deleted old file: {obj.object_name}")
                     deleted_count += 1
             
-            print(f"✅ Cleaned up {deleted_count} old files from {prefix}")
+            print(f"Cleaned up {deleted_count} old files from {prefix}")
             return True
             
         except Exception as e:
-            print(f"❌ Error during cleanup: {e}")
+            print(f"Error during cleanup: {e}")
             return False
     
     def backup_bronze_layer(self, backup_bucket: str):
@@ -264,11 +266,11 @@ class MinIOUtilsStandalone:
                 )
                 copied_count += 1
             
-            print(f"✅ Backed up {copied_count} bronze files to {backup_bucket}")
+            print(f"Backed up {copied_count} bronze files to {backup_bucket}")
             return True
             
         except Exception as e:
-            print(f"❌ Error during backup: {e}")
+            print(f"Error during backup: {e}")
             return False
     
     def print_stats_report(self):
@@ -277,24 +279,24 @@ class MinIOUtilsStandalone:
         if not stats:
             return
         
-        print(f"\n📊 MINIO BUCKET STATISTICS REPORT")
+        print(f"\nMINIO BUCKET STATISTICS REPORT")
         print("=" * 50)
         print(f"Bucket: {stats['bucket_name']}")
         print(f"Total Objects: {stats['total_objects']:,}")
         print(f"Total Size: {self._format_bytes(stats['total_size_bytes'])}")
         print(f"Generated: {stats['generated_at']}")
         
-        print(f"\n🏗️ LAKEHOUSE LAYERS:")
+        print(f"\nLAKEHOUSE LAYERS:")
         for layer, data in stats['layers'].items():
             if data['objects'] > 0:
                 print(f"  {layer.capitalize()}: {data['objects']:,} objects, {self._format_bytes(data['size_bytes'])}")
         
-        print(f"\n📚 SOURCES:")
+        print(f"\nSOURCES:")
         for source, data in stats['sources'].items():
             if data['objects'] > 0:
                 print(f"  {source.replace('_', ' ').title()}: {data['objects']:,} objects, {self._format_bytes(data['size_bytes'])}")
         
-        print(f"\n📄 FILE TYPES:")
+        print(f"\nFILE TYPES:")
         for file_type, data in sorted(stats['file_types'].items(), key=lambda x: x[1]['objects'], reverse=True):
             if data['objects'] > 0:
                 print(f"  .{file_type}: {data['objects']:,} objects, {self._format_bytes(data['size_bytes'])}")
@@ -309,7 +311,7 @@ class MinIOUtilsStandalone:
     
     def run_maintenance(self):
         """Run maintenance tasks"""
-        print("🔧 Running MinIO maintenance...")
+        print("Running MinIO maintenance...")
         
         # Setup structure if needed
         self.setup_lakehouse_structure()
@@ -320,10 +322,10 @@ class MinIOUtilsStandalone:
         # Optional: cleanup old temporary files
         cleanup_days = int(os.getenv('CLEANUP_DAYS', 30))
         if cleanup_days > 0:
-            print(f"\n🗑️ Cleaning up files older than {cleanup_days} days...")
+            print(f"\nCleaning up files older than {cleanup_days} days...")
             self.cleanup_old_files('logs/', cleanup_days)
         
-        print("\n✅ MinIO maintenance completed!")
+        print("\nMinIO maintenance completed!")
 
 def main():
     """Entry point for standalone execution"""

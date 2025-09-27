@@ -21,6 +21,11 @@ except ImportError:
     SPARK_AVAILABLE = False
     print("Warning: PySpark not available")
 
+# Type hints
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pyspark.sql import SparkSession
+
 class GoldAnalyticsStandalone:
     """Standalone Gold layer analytics generator using Spark + Iceberg"""
     
@@ -39,8 +44,12 @@ class GoldAnalyticsStandalone:
         if self.spark:
             self._create_gold_database()
     
-    def _create_spark_session(self) -> Optional[SparkSession]:
+    def _create_spark_session(self) -> Optional["SparkSession"]:
         """Create Spark session with Iceberg configuration"""
+        if not SPARK_AVAILABLE:
+            print("Spark not available, cannot create session")
+            return None
+            
         try:
             spark = SparkSession.builder \
                 .appName("OER-Gold-Analytics") \

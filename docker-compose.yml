@@ -1,8 +1,5 @@
-networks:
-  oer-lakehouse:
-    driver: bridge
-
 services:
+  # PostgreSQL Database for Airflow metadata
   postgres:
     image: postgres:17
     container_name: oer-postgres
@@ -10,39 +7,18 @@ services:
       POSTGRES_USER: airflow
       POSTGRES_PASSWORD: airflow
       POSTGRES_DB: airflow
+      POSTGRES_PORT: 5432
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
       - "5432:5432"
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
+      test: [ "CMD", "pg_isready", "-U", "airflow" ]
       interval: 5s
       retries: 10
     restart: unless-stopped
-    networks:
-      - oer-lakehouse
 
-  # PostgreSQL for Hive Metastore
-  metastore-db:
-    image: postgres:17
-    container_name: oer-metastore-db
-    environment:
-      POSTGRES_USER: hive
-      POSTGRES_PASSWORD: hive
-      POSTGRES_DB: metastore
-    volumes:
-      - metastore_data:/var/lib/postgresql/data
-    ports:
-      - "5433:5432"
-    healthcheck:
-      test: ["CMD", "pg_isready", "-U", "hive"]
-      interval: 5s
-      retries: 10
-    restart: unless-stopped
-    networks:
-      - oer-lakehouse
-
-  # MinIO Object Storage
+  # MinIO Object Storage (for data lakehouse)
   minio:
     image: minio/minio:RELEASE.2024-06-13T22-53-53Z
     container_name: oer-minio
@@ -56,104 +32,54 @@ services:
     volumes:
       - minio_data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 10s
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    networks:
-      - oer-lakehouse
 
-  # Hive Metastore (chỉ quản lý metadata cho Iceberg tables)
-  hive-metastore:
-    image: apache/hive:3.1.3
-    container_name: oer-hive-metastore
-    depends_on:
-      metastore-db:
-        condition: service_healthy
-    environment:
-      - SERVICE_NAME=metastore
-      - DB_DRIVER=postgres
-      - SERVICE_OPTS=-Djavax.jdo.option.ConnectionDriverName=org.postgresql.Driver -Djavax.jdo.option.ConnectionURL=jdbc:postgresql://metastore-db:5432/metastore -Djavax.jdo.option.ConnectionUserName=hive -Djavax.jdo.option.ConnectionPassword=hive
+  # Jupyter Notebook for Data Exploration  
+  jupyter:
+    image: jupyter/pyspark-notebook:spark-3.5.0
+    container_name: oer-jupyter
     ports:
-      - "9083:9083"
-    restart: unless-stopped
-    networks:
-      - oer-lakehouse
-    command: >
-      bash -c "
-        /opt/hive/bin/schematool -dbType postgres -initSchema &&
-        /opt/hive/bin/hive --service metastore
-      "
-
-  # Spark Master (processing engine cho lakehouse)
-  spark-master:
-    image: bitnami/spark:3.5.0
-    container_name: oer-spark-master
+      - "8888:8888"
     environment:
-      - SPARK_MODE=master
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
-    ports:
-      - "8081:8080"  # Spark Master Web UI
-      - "7077:7077"  # Spark Master Port
+      - JUPYTER_ENABLE_LAB=yes
+      # Connect to Spark cluster
+      - SPARK_MASTER=spark://spark-master:7077
     volumes:
-      - ./lakehouse/data/spark:/opt/bitnami/spark/data
-      - ./lakehouse/data/iceberg-jars:/opt/bitnami/spark/jars/iceberg
+      - ./lakehouse/airflow/notebooks:/home/jovyan/notebooks
+      - ./lakehouse/airflow/dags:/home/jovyan/workflows
+      - ./lakehouse/airflow/src:/home/jovyan/oer_project
     depends_on:
-      - hive-metastore
-    restart: unless-stopped
-    networks:
-      - oer-lakehouse
-
-  # Spark Worker
-  spark-worker:
-    image: bitnami/spark:3.5.0
-    container_name: oer-spark-worker
-    environment:
-      - SPARK_MODE=worker
-      - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2G
-      - SPARK_WORKER_CORES=2
-      - SPARK_RPC_AUTHENTICATION_ENABLED=no
-      - SPARK_RPC_ENCRYPTION_ENABLED=no
-      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
-      - SPARK_SSL_ENABLED=no
-    depends_on:
+      - minio
       - spark-master
-    volumes:
-      - ./lakehouse/data/spark:/opt/bitnami/spark/data
-      - ./lakehouse/data/iceberg-jars:/opt/bitnami/spark/jars/iceberg
     restart: unless-stopped
-    networks:
-      - oer-lakehouse
+    command: "start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''"
 
-  # === DATA PIPELINE ===
-
-  # Airflow Orchestrator
-  airflow:
-    build: ./lakehouse/airflow
-    container_name: oer-airflow
+  # Airflow Scraper
+  oer-scraper:
+    build:
+      context: ./lakehouse/airflow
+      dockerfile: Dockerfile
+    container_name: oer-airflow-scraper
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
       spark-master:
-        condition: service_started
-      hive-metastore:
-        condition: service_started
+        condition: service_healthy
     ports:
       - "8080:8080"
     volumes:
       - ./lakehouse/data/scraped:/opt/airflow/scraped_data
+      - ./lakehouse/data:/opt/airflow/database
       - ./lakehouse/data/logs:/opt/airflow/logs
       - ./lakehouse/airflow/dags:/opt/airflow/dags
-      - ./lakehouse/airflow/src:/opt/airflow/scripts
+      - ./lakehouse/airflow/src:/opt/airflow/src
       - ./lakehouse/data/spark:/opt/airflow/spark_data
-      - ./lakehouse/data/iceberg-jars:/opt/airflow/iceberg-jars
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -164,68 +90,85 @@ services:
       - AIRFLOW__CORE__PARALLELISM=8
       - AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG=1
       - PYTHONPATH=/opt/airflow:/opt/airflow/dags
-      # MinIO configuration
+      # MinIO configuration for lakehouse storage
+      - MINIO_ENABLE=1
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_SECURE=0
       - MINIO_BUCKET=oer-lakehouse
-      # Spark configuration
-      - SPARK_MASTER_URL=spark://spark-master:7077
+      # Spark cluster configuration
+      - SPARK_MASTER=spark://spark-master:7077
       - SPARK_HOME=/opt/spark
-      # Hive Metastore configuration
-      - HIVE_METASTORE_URI=thrift://hive-metastore:9083
-      # Iceberg configuration (data stored directly in MinIO S3)
-      - ICEBERG_CATALOG_TYPE=hive
-      # Scraping configuration
-      - SCRAPING_DELAY_BASE=2.0
-      - MAX_DOCUMENTS=100
-      - BATCH_SIZE=25
+      - PYSPARK_PYTHON=/usr/local/bin/python
+      # Optional: download and upload PDFs for OTL
+      - OTL_DOWNLOAD_PDFS=0
+      - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
     restart: unless-stopped
-    networks:
-      - oer-lakehouse
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
 
-  # === DATA EXPLORATION ===
-
-  # Jupyter Notebook
-  jupyter:
-    image: jupyter/pyspark-notebook:spark-3.5.0
-    container_name: oer-jupyter
-    ports:
-      - "8888:8888"
+  # Spark Master
+  spark-master:
+    build:
+      context: ./lakehouse/spark
+      dockerfile: Dockerfile
+    container_name: oer-spark-master
     environment:
-      - JUPYTER_ENABLE_LAB=yes
-      - SPARK_MASTER=spark://spark-master:7077
-      # Iceberg configurations (lakehouse data in MinIO S3)
-      - SPARK_SQL_CATALOG_LAKEHOUSE=org.apache.iceberg.spark.SparkCatalog
-      - SPARK_SQL_CATALOG_LAKEHOUSE_TYPE=hive
-      - SPARK_SQL_CATALOG_LAKEHOUSE_URI=thrift://hive-metastore:9083
-      - SPARK_SQL_CATALOG_LAKEHOUSE_S3_ENDPOINT=http://minio:9000
-      - SPARK_SQL_EXTENSIONS=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+      - SPARK_MODE=master
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_USER=spark
+    ports:
+      - "8081:8080" # Spark Master Web UI
+      - "7077:7077" # Spark Master Port
     volumes:
-      - ./lakehouse/data/notebooks:/home/jovyan/notebooks
-      - ./lakehouse/airflow/dags:/home/jovyan/workflows
-      - ./lakehouse/airflow/src:/home/jovyan/scripts
-      - ./lakehouse/data/iceberg-jars:/usr/local/spark/jars/iceberg
+      - ./lakehouse/data/spark:/opt/spark/data
+      - ./lakehouse/data/iceberg-jars:/opt/bitnami/spark/jars/iceberg
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Spark Worker
+  spark-worker:
+    build:
+      context: ./lakehouse/spark
+      dockerfile: Dockerfile
+    container_name: oer-spark-worker
+    environment:
+      - SPARK_MODE=worker
+      - SPARK_MASTER_URL=spark://spark-master:7077
+      - SPARK_WORKER_MEMORY=2g
+      - SPARK_WORKER_CORES=2
+      - SPARK_RPC_AUTHENTICATION_ENABLED=no
+      - SPARK_RPC_ENCRYPTION_ENABLED=no
+      - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
+      - SPARK_SSL_ENABLED=no
+      - SPARK_USER=spark
+    ports:
+      - "8082:8081" # Spark Worker Web UI
+    volumes:
+      - ./lakehouse/data/spark:/opt/spark/data
+      - ./lakehouse/data/iceberg-jars:/opt/bitnami/spark/jars/iceberg
     depends_on:
       - spark-master
-      - hive-metastore
-      - minio
     restart: unless-stopped
-    networks:
-      - oer-lakehouse
-    command: "start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''"
 
 volumes:
-  # Database volumes
+  scraped_data:
+  database:
+  logs:
+  dags:
   postgres_data:
-  metastore_data:
-  
-  # Storage volumes
   minio_data:
+  spark_data:
+  notebooks:

@@ -21,7 +21,7 @@ pyspark==3.5.0
 findspark==2.0.1
 
 # Data quality and validation
-pydantic==2.4.2
+pydantic==1.10.12
 jsonschema==4.19.1
 
 # Data transformation and utilities  
@@ -31,6 +31,17 @@ python-Levenshtein==0.23.0
 
 # Text processing
 nltk==3.8.1
+
+# Video and multimedia processing
+yt-dlp==2023.9.24
+youtube-transcript-api==0.6.1
+
+# PDF processing  
+PyPDF2==3.0.1
+pdfplumber==0.9.0
+
+# File handling and utils
+pathlib2==2.3.7
 
 # Schema modeling
 dataclasses-json==0.6.1

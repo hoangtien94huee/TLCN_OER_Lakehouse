@@ -23,6 +23,11 @@ try:
 except ImportError:
     SPARK_AVAILABLE = False
     print("Warning: PySpark not available")
+    
+# Type hints
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pyspark.sql import SparkSession
 
 # MinIO imports
 try:
@@ -74,8 +79,12 @@ class SilverTransformStandalone:
             self._create_database_if_not_exists()
             self._create_table_if_not_exists()
     
-    def _create_spark_session(self) -> Optional[SparkSession]:
+    def _create_spark_session(self) -> Optional["SparkSession"]:
         """Create Spark session with Iceberg configuration"""
+        if not SPARK_AVAILABLE:
+            print("Spark not available, cannot create session")
+            return None
+            
         try:
             # Spark configuration for Iceberg
             spark = SparkSession.builder \

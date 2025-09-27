@@ -8,7 +8,17 @@ Based on building-lakehouse pattern.
 """
 
 import os
+import time
 from typing import Optional
+
+# MinIO imports
+try:
+    from minio import Minio
+    from minio.error import S3Error
+    MINIO_AVAILABLE = True
+except ImportError:
+    MINIO_AVAILABLE = False
+    print("Warning: MinIO library not found")
 
 # Spark imports
 try:
@@ -25,13 +35,14 @@ class SchemaCreatorStandalone:
     def __init__(self):
         self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
         self.spark = self._create_spark_session() if SPARK_AVAILABLE else None
+        self.minio_client = self._setup_minio() if MINIO_AVAILABLE else None
         
         # Catalog configuration
         self.catalog_name = "lakehouse"
         self.default_db = "default"
         self.gold_db = "gold"
         
-        print(f"🚀 Schema Creator initialized")
+        print(f"Schema Creator initialized")
     
     def _create_spark_session(self) -> Optional[SparkSession]:
         """Create Spark session with Iceberg configuration"""
@@ -52,12 +63,108 @@ class SchemaCreatorStandalone:
                 .getOrCreate()
             
             spark.sparkContext.setLogLevel("WARN")
-            print("✅ Spark session created for schema operations")
+            print("Spark session created for schema operations")
             return spark
             
         except Exception as e:
-            print(f"❌ Spark session creation failed: {e}")
+            print(f"Spark session creation failed: {e}")
             return None
+    
+    def _setup_minio(self) -> Optional[Minio]:
+        """Setup MinIO client and wait for availability"""
+        try:
+            endpoint = os.getenv('MINIO_ENDPOINT', 'minio:9000')
+            access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+            secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+            secure = os.getenv('MINIO_SECURE', '0') == '1'
+            
+            # Remove http:// prefix if present
+            if endpoint.startswith('http://'):
+                endpoint = endpoint[7:]
+            elif endpoint.startswith('https://'):
+                endpoint = endpoint[8:]
+                secure = True
+            
+            client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+            
+            # Wait for MinIO to be available
+            max_retries = 10
+            for i in range(max_retries):
+                try:
+                    client.list_buckets()
+                    print(f"MinIO client connected successfully")
+                    return client
+                except Exception as e:
+                    if i < max_retries - 1:
+                        print(f"Waiting for MinIO... (attempt {i+1}/{max_retries})")
+                        time.sleep(2)
+                    else:
+                        print(f"MinIO connection failed after {max_retries} attempts: {e}")
+                        return None
+            
+        except Exception as e:
+            print(f"MinIO setup failed: {e}")
+            return None
+    
+    def create_minio_structure(self):
+        """Create MinIO bucket and lakehouse directory structure"""
+        if not self.minio_client:
+            print("MinIO client not available, skipping bucket creation")
+            return False
+        
+        try:
+            print("Creating MinIO lakehouse structure...")
+            
+            # Create bucket if not exists
+            if not self.minio_client.bucket_exists(self.bucket):
+                self.minio_client.make_bucket(self.bucket)
+                print(f"Bucket {self.bucket} created")
+            else:
+                print(f"Bucket {self.bucket} already exists")
+            
+            # Create directory structure by uploading marker files
+            directories = [
+                "bronze/",
+                "bronze/mit_ocw/",
+                "bronze/openstax/",
+                "bronze/otl/",
+                "silver/",
+                "silver/oer_resources/",
+                "silver/oer_subjects/",
+                "gold/",
+                "gold/analytics/",
+                "gold/ml_features/",
+                "warehouse/",
+                "warehouse/lakehouse/",
+                "warehouse/lakehouse/default/",
+                "warehouse/lakehouse/gold/"
+            ]
+            
+            for directory in directories:
+                try:
+                    # Create a marker file to ensure directory exists
+                    marker_content = f"Directory marker for {directory}\nCreated at: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+                    
+                    from io import BytesIO
+                    marker_data = BytesIO(marker_content.encode())
+                    
+                    self.minio_client.put_object(
+                        bucket_name=self.bucket,
+                        object_name=f"{directory}.keep",
+                        data=marker_data,
+                        length=len(marker_content)
+                    )
+                    print(f"Created directory: {directory}")
+                    
+                except Exception as e:
+                    print(f"Warning: Could not create directory {directory}: {e}")
+            
+            print("MinIO lakehouse structure created successfully")
+            return True
+            
+        except Exception as e:
+            print(f"Error creating MinIO structure: {e}")
+            return False
     
     def create_databases(self):
         """Create lakehouse databases"""
@@ -65,26 +172,26 @@ class SchemaCreatorStandalone:
             return False
         
         try:
-            print("🗂️ Creating databases...")
+            print(" Creating databases...")
             
             # Default database for Silver layer
             self.spark.sql(f"""
                 CREATE DATABASE IF NOT EXISTS {self.catalog_name}.{self.default_db}
                 COMMENT 'Default database for Silver layer OER resources'
             """)
-            print(f"✅ Database {self.catalog_name}.{self.default_db} created")
+            print(f" Database {self.catalog_name}.{self.default_db} created")
             
             # Gold database for Analytics
             self.spark.sql(f"""
                 CREATE DATABASE IF NOT EXISTS {self.catalog_name}.{self.gold_db}
                 COMMENT 'Gold database for OER analytics and ML features'
             """)
-            print(f"✅ Database {self.catalog_name}.{self.gold_db} created")
+            print(f" Database {self.catalog_name}.{self.gold_db} created")
             
             return True
             
         except Exception as e:
-            print(f"❌ Error creating databases: {e}")
+            print(f" Error creating databases: {e}")
             return False
     
     def create_silver_schema(self):
@@ -93,7 +200,7 @@ class SchemaCreatorStandalone:
             return False
         
         try:
-            print("🥈 Creating Silver layer schema...")
+            print(" Creating Silver layer schema...")
             
             # Main OER resources table
             silver_table_sql = f"""
@@ -131,7 +238,7 @@ class SchemaCreatorStandalone:
             """
             
             self.spark.sql(silver_table_sql)
-            print("✅ Silver layer oer_resources table created")
+            print(" Silver layer oer_resources table created")
             
             # Create indexes for better query performance
             self.spark.sql(f"""
@@ -145,12 +252,12 @@ class SchemaCreatorStandalone:
                 PARTITIONED BY (source)
                 COMMENT 'Normalized subjects table for better search performance'
             """)
-            print("✅ Silver layer oer_subjects table created")
+            print(" Silver layer oer_subjects table created")
             
             return True
             
         except Exception as e:
-            print(f"❌ Error creating Silver schema: {e}")
+            print(f" Error creating Silver schema: {e}")
             return False
     
     def create_gold_schema(self):
@@ -159,7 +266,7 @@ class SchemaCreatorStandalone:
             return False
         
         try:
-            print("🥇 Creating Gold layer schemas...")
+            print(" Creating Gold layer schemas...")
             
             # Source summary table
             self.spark.sql(f"""
@@ -177,7 +284,7 @@ class SchemaCreatorStandalone:
                 USING iceberg
                 COMMENT 'Summary statistics by source'
             """)
-            print("✅ Gold source_summary table created")
+            print(" Gold source_summary table created")
             
             # Subject analysis table
             self.spark.sql(f"""
@@ -194,7 +301,7 @@ class SchemaCreatorStandalone:
                 PARTITIONED BY (source)
                 COMMENT 'Subject-based resource analysis'
             """)
-            print("✅ Gold subject_analysis table created")
+            print(" Gold subject_analysis table created")
             
             # Quality metrics table
             self.spark.sql(f"""
@@ -216,7 +323,7 @@ class SchemaCreatorStandalone:
                 USING iceberg
                 COMMENT 'Data quality metrics by source'
             """)
-            print("✅ Gold quality_metrics table created")
+            print(" Gold quality_metrics table created")
             
             # ML features table
             self.spark.sql(f"""
@@ -246,7 +353,7 @@ class SchemaCreatorStandalone:
                 PARTITIONED BY (source, format)
                 COMMENT 'ML features for recommendation engine'
             """)
-            print("✅ Gold ml_features table created")
+            print(" Gold ml_features table created")
             
             # Library export table
             self.spark.sql(f"""
@@ -284,12 +391,12 @@ class SchemaCreatorStandalone:
                 PARTITIONED BY (source, format)
                 COMMENT 'Optimized export for library integration'
             """)
-            print("✅ Gold library_export table created")
+            print(" Gold library_export table created")
             
             return True
             
         except Exception as e:
-            print(f"❌ Error creating Gold schemas: {e}")
+            print(f" Error creating Gold schemas: {e}")
             return False
     
     def create_system_tables(self):
@@ -298,7 +405,7 @@ class SchemaCreatorStandalone:
             return False
         
         try:
-            print("🔧 Creating system tables...")
+            print(" Creating system tables...")
             
             # Pipeline execution log
             self.spark.sql(f"""
@@ -316,7 +423,7 @@ class SchemaCreatorStandalone:
                 PARTITIONED BY (DATE(start_time))
                 COMMENT 'Pipeline execution log'
             """)
-            print("✅ System pipeline_log table created")
+            print(" System pipeline_log table created")
             
             # Data quality log
             self.spark.sql(f"""
@@ -334,12 +441,12 @@ class SchemaCreatorStandalone:
                 PARTITIONED BY (DATE(check_timestamp))
                 COMMENT 'Data quality check results'
             """)
-            print("✅ System quality_log table created")
+            print(" System quality_log table created")
             
             return True
             
         except Exception as e:
-            print(f"❌ Error creating system tables: {e}")
+            print(f" Error creating system tables: {e}")
             return False
     
     def show_schema_info(self):
@@ -348,23 +455,23 @@ class SchemaCreatorStandalone:
             return
         
         try:
-            print(f"\n📊 LAKEHOUSE SCHEMA INFORMATION")
+            print(f"\n LAKEHOUSE SCHEMA INFORMATION")
             print("=" * 50)
             
             # Show databases
-            print(f"\n🗂️ DATABASES:")
+            print(f"\n DATABASES:")
             dbs = self.spark.sql(f"SHOW DATABASES IN {self.catalog_name}").collect()
             for db in dbs:
                 print(f"  - {self.catalog_name}.{db['namespace']}")
             
             # Show Silver tables
-            print(f"\n🥈 SILVER LAYER TABLES:")
+            print(f"\n SILVER LAYER TABLES:")
             silver_tables = self.spark.sql(f"SHOW TABLES IN {self.catalog_name}.{self.default_db}").collect()
             for table in silver_tables:
                 print(f"  - {table['tableName']}")
             
             # Show Gold tables
-            print(f"\n🥇 GOLD LAYER TABLES:")
+            print(f"\n GOLD LAYER TABLES:")
             try:
                 gold_tables = self.spark.sql(f"SHOW TABLES IN {self.catalog_name}.{self.gold_db}").collect()
                 for table in gold_tables:
@@ -373,45 +480,49 @@ class SchemaCreatorStandalone:
                 print("  (Gold database not yet created)")
             
         except Exception as e:
-            print(f"⚠️ Error showing schema info: {e}")
+            print(f" Error showing schema info: {e}")
     
     def run(self):
         """Main execution function"""
-        print("🚀 Starting schema creation...")
-        
-        if not self.spark:
-            print("❌ Spark not available, cannot proceed")
-            return
+        print("Starting schema creation...")
         
         success = True
         
-        # Create databases
-        if not self.create_databases():
-            success = False
+        # First, create MinIO structure (this doesn't require Spark)
+        if not self.create_minio_structure():
+            print("Warning: MinIO structure creation failed, continuing with Spark schemas...")
         
-        # Create Silver schemas
-        if not self.create_silver_schema():
-            success = False
-        
-        # Create Gold schemas
-        if not self.create_gold_schema():
-            success = False
-        
-        # Create system tables
-        if not self.create_system_tables():
-            success = False
-        
-        # Show schema information
-        self.show_schema_info()
+        # Then create Spark schemas if available
+        if self.spark:
+            # Create databases
+            if not self.create_databases():
+                success = False
+            
+            # Create Silver schemas
+            if not self.create_silver_schema():
+                success = False
+            
+            # Create Gold schemas
+            if not self.create_gold_schema():
+                success = False
+            
+            # Create system tables
+            if not self.create_system_tables():
+                success = False
+            
+            # Show schema information
+            self.show_schema_info()
+        else:
+            print("Spark not available, skipping table schema creation")
         
         if success:
-            print(f"\n✅ All schemas created successfully!")
-            print(f"📋 Ready for data processing:")
+            print(f"\nAll schemas created successfully!")
+            print(f"Ready for data processing:")
             print(f"  1. Run bronze_*.py scripts to collect data")
             print(f"  2. Run silver_transform.py to process to Silver layer")
             print(f"  3. Run gold_analytics.py to generate analytics")
         else:
-            print(f"\n⚠️ Some schemas may have failed to create")
+            print(f"\nSome schemas may have failed to create")
         
         if self.spark:
             self.spark.stop()

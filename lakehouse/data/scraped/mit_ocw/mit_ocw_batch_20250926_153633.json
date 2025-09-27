@@ -1,0 +1,510 @@
+[
+  {
+    "id": "0b6c67f1c970bb47d4d829198efa008e",
+    "title": "Waste Containment and Remediation Technology",
+    "description": "1.34 focuses on the geotechnical aspects of hazardous waste management, with specific emphasis on the design of land-based waste containment structures and hazardous waste remediation. Topics include: introduction to hazardous waste, definition of hazardous waste, regulatory requirements, waste characteristics, geo-chemistry, and contaminant transport; the design and operation of waste containment structures, landfills, impoundments, and mine-waste disposal; the characterization and remediation of contaminated sites, the superfund law, preliminary site assessment, site investigation techniques, and remediation technologies; and monitoring requirements.",
+    "authors": [
+      "Dr. Peter Shanahan",
+      "Peter Shanahan\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Civil Engineering",
+      "Geotechnical Engineering",
+      "Environmental Engineering",
+      "Environmental Management"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-34-waste-containment-and-remediation-technology-spring-2004/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:03.614054",
+    "videos": [
+      {
+        "type": "lecture_video_page",
+        "video_id": "cac51fd03202",
+        "url": "https://ocw.mit.edu/courses/1-34-waste-containment-and-remediation-technology-spring-2004/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      },
+      {
+        "type": "lecture_video_page",
+        "video_id": "cac51fd03202",
+        "url": "https://ocw.mit.edu/courses/1-34-waste-containment-and-remediation-technology-spring-2004/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      }
+    ],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 2,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": true
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:03.614071",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "d9578ca1effa3c0407e662a88bef7423",
+    "title": "Land, Water, Food, and Climate",
+    "description": "This reading seminar examines land, water, food, and climate in a changing world, with an emphasis on key scientific questions about the connections between natural resources and food production. Students read and discuss papers on a range of topics, including water and land resources, climate change, demography, agroecology, biotechnology, trade, and food security. The readings are supplemented by short lectures that provide context and summarize main points. The seminar provides a broad perspective on one of the defining global issues of this century. Students consider scientific controversies as well as areas of general agreement and examine practical solutions for addressing critical problems.",
+    "authors": [
+      "Prof. Dennis McLaughlin"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Energy",
+      "Climate",
+      "Renewables",
+      "Science",
+      "Earth Science",
+      "Climate Studies",
+      "Environmental Science",
+      "Sustainability"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-74-land-water-food-and-climate-fall-2020/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:06.386037",
+    "videos": [],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 0,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": false
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:06.386049",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "88ea971b44b6e16cdbadd59c24f34b5f",
+    "title": "Solid Mechanics",
+    "description": "1.050 is a sophomore-level engineering mechanics course, commonly labelled \"Statics and Strength of Materials\" or \"Solid Mechanics I.\" This course introduces students to the fundamental principles and methods of structural mechanics. Topics covered include: static equilibrium, force resultants, support conditions, analysis of determinate planar structures (beams, trusses, frames), stresses and strains in structural elements, states of stress (shear, bending, torsion), statically indeterminate systems, displacements and deformations, introduction to matrix methods, elastic stability, and approximate methods. Design exercises are used to encourage creative student initiative and systems thinking.",
+    "authors": [
+      "Prof. Louis Bucciarelli",
+      "Louis Bucciarelli\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Aerospace Engineering",
+      "Structural Mechanics",
+      "Materials Science and Engineering",
+      "Mechanical Engineering",
+      "Solid Mechanics"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-050-solid-mechanics-fall-2004/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:09.740377",
+    "videos": [
+      {
+        "type": "lecture_video_page",
+        "video_id": "b62c695dee1e",
+        "url": "https://ocw.mit.edu/courses/1-050-solid-mechanics-fall-2004/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      },
+      {
+        "type": "lecture_video_page",
+        "video_id": "b62c695dee1e",
+        "url": "https://ocw.mit.edu/courses/1-050-solid-mechanics-fall-2004/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      }
+    ],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 2,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": true
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:09.740387",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "89922bad7940cef7efa02419bfff7405",
+    "title": "Advanced Soil Mechanics",
+    "description": "This class presents the application of principles of soil mechanics. It considers the following topics: the origin and nature of soils; soil classification; the effective stress principle; hydraulic conductivity and seepage; stress-strain-strength behavior of cohesionless and cohesive soils and application to lateral earth stresses; bearing capacity and slope stability; consolidation theory and settlement analysis; and laboratory and field methods for evaluation of soil properties in design practice.",
+    "authors": [
+      "Prof. Charles Ladd",
+      "Dr. Lucy C. Jen",
+      "Charles Ladd\n\n\nDr"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Civil Engineering",
+      "Geotechnical Engineering",
+      "Science",
+      "Earth Science",
+      "Geology"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-361-advanced-soil-mechanics-fall-2004/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:15.722740",
+    "videos": [
+      {
+        "type": "lecture_video_page",
+        "video_id": "b765b1f73e8d",
+        "url": "https://ocw.mit.edu/courses/1-361-advanced-soil-mechanics-fall-2004/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      },
+      {
+        "type": "lecture_video_page",
+        "video_id": "b765b1f73e8d",
+        "url": "https://ocw.mit.edu/courses/1-361-advanced-soil-mechanics-fall-2004/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      }
+    ],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 2,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": true
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:15.722749",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "b4d0ac0e93dcda0a311ee1e29b2d8e38",
+    "title": "Environmental Engineering Masters of Engineering Project",
+    "description": "This class is one of the core requirements for the Environmental Masters of Engineering program. It is designed to teach about environmental engineering through the use of case studies, computer software tools, and seminars from industrial experts. Case studies provide the basis for group projects as well as individual theses. Past case studies have included the MMR Superfund site on Cape Cod; restoration of the Florida Everglades; dredging of Boston Harbor; local watershed trading programs; appropriate wastewater treatment technology for Brazil; point-of-use water treatment for Nepal, Brownfields Development in Providence, RI, and water resource planning for the island of Cyprus. This class spans the entire academic year: students must register for the Fall term, IAP, and the Spring term.",
+    "authors": [
+      "Daniele Lantagne",
+      "Dr. Eric Adams",
+      "Dr. Peter Shanahan"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Environmental Engineering",
+      "Aquatic Sciences and Water Quality Control",
+      "Environmental Management",
+      "Hydrology and Water Resource Systems"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-782-environmental-engineering-masters-of-engineering-project-fall-2003-spring-2004/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:18.387021",
+    "videos": [],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 0,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": false
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:18.387032",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "69fa96438ef2b4f6fdfe34fece8dcd5a",
+    "title": "Ecology II: Engineering for Sustainability",
+    "description": "This course provides a review of physical, chemical, ecological, and economic principles used to examine interactions between humans and the natural environment. Mass balance concepts are applied to ecology, chemical kinetics, hydrology, and transportation; energy balance concepts are applied to building design, ecology, and climate change; and economic and life cycle concepts are applied to resource evaluation and engineering design. Numerical models are used to integrate concepts and to assess environmental impacts of human activities. Problem sets involve development of MATLAB® models for particular engineering applications. Some experience with computer programming is helpful but not essential.",
+    "authors": [
+      "Prof. Dennis McLaughlin"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Civil Engineering",
+      "Science",
+      "Biology",
+      "Ecology",
+      "Earth Science",
+      "Environmental Science",
+      "Sustainability"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-020-ecology-ii-engineering-for-sustainability-spring-2008/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:21.689217",
+    "videos": [
+      {
+        "type": "lecture_video_page",
+        "video_id": "8a0705b72ce7",
+        "url": "https://ocw.mit.edu/courses/1-020-ecology-ii-engineering-for-sustainability-spring-2008/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      },
+      {
+        "type": "lecture_video_page",
+        "video_id": "8a0705b72ce7",
+        "url": "https://ocw.mit.edu/courses/1-020-ecology-ii-engineering-for-sustainability-spring-2008/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      }
+    ],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 2,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": true
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:21.689227",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "8c1ece5beaf6d54df57806761cbfb355",
+    "title": "Civil Engineering Materials Laboratory",
+    "description": "This course introduces the concepts, techniques, and devices used to measure engineering properties of materials. There is an emphasis on measurement of load-deformation characteristics and failure modes of both natural and fabricated materials. Weekly experiments include data collection, data analysis, and interpretation and presentation of results.",
+    "authors": [
+      "Dr. John Germaine",
+      "John Germaine\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Civil Engineering",
+      "Materials Science and Engineering"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-103-civil-engineering-materials-laboratory-spring-2004/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:24.478913",
+    "videos": [
+      {
+        "type": "simulation_video_page",
+        "video_id": "44e36278c606",
+        "url": "https://ocw.mit.edu/courses/1-103-civil-engineering-materials-laboratory-spring-2004/pages/video-demonstrations/",
+        "title": "Video Demonstrations",
+        "video_category": "simulation",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      },
+      {
+        "type": "simulation_video_page",
+        "video_id": "44e36278c606",
+        "url": "https://ocw.mit.edu/courses/1-103-civil-engineering-materials-laboratory-spring-2004/pages/video-demonstrations/",
+        "title": "Video Demonstrations",
+        "video_category": "simulation",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      }
+    ],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 2,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": true
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:24.478921",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "8b33ee577e7ed506e2d26c58b0a44ee4",
+    "title": "An Introduction to Intelligent Transportation Systems",
+    "description": "Intelligent Transportation Systems (ITS) represent a major transition in transportation on many dimensions. This course considers ITS as a lens through which one can view many transportation and societal issues. ITS is an international program intended to improve the effectiveness and efficiency of surface transportation systems through advanced technologies in information systems, communications, and sensors. In the United States, ITS represents the major post-Interstate-era program for advancing surface transportation in highways and public transportation, and is potentially comparable to the air traffic control system in impact. The readings for the class come primarily from the instructor's own text: Sussman, Joseph. [_Perspectives on Intelligent Transportation Systems (ITS)_](http://www.springeronline.com/sgw/cda/frontpage/0,11855,4-40109-22-35352196-0,00.html). New York, NY: Springer, 2005. ISBN: 0387232575.",
+    "authors": [
+      "Prof. Joseph Sussman",
+      "Joseph Sussman\n\n\n\n\n\n\n                Departments\n              \n\n\n\nCivil"
+    ],
+    "subject": [
+      "Civil and Environmental EngineeringEngineering Systems Division",
+      "Engineering",
+      "Civil Engineering",
+      "Transportation Engineering",
+      "Social Science",
+      "Urban Studies",
+      "Transportation Planning"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-212j-an-introduction-to-intelligent-transportation-systems-spring-2005/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:28.100884",
+    "videos": [
+      {
+        "type": "lecture_video_page",
+        "video_id": "1bae7f0527a3",
+        "url": "https://ocw.mit.edu/courses/1-212j-an-introduction-to-intelligent-transportation-systems-spring-2005/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      },
+      {
+        "type": "lecture_video_page",
+        "video_id": "1bae7f0527a3",
+        "url": "https://ocw.mit.edu/courses/1-212j-an-introduction-to-intelligent-transportation-systems-spring-2005/pages/lecture-notes/",
+        "title": "Lecture Notes",
+        "video_category": "lecture",
+        "transcript": null,
+        "transcript_source": null,
+        "duration": null,
+        "source": "mit_ocw_page"
+      }
+    ],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 2,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": true
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:28.100894",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  },
+  {
+    "id": "a2505b439d7cd45eadb909a40789db55",
+    "title": "Aquatic Chemistry",
+    "description": "This course details the quantitative treatment of chemical processes in aquatic systems such as lakes, oceans, rivers, estuaries, groundwaters, and wastewaters. It includes a brief review of chemical thermodynamics that is followed by discussion of acid-base, precipitation-dissolution, coordination, and reduction-oxidation reactions. Emphasis is on equilibrium calculations as a tool for understanding the variables that govern the chemical composition of aquatic systems and the fate of inorganic pollutants.\n\nThis course is offered through The [MIT/WHOI Joint Program](http://web.mit.edu/mit-whoi/www/). The MIT/WHOI Joint Program is one of the premier marine science graduate programs in the world. It draws on the complementary strengths and approaches of two great institutions: the Massachusetts Institute of Technology (MIT) and the Woods Hole Oceanographic Institution (WHOI).",
+    "authors": [
+      "Dr. Jeff Seewald",
+      "Dr. Jim Moffett",
+      "Dr. Meg Tivey"
+    ],
+    "subject": [
+      "Civil and Environmental Engineering",
+      "Engineering",
+      "Environmental Engineering",
+      "Aquatic Sciences and Water Quality Control",
+      "Hydrodynamics and Coastal Engineering",
+      "Hydrology and Water Resource Systems",
+      "Science",
+      "Chemistry"
+    ],
+    "source": "MIT",
+    "url": "https://ocw.mit.edu/courses/1-76-aquatic-chemistry-fall-2005/",
+    "url_pdf": "",
+    "scraped_at": "2025-09-26T15:36:33.326353",
+    "videos": [],
+    "pdfs": [],
+    "multimedia_stats": {
+      "total_videos": 0,
+      "total_pdfs": 0,
+      "videos_with_transcripts": 0,
+      "downloaded_pdfs": 0,
+      "total_pdf_size_mb": 0,
+      "has_multimedia": false
+    },
+    "raw_data": {
+      "scraped_at": "2025-09-26T15:36:33.326367",
+      "scraper_version": "3.0",
+      "multimedia_enabled": {
+        "videos": true,
+        "pdfs": true,
+        "pdf_downloads": true
+      }
+    }
+  }
+]

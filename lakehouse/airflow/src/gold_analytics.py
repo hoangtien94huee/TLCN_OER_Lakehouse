@@ -36,10 +36,10 @@ class GoldAnalyticsStandalone:
         # Table configuration
         self.catalog_name = "lakehouse"
         self.database_name = "default"
-        self.silver_table = f"{self.catalog_name}.{self.database_name}.oer_resources"
+        self.silver_table = f"{self.catalog_name}.{self.database_name}.oer_resources_dc"
         self.gold_database = "gold"
         
-        print(f"🚀 Gold Analytics initialized")
+        print(f"Gold Analytics initialized")
         
         if self.spark:
             self._create_gold_database()
@@ -55,10 +55,8 @@ class GoldAnalyticsStandalone:
                 .appName("OER-Gold-Analytics") \
                 .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
                 .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
-                .config("spark.sql.catalog.lakehouse.type", "hive") \
-                .config("spark.sql.catalog.lakehouse.uri", os.getenv('HIVE_METASTORE_URI', 'thrift://hive-metastore:9083')) \
-                .config("spark.sql.catalog.lakehouse.warehouse", f"s3a://{self.bucket}/gold/") \
-                .config("spark.sql.catalog.lakehouse.s3.endpoint", os.getenv('MINIO_ENDPOINT', 'http://minio:9000')) \
+                .config("spark.sql.catalog.lakehouse.type", "rest") \
+                .config("spark.sql.catalog.lakehouse.uri", os.getenv('ICEBERG_REST_URI', 'http://iceberg-rest:8181')) \
                 .config("spark.hadoop.fs.s3a.access.key", os.getenv('MINIO_ACCESS_KEY', 'minioadmin')) \
                 .config("spark.hadoop.fs.s3a.secret.key", os.getenv('MINIO_SECRET_KEY', 'minioadmin')) \
                 .config("spark.hadoop.fs.s3a.endpoint", os.getenv('MINIO_ENDPOINT', 'http://minio:9000')) \
@@ -67,325 +65,350 @@ class GoldAnalyticsStandalone:
                 .getOrCreate()
             
             spark.sparkContext.setLogLevel("WARN")
-            print("✅ Spark session created for Gold layer")
+            print("Spark session created for Gold layer")
             return spark
             
         except Exception as e:
-            print(f"❌ Spark session creation failed: {e}")
+            print(f"Spark session creation failed: {e}")
             return None
     
     def _create_gold_database(self):
         """Create gold database if it doesn't exist"""
         try:
             self.spark.sql(f"CREATE DATABASE IF NOT EXISTS {self.catalog_name}.{self.gold_database}")
-            print(f"✅ Gold database {self.catalog_name}.{self.gold_database} ready")
+            print(f"Gold database {self.catalog_name}.{self.gold_database} ready")
         except Exception as e:
-            print(f"⚠️ Gold database creation warning: {e}")
+            print(f"Gold database creation warning: {e}")
     
     def create_source_summary(self):
-        """Create summary table by source"""
+        """Create summary table by source system"""
         try:
-            print("📊 Creating source summary table...")
-            
+            print("[gold] Creating source summary table...")
+
             summary_sql = f"""
                 CREATE OR REPLACE TABLE {self.catalog_name}.{self.gold_database}.source_summary
                 USING iceberg
                 AS
-                SELECT 
-                    source,
-                    count(*) as total_resources,
-                    avg(quality_score) as avg_quality_score,
-                    count(DISTINCT subjects) as unique_subjects,
-                    count(DISTINCT authors) as unique_authors,
-                    count(CASE WHEN license LIKE '%CC%' THEN 1 END) as creative_commons_count,
-                    min(created_at) as first_scraped,
-                    max(updated_at) as last_updated,
-                    current_timestamp() as analytics_generated_at
-                FROM {self.silver_table}
-                GROUP BY source
+                WITH base AS (
+                    SELECT *
+                    FROM {self.silver_table}
+                ),
+                subject_counts AS (
+                    SELECT source_system, COUNT(DISTINCT subject) AS unique_subjects
+                    FROM base
+                    LATERAL VIEW explode(dc_subject) AS subject
+                    WHERE subject IS NOT NULL AND subject != ''
+                    GROUP BY source_system
+                ),
+                creator_counts AS (
+                    SELECT source_system, COUNT(DISTINCT creator) AS unique_creators
+                    FROM base
+                    LATERAL VIEW explode(dc_creator) AS creator
+                    WHERE creator IS NOT NULL AND creator != ''
+                    GROUP BY source_system
+                )
+                SELECT
+                    b.source_system,
+                    COUNT(*) AS total_resources,
+                    AVG(b.quality_score) AS avg_quality_score,
+                    COALESCE(MAX(sc.unique_subjects), 0) AS unique_subjects,
+                    COALESCE(MAX(cc.unique_creators), 0) AS unique_creators,
+                    SUM(CASE WHEN lower(b.dc_rights) LIKE '%cc%' THEN 1 ELSE 0 END) AS creative_commons_count,
+                    MIN(b.ingested_at) AS first_ingested,
+                    MAX(b.ingested_at) AS last_ingested,
+                    CURRENT_TIMESTAMP() AS analytics_generated_at
+                FROM base b
+                LEFT JOIN subject_counts sc ON b.source_system = sc.source_system
+                LEFT JOIN creator_counts cc ON b.source_system = cc.source_system
+                GROUP BY b.source_system
             """
-            
+
             self.spark.sql(summary_sql)
-            print("✅ Source summary table created")
-            
+            print("[gold] Source summary table created")
+
         except Exception as e:
-            print(f"❌ Error creating source summary: {e}")
-    
+            print(f"[gold] Error creating source summary: {e}")
+
     def create_subject_analysis(self):
         """Create subject-based analysis table"""
         try:
-            print("📚 Creating subject analysis table...")
-            
+            print("[gold] Creating subject analysis table...")
+
             subject_sql = f"""
                 CREATE OR REPLACE TABLE {self.catalog_name}.{self.gold_database}.subject_analysis
                 USING iceberg
                 AS
-                SELECT 
-                    explode(subjects) as subject,
-                    source,
-                    format,
-                    count(*) as resource_count,
-                    avg(quality_score) as avg_quality,
-                    collect_list(title) as sample_titles,
-                    current_timestamp() as analytics_generated_at
-                FROM {self.silver_table}
-                WHERE size(subjects) > 0
-                GROUP BY explode(subjects), source, format
-                HAVING count(*) >= 2
+                WITH exploded AS (
+                    SELECT
+                        dc_identifier,
+                        dc_title,
+                        source_system,
+                        dc_type,
+                        quality_score,
+                        subject
+                    FROM {self.silver_table}
+                    LATERAL VIEW explode(dc_subject) AS subject
+                    WHERE subject IS NOT NULL AND subject != ''
+                )
+                SELECT
+                    subject,
+                    source_system,
+                    dc_type,
+                    COUNT(*) AS resource_count,
+                    AVG(quality_score) AS avg_quality,
+                    collect_list(dc_title) AS sample_titles,
+                    CURRENT_TIMESTAMP() AS analytics_generated_at
+                FROM exploded
+                GROUP BY subject, source_system, dc_type
+                HAVING COUNT(*) >= 2
                 ORDER BY resource_count DESC
             """
-            
+
             self.spark.sql(subject_sql)
-            print("✅ Subject analysis table created")
-            
+            print("[gold] Subject analysis table created")
+
         except Exception as e:
-            print(f"❌ Error creating subject analysis: {e}")
-    
+            print(f"[gold] Error creating subject analysis: {e}")
+
     def create_quality_metrics(self):
         """Create data quality metrics table"""
         try:
-            print("🎯 Creating quality metrics table...")
-            
+            print("[gold] Creating quality metrics table...")
+
             quality_sql = f"""
                 CREATE OR REPLACE TABLE {self.catalog_name}.{self.gold_database}.quality_metrics
                 USING iceberg
                 AS
-                SELECT 
-                    source,
-                    count(*) as total_resources,
-                    sum(CASE WHEN quality_score >= 0.8 THEN 1 ELSE 0 END) as high_quality_count,
-                    sum(CASE WHEN quality_score >= 0.6 THEN 1 ELSE 0 END) as medium_quality_count,
-                    sum(CASE WHEN quality_score < 0.6 THEN 1 ELSE 0 END) as low_quality_count,
-                    avg(quality_score) as avg_quality_score,
-                    min(quality_score) as min_quality_score,
-                    max(quality_score) as max_quality_score,
-                    
-                    -- Completeness metrics
-                    sum(CASE WHEN title IS NOT NULL AND title != '' THEN 1 ELSE 0 END) as title_completeness,
-                    sum(CASE WHEN description IS NOT NULL AND description != '' THEN 1 ELSE 0 END) as description_completeness,
-                    sum(CASE WHEN size(authors) > 0 THEN 1 ELSE 0 END) as authors_completeness,
-                    sum(CASE WHEN size(subjects) > 0 THEN 1 ELSE 0 END) as subjects_completeness,
-                    
-                    current_timestamp() as metrics_generated_at
+                SELECT
+                    source_system,
+                    COUNT(*) AS total_resources,
+                    SUM(CASE WHEN quality_score >= 0.8 THEN 1 ELSE 0 END) AS high_quality_count,
+                    SUM(CASE WHEN quality_score >= 0.6 AND quality_score < 0.8 THEN 1 ELSE 0 END) AS medium_quality_count,
+                    SUM(CASE WHEN quality_score < 0.6 THEN 1 ELSE 0 END) AS low_quality_count,
+                    AVG(quality_score) AS avg_quality_score,
+                    MIN(quality_score) AS min_quality_score,
+                    MAX(quality_score) AS max_quality_score,
+                    SUM(CASE WHEN dc_title IS NOT NULL AND dc_title != '' THEN 1 ELSE 0 END) AS title_completeness,
+                    SUM(CASE WHEN dc_description IS NOT NULL AND dc_description != '' THEN 1 ELSE 0 END) AS description_completeness,
+                    SUM(CASE WHEN size(dc_creator) > 0 THEN 1 ELSE 0 END) AS creator_completeness,
+                    SUM(CASE WHEN size(dc_subject) > 0 THEN 1 ELSE 0 END) AS subject_completeness,
+                    CURRENT_TIMESTAMP() AS metrics_generated_at
                 FROM {self.silver_table}
-                GROUP BY source
+                GROUP BY source_system
             """
-            
+
             self.spark.sql(quality_sql)
-            print("✅ Quality metrics table created")
-            
+            print("[gold] Quality metrics table created")
+
         except Exception as e:
-            print(f"❌ Error creating quality metrics: {e}")
-    
+            print(f"[gold] Error creating quality metrics: {e}")
+
     def create_author_analysis(self):
         """Create author productivity analysis"""
         try:
-            print("👥 Creating author analysis table...")
-            
+            print("[gold] Creating author analysis table...")
+
             author_sql = f"""
                 CREATE OR REPLACE TABLE {self.catalog_name}.{self.gold_database}.author_analysis
                 USING iceberg
                 AS
-                SELECT 
-                    explode(authors) as author,
-                    source,
-                    count(*) as resource_count,
-                    collect_list(DISTINCT format) as formats,
-                    collect_list(DISTINCT explode(subjects)) as subjects_taught,
-                    avg(quality_score) as avg_quality,
-                    min(created_at) as first_resource,
-                    max(updated_at) as latest_resource,
-                    current_timestamp() as analytics_generated_at
-                FROM {self.silver_table}
-                WHERE size(authors) > 0
-                GROUP BY explode(authors), source
-                HAVING count(*) >= 2
-                ORDER BY resource_count DESC
+                WITH expanded AS (
+                    SELECT
+                        dc_identifier,
+                        source_system,
+                        dc_type,
+                        quality_score,
+                        ingested_at,
+                        creator,
+                        subject
+                    FROM {self.silver_table}
+                    LATERAL VIEW explode(dc_creator) AS creator
+                    LATERAL VIEW explode_outer(dc_subject) AS subject
+                    WHERE creator IS NOT NULL AND creator != ''
+                )
+                SELECT
+                    creator AS author,
+                    source_system,
+                    COUNT(DISTINCT dc_identifier) AS resource_count,
+                    collect_set(dc_type) AS formats,
+                    collect_set(subject) FILTER (WHERE subject IS NOT NULL AND subject != '') AS subjects_covered,
+                    AVG(quality_score) AS avg_quality,
+                    MIN(ingested_at) AS first_resource,
+                    MAX(ingested_at) AS latest_resource,
+                    CURRENT_TIMESTAMP() AS analytics_generated_at
+                FROM expanded
+                GROUP BY creator, source_system
             """
-            
+
             self.spark.sql(author_sql)
-            print("✅ Author analysis table created")
-            
+            print("[gold] Author analysis table created")
+
         except Exception as e:
-            print(f"❌ Error creating author analysis: {e}")
-    
+            print(f"[gold] Error creating author analysis: {e}")
+
     def create_ml_features(self):
         """Create ML feature table for recommendations"""
         try:
-            print("🤖 Creating ML features table...")
-            
+            print("[gold] Creating ML features table...")
+
             ml_features_sql = f"""
                 CREATE OR REPLACE TABLE {self.catalog_name}.{self.gold_database}.ml_features
                 USING iceberg
                 AS
-                SELECT 
-                    id,
-                    title,
-                    description,
-                    source,
-                    format,
-                    language,
+                SELECT
+                    dc_identifier,
+                    dc_title,
+                    dc_description,
+                    source_system,
+                    dc_type,
+                    dc_format,
+                    dc_language,
                     quality_score,
-                    
-                    -- Text features
-                    length(title) as title_length,
-                    length(description) as description_length,
-                    size(split(description, ' ')) as description_word_count,
-                    
-                    -- Content features
-                    size(subjects) as subject_count,
-                    size(authors) as author_count,
-                    subjects,
-                    authors,
-                    
-                    -- Metadata features
-                    CASE WHEN isbn IS NOT NULL AND isbn != '' THEN 1 ELSE 0 END as has_isbn,
-                    CASE WHEN publisher IS NOT NULL AND publisher != '' THEN 1 ELSE 0 END as has_publisher,
-                    CASE WHEN license LIKE '%CC%' THEN 1 ELSE 0 END as is_creative_commons,
-                    
-                    -- Download features
-                    size(download_links) as download_options_count,
-                    
-                    -- Temporal features
-                    datediff(current_date(), to_date(created_at)) as days_since_created,
-                    
-                    current_timestamp() as features_generated_at
+                    length(dc_title) AS title_length,
+                    length(dc_description) AS description_length,
+                    size(split(coalesce(dc_description, ''), ' ')) AS description_word_count,
+                    size(dc_subject) AS subject_count,
+                    size(dc_creator) AS creator_count,
+                    dc_subject,
+                    dc_creator,
+                    CASE WHEN dc_publisher IS NOT NULL AND dc_publisher != '' THEN 1 ELSE 0 END AS has_publisher,
+                    CASE WHEN lower(dc_rights) LIKE '%cc%' THEN 1 ELSE 0 END AS is_creative_commons,
+                    size(dc_relation) AS relation_count,
+                    datediff(current_date(), to_date(dc_date)) AS days_since_reference_date,
+                    ingested_at,
+                    bronze_object,
+                    CURRENT_TIMESTAMP() AS features_generated_at
                 FROM {self.silver_table}
             """
-            
+
             self.spark.sql(ml_features_sql)
-            print("✅ ML features table created")
-            
+            print("[gold] ML features table created")
+
         except Exception as e:
-            print(f"❌ Error creating ML features: {e}")
-    
+            print(f"[gold] Error creating ML features: {e}")
+
     def create_library_export(self):
         """Create table optimized for library integration"""
         try:
-            print("📖 Creating library export table...")
-            
+            print("[gold] Creating library export table...")
+
             library_sql = f"""
                 CREATE OR REPLACE TABLE {self.catalog_name}.{self.gold_database}.library_export
                 USING iceberg
                 AS
-                SELECT 
-                    id,
-                    title,
-                    description,
-                    authors,
-                    subjects,
-                    publisher,
-                    isbn,
-                    url,
-                    license,
-                    format,
-                    language,
-                    source,
-                    publication_date,
-                    
-                    -- MARC fields mapping
-                    CASE 
-                        WHEN format = 'textbook' THEN 'Book'
-                        WHEN format = 'course' THEN 'Educational Resource'
-                        ELSE 'Online Resource'
-                    END as material_type,
-                    
-                    -- Dublin Core mapping
-                    struct(
-                        title as dc_title,
-                        authors[0] as dc_creator,
-                        description as dc_description,
-                        subjects as dc_subject,
-                        publisher as dc_publisher,
-                        publication_date as dc_date,
-                        format as dc_type,
-                        language as dc_language,
-                        license as dc_rights,
-                        url as dc_identifier
-                    ) as dublin_core_fields,
-                    
+                SELECT
+                    dc_identifier,
+                    dc_title,
+                    dc_description,
+                    dc_creator,
+                    dc_contributor,
+                    dc_subject,
+                    dc_publisher,
+                    dc_date,
+                    dc_type,
+                    dc_format,
+                    dc_language,
+                    dc_rights,
+                    dc_source,
+                    source_system,
+                    dc_relation,
                     quality_score,
-                    current_timestamp() as export_generated_at
+                    struct(
+                        dc_title AS dc_title,
+                        element_at(dc_creator, 1) AS dc_creator,
+                        dc_description AS dc_description,
+                        dc_subject AS dc_subject,
+                        dc_publisher AS dc_publisher,
+                        dc_date AS dc_date,
+                        dc_type AS dc_type,
+                        dc_language AS dc_language,
+                        dc_rights AS dc_rights,
+                        dc_identifier AS dc_identifier
+                    ) AS dublin_core_fields,
+                    CURRENT_TIMESTAMP() AS export_generated_at
                 FROM {self.silver_table}
-                WHERE quality_score >= 0.5  -- Only export quality resources
+                WHERE quality_score >= 0.5
             """
-            
+
             self.spark.sql(library_sql)
-            print("✅ Library export table created")
-            
+            print("[gold] Library export table created")
+
         except Exception as e:
-            print(f"❌ Error creating library export: {e}")
-    
+            print(f"[gold] Error creating library export: {e}")
+
     def generate_analytics_report(self):
         """Generate and display analytics report"""
         try:
-            print("\n📈 GOLD LAYER ANALYTICS REPORT")
+            print()
+            print("GOLD LAYER ANALYTICS REPORT")
             print("=" * 50)
-            
-            # Source summary
-            print("\n🗂️  SOURCE SUMMARY:")
-            source_df = self.spark.sql(f"SELECT * FROM {self.catalog_name}.{self.gold_database}.source_summary ORDER BY total_resources DESC")
+            print()
+            print("SOURCE SUMMARY:")
+            source_df = self.spark.sql(
+                f"SELECT * FROM {self.catalog_name}.{self.gold_database}.source_summary ORDER BY total_resources DESC"
+            )
             source_df.show(truncate=False)
-            
-            # Top subjects
-            print("\n📚 TOP SUBJECTS:")
-            subject_df = self.spark.sql(f"""
-                SELECT subject, sum(resource_count) as total_count 
-                FROM {self.catalog_name}.{self.gold_database}.subject_analysis 
-                GROUP BY subject 
-                ORDER BY total_count DESC 
+            print()
+            print("TOP SUBJECTS:")
+            subject_df = self.spark.sql(
+                f"""
+                SELECT subject, SUM(resource_count) AS total_count
+                FROM {self.catalog_name}.{self.gold_database}.subject_analysis
+                GROUP BY subject
+                ORDER BY total_count DESC
                 LIMIT 10
-            """)
+                """
+            )
             subject_df.show(truncate=False)
-            
-            # Quality overview
-            print("\n🎯 QUALITY OVERVIEW:")
-            quality_df = self.spark.sql(f"SELECT * FROM {self.catalog_name}.{self.gold_database}.quality_metrics")
+            print()
+            print("QUALITY OVERVIEW:")
+            quality_df = self.spark.sql(
+                f"SELECT * FROM {self.catalog_name}.{self.gold_database}.quality_metrics"
+            )
             quality_df.show(truncate=False)
-            
         except Exception as e:
-            print(f"⚠️ Error generating report: {e}")
-    
+            print(f"Error generating report: {e}")
+
     def run(self):
         """Main execution function"""
-        print("🚀 Starting Gold layer analytics generation...")
-        
+        print("Starting Gold layer analytics generation...")
+
         if not self.spark:
-            print("❌ Spark not available, cannot proceed")
+            print("Spark not available, cannot proceed")
             return
-        
+
         try:
-            # Check if Silver table exists
-            tables = self.spark.sql(f"SHOW TABLES IN {self.catalog_name}.{self.database_name}").collect()
-            silver_exists = any('oer_resources' in str(row) for row in tables)
-            
+            tables = self.spark.sql(
+                f"SHOW TABLES IN {self.catalog_name}.{self.database_name}"
+            ).collect()
+            silver_exists = any(getattr(row, 'tableName', '') == 'oer_resources_dc' for row in tables)
+
             if not silver_exists:
-                print("❌ Silver layer table not found. Run silver_transform.py first.")
+                print("Silver layer table not found. Run silver_transform.py first.")
                 return
-            
-            # Create all Gold layer tables
+
             self.create_source_summary()
             self.create_subject_analysis()
             self.create_quality_metrics()
             self.create_author_analysis()
             self.create_ml_features()
             self.create_library_export()
-            
-            # Generate report
+
             self.generate_analytics_report()
-            
-            print(f"\n✅ Gold layer analytics generation completed!")
-            print(f"📊 Available Gold tables:")
+
+            print()
+            print("Gold layer analytics generation completed!")
+            print("Available Gold tables:")
             print(f"  - {self.catalog_name}.{self.gold_database}.source_summary")
             print(f"  - {self.catalog_name}.{self.gold_database}.subject_analysis")
             print(f"  - {self.catalog_name}.{self.gold_database}.quality_metrics")
             print(f"  - {self.catalog_name}.{self.gold_database}.author_analysis")
             print(f"  - {self.catalog_name}.{self.gold_database}.ml_features")
             print(f"  - {self.catalog_name}.{self.gold_database}.library_export")
-            
+
         except Exception as e:
-            print(f"❌ Error in Gold layer processing: {e}")
-        
+            print(f"Error in Gold layer processing: {e}")
+
         finally:
             if self.spark:
                 self.spark.stop()

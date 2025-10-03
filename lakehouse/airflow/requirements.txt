@@ -11,13 +11,14 @@ psycopg2-binary==2.9.7
 # Object storage and lakehouse
 minio==7.1.17
 pyiceberg[s3fs,duckdb]==0.6.1
-pyhive==0.7.0
+# pyhive removed - using Iceberg REST Catalog instead
 thrift==0.16.0
 sasl==0.3.1
 
 # Data processing
 pandas==2.0.3
 pyspark==3.5.0
+py4j==0.10.9.7
 findspark==2.0.1
 
 # Data quality and validation
@@ -38,7 +39,8 @@ youtube-transcript-api==0.6.1
 
 # PDF processing  
 PyPDF2==3.0.1
-pdfplumber==0.9.0
+pdfplumber==0.10.4
+pdfminer.six==20231228
 
 # File handling and utils
 pathlib2==2.3.7

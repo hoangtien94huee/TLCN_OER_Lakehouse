@@ -47,7 +47,7 @@ def scrape_mit_ocw_documents(**context):
             use_selenium=True,
             output_dir="/opt/airflow/scraped_data/mit_ocw",
             batch_size=int(os.getenv('BATCH_SIZE', 25)),
-            max_documents=int(os.getenv('MAX_DOCUMENTS', 100)) if os.getenv('MAX_DOCUMENTS') else None
+            max_documents=300
         )
         
         # Cào dữ liệu với error handling

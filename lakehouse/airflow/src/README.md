@@ -111,7 +111,7 @@ export MINIO_ENDPOINT=minio:9000
 export MINIO_ACCESS_KEY=minioadmin
 export MINIO_SECRET_KEY=minioadmin
 export MINIO_BUCKET=oer-lakehouse
-export HIVE_METASTORE_URI=thrift://hive-metastore:9083
+export ICEBERG_REST_URI=http://iceberg-rest:8181
 ```
 
 ### Initialize Lakehouse
@@ -164,7 +164,7 @@ All scripts use environment variables for configuration:
 | `MINIO_ACCESS_KEY` | `minioadmin` | MinIO access key |
 | `MINIO_SECRET_KEY` | `minioadmin` | MinIO secret key |
 | `MINIO_BUCKET` | `oer-lakehouse` | Primary bucket name |
-| `HIVE_METASTORE_URI` | `thrift://hive-metastore:9083` | Hive Metastore connection |
+| `ICEBERG_REST_URI` | `http://iceberg-rest:8181` | Iceberg REST Catalog endpoint |
 | `SCRAPING_DELAY_BASE` | `2.0` | Base delay between requests (seconds) |
 | `MAX_DOCUMENTS` | `100` | Maximum documents to scrape per source |
 | `BATCH_SIZE` | `25` | Batch size for data processing |

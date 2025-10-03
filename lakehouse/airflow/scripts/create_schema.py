@@ -23,7 +23,7 @@ try:
     
     if minio_utils.client:
         # Create basic lakehouse structure
-        success = minio_utils.create_lakehouse_structure()
+        success = minio_utils.setup_lakehouse_structure()
         if success:
             print("MinIO lakehouse structure created successfully")
         else:

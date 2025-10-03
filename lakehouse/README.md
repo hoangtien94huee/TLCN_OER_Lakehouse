@@ -1,88 +1,102 @@
-# OER Lakehouse Architecture
-# =========================
+# OER Lakehouse
 
-Inspired by [building-lakehouse](https://github.com/harrydevforlife/building-lakehouse) project, 
-our OER Lakehouse uses a clean, modular architecture for processing Open Educational Resources.
+This repository provisions a local OER Lakehouse using MinIO (S3-compatible), Apache Iceberg (REST catalog), Spark, and Airflow.
 
-## 📁 Directory Structure
+## Directory Structure
 
 ```
 lakehouse/
-├── airflow/               # Data Orchestration
-│   ├── dags/             # Airflow DAGs
-│   ├── src/              # 🌟 Standalone Python scripts
-│   ├── Dockerfile        # Airflow container
-│   ├── entrypoint.sh     # Startup script
-│   └── requirements.txt  # Python dependencies
-└── spark/                # Data Processing
-    ├── transformers/     # Spark transformation jobs
-    └── Dockerfile        # Custom Spark container
+├── airflow/               # Airflow image, DAGs and ETL code
+│   ├── dags/
+│   ├── src/
+│   ├── Dockerfile
+│   ├── entrypoint.sh
+│   └── requirements.txt
+├── iceberg-rest/          # Iceberg REST catalog image
+└── spark/                 # Spark image (if applicable)
 ```
 
-## 🏗️ Lakehouse Layers
+## Components
 
-### Bronze Layer (Raw Data)
-- **Storage**: MinIO S3-compatible object storage
-- **Format**: JSON files from OER sources
-- **Sources**: MIT OCW, OpenStax, Open Textbook Library
-- **Path**: `s3://oer-lakehouse/bronze/`
+- MinIO: S3-compatible object storage
+- Iceberg REST: Catalog and table metadata service
+- Spark: ETL and SQL over Iceberg tables
+- Airflow: Orchestration and standalone runners
 
-### Silver Layer (Cleaned Data)
-- **Storage**: Apache Iceberg tables
-- **Format**: Parquet with schema evolution
-- **Schema**: Unified OER schema (Dublin Core + LRMI)
-- **Path**: `s3://oer-lakehouse/silver/`
+## Quick Start
 
-### Gold Layer (Analytics Ready)
-- **Storage**: Apache Iceberg tables
-- **Format**: Aggregated and ML-ready datasets
-- **Purpose**: Business intelligence and recommendations
-- **Path**: `s3://oer-lakehouse/gold/`
+Prerequisites: Docker, Docker Compose.
 
-## 🔄 Data Flow
-
-```
-OER Sources → Bronze → Silver → Gold → Analytics
-     ↓           ↓        ↓       ↓
-  Scrapers → MinIO → Spark → Jupyter
-```
-
-1. **Ingestion**: Standalone scripts scrape OER sources
-2. **Processing**: Spark transforms and validates data
-3. **Storage**: Iceberg manages table versions and metadata
-4. **Analysis**: Jupyter notebooks for exploration and insights
-
-## 🚀 Quick Start
-
+1) Start services
 ```bash
-# Start all services
-docker-compose up -d
-
-# Setup schemas
-docker exec oer-airflow python /opt/airflow/scripts/create_schema.py
-
-# Run data pipeline
-docker exec oer-airflow python /opt/airflow/scripts/bronze_mit_ocw.py
-
-# Access services
-open http://localhost:8080  # Airflow
-open http://localhost:8888  # Jupyter
-open http://localhost:9001  # MinIO Console
+docker compose up -d
 ```
 
-## 📊 Key Features
+2) Buckets and endpoints
+- Bucket created automatically: `oer-lakehouse`
+- REST catalog points to MinIO endpoint with path-style access
+- Spark reads Bronze via `s3a://`, Iceberg table locations use `s3://`
 
-- **Schema Evolution**: Iceberg supports schema changes
-- **ACID Transactions**: Reliable data updates
-- **Time Travel**: Query historical data versions
-- **Scalable Processing**: Spark handles large datasets
-- **Standalone Scripts**: Self-contained Python processing
-- **Jupyter Integration**: Interactive data exploration
+3) Run Silver transform (standalone)
+```bash
+docker exec oer-airflow-scraper python /opt/airflow/src/silver_transform.py
+```
 
-## 🎯 Use Cases
+4) Query data
+```bash
+docker exec oer-airflow-scraper /opt/spark/bin/spark-sql \
+  --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions \
+  --conf spark.sql.catalogImplementation=in-memory \
+  --conf spark.sql.catalog.spark_catalog=org.apache.spark.sql.connector.catalog.InMemoryCatalog \
+  --conf spark.sql.catalog.lakehouse=org.apache.iceberg.spark.SparkCatalog \
+  --conf spark.sql.catalog.lakehouse.type=rest \
+  --conf spark.sql.catalog.lakehouse.uri=http://iceberg-rest:8181 \
+  --conf spark.sql.defaultCatalog=lakehouse \
+  --conf spark.sql.catalog.lakehouse.io-impl=org.apache.iceberg.hadoop.HadoopFileIO \
+  --conf spark.hadoop.fs.s3a.endpoint=http://MINIO_IP:9000 \
+  --conf spark.hadoop.fs.s3a.access.key=minioadmin \
+  --conf spark.hadoop.fs.s3a.secret.key=minioadmin \
+  --conf spark.hadoop.fs.s3a.path.style.access=true \
+  --conf spark.hadoop.fs.s3a.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+  --conf spark.hadoop.fs.s3.impl=org.apache.hadoop.fs.s3a.S3AFileSystem \
+  --conf spark.hadoop.fs.AbstractFileSystem.s3.impl=org.apache.hadoop.fs.s3a.S3A \
+  --conf spark.hadoop.fs.s3a.connection.ssl.enabled=false \
+  -e "SELECT COUNT(*) FROM lakehouse.default.oer_resources_dc"
+```
 
-- **Data Collection**: Automated OER harvesting from multiple sources
-- **Data Quality**: Validation and standardization
-- **Analytics**: Subject analysis and content metrics
-- **Research**: ML feature generation for recommendation systems
+Replace MINIO_IP with the container IP of `oer-minio` (example: 172.18.0.2).
+
+## Conventions
+
+- Bronze files: `s3a://oer-lakehouse/bronze/...`
+- Iceberg databases and tables: `s3://oer-lakehouse/silver/...`
+- Spark session disables Hive to avoid Hive warnings
+
+## Troubleshooting
+
+- UnknownHost or timeout when creating tables
+  - Use path-style access, disable virtual host style
+  - In `docker-compose.yml` for `iceberg-rest`:
+    - `CATALOG_S3_PATH_STYLE_ACCESS: "true"`
+    - `CATALOG_S3_VIRTUAL_HOST_ENABLED: "false"`
+    - `CATALOG_S3_V2_VIRTUAL_HOST_ENABLED: "false"`
+    - Set `CATALOG_S3_ENDPOINT` to the MinIO container IP
+
+- No FileSystem for scheme "s3"
+  - Spark lacks `s3` handler; route `s3` to S3A and/or use HadoopFileIO on Spark side
+  - Add to Spark configs:
+    - `spark.hadoop.fs.s3.impl=org.apache.hadoop.fs.s3a.S3AFileSystem`
+    - `spark.hadoop.fs.AbstractFileSystem.s3.impl=org.apache.hadoop.fs.s3a.S3A`
+    - `spark.sql.catalog.lakehouse.io-impl=org.apache.iceberg.hadoop.HadoopFileIO`
+
+- Hive warnings in logs
+  - Disable Hive in Spark session:
+    - `spark.sql.catalogImplementation=in-memory`
+    - `spark.sql.catalog.spark_catalog=org.apache.spark.sql.connector.catalog.InMemoryCatalog`
+
+## Notes
+
+- Credentials default to `minioadmin:minioadmin` for local setup
+- Tables are partitioned by `source_system`
+- The Silver transform normalizes list fields and enforces per-table schemas
 

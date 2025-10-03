@@ -48,3 +48,7 @@ htmlcov/
 
 # Documentation builds
 docs/_build/
+
+# Java/Scala artifacts
+**/*.jar
+lakehouse/data/iceberg-jars/

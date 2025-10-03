@@ -51,10 +51,8 @@ class SchemaCreatorStandalone:
                 .appName("OER-Schema-Creator") \
                 .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
                 .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
-                .config("spark.sql.catalog.lakehouse.type", "hive") \
-                .config("spark.sql.catalog.lakehouse.uri", os.getenv('HIVE_METASTORE_URI', 'thrift://hive-metastore:9083')) \
-                .config("spark.sql.catalog.lakehouse.warehouse", f"s3a://{self.bucket}/") \
-                .config("spark.sql.catalog.lakehouse.s3.endpoint", os.getenv('MINIO_ENDPOINT', 'http://minio:9000')) \
+                .config("spark.sql.catalog.lakehouse.type", "rest") \
+                .config("spark.sql.catalog.lakehouse.uri", os.getenv('ICEBERG_REST_URI', 'http://iceberg-rest:8181')) \
                 .config("spark.hadoop.fs.s3a.access.key", os.getenv('MINIO_ACCESS_KEY', 'minioadmin')) \
                 .config("spark.hadoop.fs.s3a.secret.key", os.getenv('MINIO_SECRET_KEY', 'minioadmin')) \
                 .config("spark.hadoop.fs.s3a.endpoint", os.getenv('MINIO_ENDPOINT', 'http://minio:9000')) \
@@ -129,8 +127,14 @@ class SchemaCreatorStandalone:
                 "bronze/openstax/",
                 "bronze/otl/",
                 "silver/",
-                "silver/oer_resources/",
+                "silver/oer_resources_dc/",
                 "silver/oer_subjects/",
+                "silver/oer_relations/",
+                "silver/oer_multimedia/",
+                "silver/oer_quality_audit/",
+                "silver/oer_creators/",
+                "silver/oer_history/",
+                "silver/oer_language_normalized/",
                 "gold/",
                 "gold/analytics/",
                 "gold/ml_features/",
@@ -204,55 +208,162 @@ class SchemaCreatorStandalone:
             
             # Main OER resources table
             silver_table_sql = f"""
-                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_resources (
-                    id STRING COMMENT 'Unique resource identifier (hash of URL)',
-                    title STRING COMMENT 'Resource title',
-                    description STRING COMMENT 'Resource description',
-                    url STRING COMMENT 'Original resource URL',
-                    source STRING COMMENT 'Source system (mit_ocw, openstax, otl)',
-                    subjects ARRAY<STRING> COMMENT 'Subject areas/topics',
-                    authors ARRAY<STRING> COMMENT 'Authors or instructors',
-                    language STRING COMMENT 'Primary language (ISO code)',
-                    format STRING COMMENT 'Resource format (course, textbook, etc)',
-                    license STRING COMMENT 'License type (CC BY, etc)',
-                    publication_date STRING COMMENT 'Publication or last updated date',
-                    isbn STRING COMMENT 'ISBN if available',
-                    publisher STRING COMMENT 'Publisher name',
-                    download_links ARRAY<STRUCT<
-                        format: STRING COMMENT 'File format (pdf, epub, etc)',
-                        url: STRING COMMENT 'Download URL',
-                        text: STRING COMMENT 'Link text'
-                    >> COMMENT 'Available download links',
-                    created_at TIMESTAMP COMMENT 'Record creation timestamp',
-                    updated_at TIMESTAMP COMMENT 'Record last update timestamp',
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_resources_dc (
+                    dc_identifier STRING COMMENT 'Primary identifier (URL or canonical ID)',
+                    dc_title STRING COMMENT 'Resource title',
+                    dc_creator ARRAY<STRING> COMMENT 'Creators or instructors',
+                    dc_subject ARRAY<STRING> COMMENT 'Subject areas and topics',
+                    dc_description STRING COMMENT 'Resource description',
+                    dc_publisher STRING COMMENT 'Publishing organization or source',
+                    dc_contributor ARRAY<STRING> COMMENT 'Additional contributors',
+                    dc_date STRING COMMENT 'Key date in ISO format',
+                    dc_type STRING COMMENT 'DCMI type classification',
+                    dc_format STRING COMMENT 'Resource format or MIME type',
+                    dc_source STRING COMMENT 'Collection or system of origin',
+                    dc_language STRING COMMENT 'Primary language (ISO code)',
+                    dc_relation ARRAY<STRING> COMMENT 'Related resource URLs',
+                    dc_coverage STRING COMMENT 'Spatial or temporal coverage',
+                    dc_rights STRING COMMENT 'Rights statement or license',
+                    source_system STRING COMMENT 'Originating scraper identifier',
+                    bronze_object STRING COMMENT 'Source bronze object path',
+                    ingested_at TIMESTAMP COMMENT 'Record ingestion timestamp',
                     quality_score DOUBLE COMMENT 'Data quality score (0.0-1.0)'
                 )
                 USING iceberg
-                PARTITIONED BY (source)
+                PARTITIONED BY (source_system)
                 TBLPROPERTIES (
                     'format-version' = '2',
                     'write.metadata.delete-after-commit.enabled' = 'true',
                     'write.metadata.previous-versions-max' = '5'
                 )
-                COMMENT 'Silver layer table for unified OER resources'
+                COMMENT 'Silver layer table storing Dublin Core records'
             """
             
             self.spark.sql(silver_table_sql)
-            print(" Silver layer oer_resources table created")
+            print(" Silver layer oer_resources_dc table created")
             
             # Create indexes for better query performance
             self.spark.sql(f"""
                 CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_subjects (
-                    subject STRING,
-                    resource_id STRING,
-                    source STRING,
-                    created_at TIMESTAMP
+                    dc_subject STRING,
+                    dc_identifier STRING,
+                    source_system STRING,
+                    ingested_at TIMESTAMP
                 )
                 USING iceberg
-                PARTITIONED BY (source)
-                COMMENT 'Normalized subjects table for better search performance'
+                PARTITIONED BY (source_system)
+                COMMENT 'Normalized subjects view of Dublin Core resources'
             """)
             print(" Silver layer oer_subjects table created")
+
+            self.spark.sql(f"""
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_relations (
+                    dc_identifier STRING,
+                    relation_url STRING,
+                    relation_type STRING,
+                    source_system STRING,
+                    ingested_at TIMESTAMP
+                )
+                USING iceberg
+                PARTITIONED BY (source_system)
+                TBLPROPERTIES (
+                    'format-version' = '2'
+                )
+                COMMENT 'Flattened related resources for Dublin Core records'
+            """)
+            print(" Silver layer oer_relations table created")
+
+            self.spark.sql(f"""
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_multimedia (
+                    media_id STRING,
+                    dc_identifier STRING,
+                    media_type STRING,
+                    title STRING,
+                    url STRING,
+                    transcript_available BOOLEAN,
+                    size_mb DOUBLE,
+                    source_system STRING,
+                    ingested_at TIMESTAMP
+                )
+                USING iceberg
+                PARTITIONED BY (source_system)
+                TBLPROPERTIES (
+                    'format-version' = '2'
+                )
+                COMMENT 'Multimedia artefacts associated with resources'
+            """)
+            print(" Silver layer oer_multimedia table created")
+
+            self.spark.sql(f"""
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_quality_audit (
+                    dc_identifier STRING,
+                    issue_code STRING,
+                    severity STRING,
+                    detail STRING,
+                    source_system STRING,
+                    detected_at TIMESTAMP
+                )
+                USING iceberg
+                PARTITIONED BY (source_system)
+                TBLPROPERTIES (
+                    'format-version' = '2'
+                )
+                COMMENT 'Quality checks and issues detected during ingestion'
+            """)
+            print(" Silver layer oer_quality_audit table created")
+
+            self.spark.sql(f"""
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_creators (
+                    dc_identifier STRING,
+                    creator_name STRING,
+                    normalized_name STRING,
+                    role STRING,
+                    source_system STRING,
+                    ingested_at TIMESTAMP
+                )
+                USING iceberg
+                PARTITIONED BY (source_system)
+                TBLPROPERTIES (
+                    'format-version' = '2'
+                )
+                COMMENT 'Normalized creator and contributor information'
+            """)
+            print(" Silver layer oer_creators table created")
+
+            self.spark.sql(f"""
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_history (
+                    dc_identifier STRING,
+                    bronze_object STRING,
+                    record_checksum STRING,
+                    source_system STRING,
+                    ingested_at TIMESTAMP
+                )
+                USING iceberg
+                PARTITIONED BY (source_system)
+                TBLPROPERTIES (
+                    'format-version' = '2'
+                )
+                COMMENT 'Change tracking for Bronze to Silver normalization'
+            """)
+            print(" Silver layer oer_history table created")
+
+            self.spark.sql(f"""
+                CREATE TABLE IF NOT EXISTS {self.catalog_name}.{self.default_db}.oer_language_normalized (
+                    dc_identifier STRING,
+                    raw_language STRING,
+                    normalized_language STRING,
+                    source_system STRING,
+                    ingested_at TIMESTAMP
+                )
+                USING iceberg
+                PARTITIONED BY (source_system)
+                TBLPROPERTIES (
+                    'format-version' = '2'
+                )
+                COMMENT 'Normalized language mappings for resources'
+            """)
+            print(" Silver layer oer_language_normalized table created")
+
             
             return True
             

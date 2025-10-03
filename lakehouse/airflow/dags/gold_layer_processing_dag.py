@@ -497,7 +497,7 @@ This DAG creates analytics-ready data in the Gold layer from standardized Silver
 - Silver layer processing must complete successfully
 - Apache Spark cluster must be running with ML libraries
 - MinIO object storage must be accessible
-- Hive Metastore for Iceberg table management
+- Iceberg REST Catalog for table management
 
 ## Outputs:
 

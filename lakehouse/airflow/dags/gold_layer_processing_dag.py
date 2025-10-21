@@ -17,6 +17,7 @@ Dependencies: Requires Silver layer processing to complete first
 """
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
@@ -26,6 +27,7 @@ import json
 import os
 
 from src.gold_analytics import GoldAnalyticsStandalone
+from src.giaotrinh_reference_loader import main as load_reference_catalog
 
 # DAG Configuration
 default_args = {
@@ -142,6 +144,31 @@ def validate_silver_layer_availability(**context):
         logger.error(f"[Silver Validation] Failed: {e}")
         raise
 
+def refresh_reference_datasets(**context):
+    """Refresh faculty/subject taxonomy from giaotrinh.sql before gold processing."""
+    logger = context['task_instance'].log
+    airflow_root = Path(__file__).resolve().parents[2]
+    sql_default = airflow_root.parent / "giaotrinh.sql"
+    if not sql_default.exists():
+        sql_default = airflow_root / "giaotrinh.sql"
+    sql_path = Path(os.getenv("REFERENCE_SQL_PATH", str(sql_default)))
+    output_dir = Path(os.getenv("REFERENCE_DATA_DIR", str(airflow_root / "data" / "reference")))
+    minio_prefix = os.getenv("REFERENCE_MINIO_PREFIX", "bronze/reference/giaotrinh")
+
+    logger.info(f"[Reference] Refreshing taxonomy from {sql_path}")
+    if not sql_path.exists():
+        raise FileNotFoundError(f"Reference SQL file not found at {sql_path}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    load_reference_catalog(str(sql_path), str(output_dir), upload_to_minio=True, minio_prefix=minio_prefix)
+
+    bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
+    reference_uri = f"s3a://{bucket}/{minio_prefix.strip('/')}"
+    os.environ["REFERENCE_DATA_URI"] = reference_uri
+    os.environ["REFERENCE_DATA_DIR"] = str(output_dir)
+
+    logger.info(f"[Reference] Reference datasets written to {output_dir} and uploaded to {reference_uri}")
+
 def create_analytics_tables(**context):
     """Create analytics tables in Gold layer"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
@@ -165,6 +192,10 @@ def create_analytics_tables(**context):
         })()
         
         # Process to Gold layer using standalone analytics
+        os.environ.setdefault(
+            "REFERENCE_DATA_DIR",
+            str(Path(__file__).resolve().parents[2] / "data" / "reference")
+        )
         analytics = GoldAnalyticsStandalone()
         analytics.run()
         
@@ -408,6 +439,13 @@ validate_silver_task = PythonOperator(
     dag=dag,
 )
 
+# Refresh taxonomy reference data
+refresh_reference_task = PythonOperator(
+    task_id='refresh_reference_data',
+    python_callable=refresh_reference_datasets,
+    dag=dag,
+)
+
 # Create analytics tables
 create_analytics_task = PythonOperator(
     task_id='create_analytics_tables',
@@ -452,8 +490,9 @@ end_task = DummyOperator(
 # === DAG Dependencies ===
 
 # Linear workflow with external dependency
-start_task >> wait_for_silver_processing >> validate_silver_task
-validate_silver_task >> create_analytics_task >> validate_quality_task
+# start_task >> wait_for_silver_processing >> validate_silver_task
+start_task >> validate_silver_task
+validate_silver_task >> refresh_reference_task >> create_analytics_task >> validate_quality_task
 validate_quality_task >> generate_report_task >> cleanup_task
 cleanup_task >> health_check_task >> end_task
 

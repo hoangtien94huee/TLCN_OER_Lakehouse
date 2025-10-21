@@ -88,9 +88,6 @@ class MinIOUtilsStandalone:
                 'bronze/otl/',
                 'silver/',
                 'gold/',
-                'exports/marc/',
-                'exports/dublin_core/',
-                'exports/oai_pmh/',
                 'logs/'
             ]
             
@@ -161,7 +158,6 @@ class MinIOUtilsStandalone:
                     'bronze': {'objects': 0, 'size_bytes': 0},
                     'silver': {'objects': 0, 'size_bytes': 0},
                     'gold': {'objects': 0, 'size_bytes': 0},
-                    'exports': {'objects': 0, 'size_bytes': 0},
                     'other': {'objects': 0, 'size_bytes': 0}
                 },
                 'sources': {
@@ -189,9 +185,6 @@ class MinIOUtilsStandalone:
                 elif obj_name.startswith('gold/'):
                     stats['layers']['gold']['objects'] += 1
                     stats['layers']['gold']['size_bytes'] += obj.size
-                elif obj_name.startswith('exports/'):
-                    stats['layers']['exports']['objects'] += 1
-                    stats['layers']['exports']['size_bytes'] += obj.size
                 else:
                     stats['layers']['other']['objects'] += 1
                     stats['layers']['other']['size_bytes'] += obj.size

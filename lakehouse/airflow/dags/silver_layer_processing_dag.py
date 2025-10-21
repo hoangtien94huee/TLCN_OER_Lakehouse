@@ -25,6 +25,9 @@ from airflow.operators.dummy import DummyOperator
 import json
 import os
 
+
+os.environ.setdefault("REFERENCE_DATA_URI", "s3a://oer-lakehouse/bronze/reference/giaotrinh")
+
 from src.silver_transform import SilverTransformStandalone
 
 # DAG Configuration

@@ -1,871 +1,1122 @@
 #!/usr/bin/env python3
 """
-Silver Layer Transformation - Bronze to Silver
-===============================================
+Silver Layer Dublin Core Transformer
+====================================
 
-Standalone script to transform Bronze layer data to Silver layer using Spark + Iceberg.
-Based on building-lakehouse pattern.
+This module normalizes bronze layer OER scrapes into a consistent Dublin Core
+representation stored in Iceberg. Each record includes both structured fields
+for analytics and an XML payload that follows the Dublin Core standard so that
+search and downstream systems can rely on a uniform contract.
 """
 
-import os
-import json
+from __future__ import annotations
+
 import hashlib
+import os
 import sys
+import json
+from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Dict, Any, Optional
 from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+import unicodedata
 import re
-from urllib.parse import urlparse
+import xml.etree.ElementTree as ET
+from uuid import uuid4
 
-# Spark imports
-try:
-    from pyspark.sql import SparkSession
-    from pyspark.sql import functions as F
-    from pyspark.sql.types import *
-    SPARK_AVAILABLE = True
-except ImportError:
-    SPARK_AVAILABLE = False
-    print("Warning: PySpark not available")
-    
-# Type hints
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    from pyspark.sql import SparkSession
-
-# MinIO imports
 try:
     from minio import Minio
     from minio.error import S3Error
     MINIO_AVAILABLE = True
 except ImportError:
     MINIO_AVAILABLE = False
-    print("Warning: MinIO library not found")
 
-class SilverTransformStandalone:
-    """Standalone Silver layer transformer using Spark + Iceberg"""
-    
-    def __init__(self):
-        self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
-        self._ensure_spark_home()
-        self.spark = self._create_spark_session() if SPARK_AVAILABLE else None
-        self.minio_client = self._setup_minio() if MINIO_AVAILABLE else None
-        
+# Spark imports
+try:
+    from pyspark.sql import Row, SparkSession, DataFrame
+    from pyspark.sql import functions as F
+    from pyspark.sql import types as T
+
+    SPARK_AVAILABLE = True
+except ImportError:
+    SPARK_AVAILABLE = False
+    Row = SparkSession = DataFrame = None  # type: ignore
+
+
+@dataclass(frozen=True)
+class SubjectCategoryRule:
+    pattern: str
+    name: str
+    code: str
+
+
+class SilverDublinCoreTransformer:
+    """Transforms bronze JSON payloads into normalized Dublin Core XML records."""
+
+    SUBJECT_CATEGORY_RULES: Tuple[SubjectCategoryRule, ...] = (
+        SubjectCategoryRule(r"\b(computer|software|program|data|ai|machine|cs)\b", "Computer Science", "CS"),
+        SubjectCategoryRule(r"\b(math|algebra|calculus|geometry|statistics)\b", "Mathematics", "MATH"),
+        SubjectCategoryRule(r"\b(physics|chemistry|biology|science|astronomy)\b", "Natural Sciences", "SCI"),
+        SubjectCategoryRule(r"\b(engineering|mechanical|electrical|civil|aerospace)\b", "Engineering", "ENG"),
+        SubjectCategoryRule(r"\b(history|politic|sociology|psychology|anthropology|philosophy)\b", "Social Scie nces", "SOC"),
+        SubjectCategoryRule(r"\b(business|finance|management|marketing|economics)\b", "Business and Management", "BUS"),
+        SubjectCategoryRule(r"\b(language|literature|writing|art|music)\b", "Arts and Humanities", "ART"),
+        SubjectCategoryRule(r"\b(education|teaching|learning|pedagogy)\b", "Education", "EDU"),
+        SubjectCategoryRule(r"\b(health|medicine|nursing|biology|biomedical)\b", "Health Sciences", "HEALTH"),
+    )
+
+    PUBLISHER_TYPE_RULES: Tuple[Tuple[str, str], ...] = (
+        ("university", "University"),
+        ("institute", "University"),
+        ("college", "University"),
+        ("openstax", "Non-profit"),
+        ("opentextbook", "Non-profit"),
+        ("mit", "University"),
+        ("ocw", "University"),
+        ("library", "Library"),
+    )
+
+    FORMAT_CATEGORY_RULES: Tuple[Tuple[str, str], ...] = (
+        ("pdf", "Document"),
+        ("html", "Document"),
+        ("ebook", "Document"),
+        ("video", "Media"),
+        ("audio", "Media"),
+        ("interactive", "Interactive"),
+        ("notebook", "Interactive"),
+    )
+
+    def __init__(self) -> None:
         if not SPARK_AVAILABLE:
-            raise RuntimeError("PySpark is not installed in this environment")
-        if not self.spark:
-            raise RuntimeError("Spark session could not be created")
+            raise RuntimeError("PySpark is required to run the silver transformer")
 
-
-        # Table configuration
-        self.catalog_name = "lakehouse"
-        self.database_name = "default"
-        self.table_name = "oer_resources_dc"
+        self.bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
+        self.catalog_name = os.getenv("ICEBERG_SILVER_CATALOG", "silver")
+        self.database_name = os.getenv("SILVER_DATABASE", "default")
+        self.table_name = os.getenv("SILVER_TABLE", "oer_resources")
         self.full_table_name = f"{self.catalog_name}.{self.database_name}.{self.table_name}"
-        self.subjects_table = f"{self.catalog_name}.{self.database_name}.oer_subjects"
-        self.relations_table = f"{self.catalog_name}.{self.database_name}.oer_relations"
-        self.multimedia_table = f"{self.catalog_name}.{self.database_name}.oer_multimedia"
-        self.quality_table = f"{self.catalog_name}.{self.database_name}.oer_quality_audit"
-        self.creators_table = f"{self.catalog_name}.{self.database_name}.oer_creators"
-        self.history_table = f"{self.catalog_name}.{self.database_name}.oer_history"
-        self.language_table = f"{self.catalog_name}.{self.database_name}.oer_language_normalized"
-        
-        print("Silver Transform initialized")
-        
-        # Ensure MinIO paths exist before attempting to create DB/tables
-        self._ensure_minio_paths()
+        self.legacy_table_name = f"{self.catalog_name}.{self.database_name}.oer_dc_documents"
+        self.subjects_bridge_table = f"{self.catalog_name}.{self.database_name}.oer_resource_subjects"
+        self.keywords_bridge_table = f"{self.catalog_name}.{self.database_name}.oer_resource_keywords"
+        self.creators_bridge_table = f"{self.catalog_name}.{self.database_name}.oer_resource_creators"
+        self.reference_subjects_table = f"{self.catalog_name}.{self.database_name}.reference_subjects"
+        self.reference_faculties_table = f"{self.catalog_name}.{self.database_name}.reference_faculties"
+        self.reference_departments_table = f"{self.catalog_name}.{self.database_name}.reference_departments"
+        self.reference_programs_table = f"{self.catalog_name}.{self.database_name}.reference_programs"
+        self.reference_program_subject_links_table = f"{self.catalog_name}.{self.database_name}.reference_program_subject_links"
+        self.reference_textbooks_table = f"{self.catalog_name}.{self.database_name}.reference_textbooks"
+        self.reference_dewey_table = f"{self.catalog_name}.{self.database_name}.reference_dewey_classes"
 
-        if self.spark:
-            self._create_database_if_not_exists()
-            self._create_table_if_not_exists()
-            self._create_support_tables_if_not_exists()
+        self.spark = self._create_spark_session()
+        self.spark.sql(f"CREATE DATABASE IF NOT EXISTS {self.catalog_name}.{self.database_name}")
 
-    def _ensure_spark_home(self) -> None:
-        """Ensure SPARK_HOME points to a valid Spark installation before creating sessions."""
-        if not SPARK_AVAILABLE:
-            return
+        bronze_hint = os.getenv("BRONZE_INPUT")
+        self.bronze_root = bronze_hint or f"s3a://{self.bucket}/bronze/"
+        print(f"Silver transformer targeting {self.full_table_name} from {self.bronze_root}")
 
-        spark_home_env = os.environ.get('SPARK_HOME')
-        if spark_home_env:
-            spark_submit = Path(spark_home_env) / 'bin' / 'spark-submit'
-            if spark_submit.exists():
-                return
-            print(f"Configured SPARK_HOME {spark_home_env} missing spark-submit; attempting auto-configuration")
+        # Reference datasets (faculties, subjects) for canonical mapping
+        self.reference_subjects_by_code: Dict[str, Dict[str, Any]] = {}
+        self.reference_subjects_by_name: Dict[str, Dict[str, Any]] = {}
+        self.reference_faculties: Dict[int, str] = {}
+        self.reference_departments: Dict[int, str] = {}
+        self.reference_enabled = False
+        self.reference_subject_records: List[Dict[str, Any]] = []
+        self.reference_faculty_records: List[Dict[str, Any]] = []
+        self.reference_department_records: List[Dict[str, Any]] = []
+        self.reference_program_records: List[Dict[str, Any]] = []
+        self.reference_program_subject_links_records: List[Dict[str, Any]] = []
+        self.reference_textbook_records: List[Dict[str, Any]] = []
+        self.reference_dewey_records: List[Dict[str, Any]] = []
+        self.reference_storage: str = "local"
+        self.reference_path: Optional[Path] = None
+        self.reference_bucket: Optional[str] = None
+        self.reference_prefix: str = ""
+        self.minio_client: Optional[Minio] = None
 
-        try:
-            import pyspark  # type: ignore
-            package_home = Path(pyspark.__file__).resolve().parent
-            candidate_home = package_home
-            candidate_submit = candidate_home / 'bin' / 'spark-submit'
-            if candidate_submit.exists():
-                if spark_home_env and spark_home_env != str(candidate_home):
-                    print(f"SPARK_HOME updated from {spark_home_env} to {candidate_home}")
-                else:
-                    print(f"SPARK_HOME set to {candidate_home}")
-                os.environ['SPARK_HOME'] = str(candidate_home)
-                os.environ.setdefault('PYSPARK_PYTHON', sys.executable)
-                return
-            print(f"PySpark package found at {candidate_home} but spark-submit is missing")
-        except Exception as exc:
-            print(f"Unable to auto-configure SPARK_HOME: {exc}")
-
-    
-    def _create_spark_session(self) -> Optional["SparkSession"]:
-        """Create Spark session with Iceberg configuration"""
-        if not SPARK_AVAILABLE:
-            print("Spark not available, cannot create session")
-            return None
-            
-        try:
-            # Spark configuration for Iceberg REST Catalog
-            spark = SparkSession.builder \
-                .appName("OER-Silver-Transform") \
-                .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
-                .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
-                .config("spark.sql.catalog.lakehouse.type", "rest") \
-                .config("spark.sql.catalog.lakehouse.uri", os.getenv('ICEBERG_REST_URI', 'http://iceberg-rest:8181')) \
-                .config("spark.sql.defaultCatalog", "lakehouse") \
-                .config("spark.hadoop.fs.s3a.access.key", os.getenv('MINIO_ACCESS_KEY', 'minioadmin')) \
-                .config("spark.hadoop.fs.s3a.secret.key", os.getenv('MINIO_SECRET_KEY', 'minioadmin')) \
-                .config("spark.hadoop.fs.s3a.endpoint", os.getenv('MINIO_ENDPOINT', 'http://minio:9000')) \
-                .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-                .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
-                .config("spark.hadoop.fs.s3a.aws.credentials.provider", "org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider") \
-                .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false") \
-                .config("spark.network.timeout", "300s") \
-                .getOrCreate()
-            
-            spark.sparkContext.setLogLevel("WARN")
-            print("Spark session created with Iceberg support")
-            return spark
-            
-        except Exception as e:
-            print(f"Spark session creation failed: {e}")
-            return None
-    
-    def _setup_minio(self):
-        """Setup MinIO client"""
-        try:
-            endpoint_raw = os.getenv('MINIO_ENDPOINT', 'http://minio:9000')
-            if '://' not in endpoint_raw:
-                endpoint_raw = f'http://{endpoint_raw}'
-            parsed = urlparse(endpoint_raw)
-            endpoint = parsed.netloc or parsed.path
-
-            access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
-            secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
-
-            secure_env = os.getenv('MINIO_SECURE')
-            if secure_env is not None:
-                secure = secure_env.lower() in {'1', 'true', 'yes'}
+        reference_uri = os.getenv("REFERENCE_DATA_URI")
+        if reference_uri and reference_uri.startswith(("s3://", "s3a://")):
+            if MINIO_AVAILABLE:
+                bucket, prefix = self._parse_s3_uri(reference_uri)
+                self.reference_storage = "minio"
+                self.reference_bucket = bucket
+                self.reference_prefix = prefix
+                self.minio_client = self._create_minio_client()
+                if not self.minio_client:
+                    print("Warning: unable to initialize MinIO client; falling back to local reference files")
+                    self.reference_storage = "local"
+                    self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
             else:
-                secure = parsed.scheme == 'https'
+                print("Warning: REFERENCE_DATA_URI points to MinIO but minio package not installed; using local fallback")
+                self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
+        elif reference_uri:
+            self.reference_path = Path(reference_uri)
+        else:
+            self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
 
-            client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+        self._load_reference_data()
+        self._write_reference_dimensions()
 
-            # Test connection
-            client.bucket_exists(self.bucket)
-            print("MinIO connection established")
-            return client
+        self.output_schema = self._build_output_schema()
 
-        except Exception as e:
-            print(f"MinIO setup failed: {e}")
+    def __getstate__(self) -> Dict[str, Any]:
+        state = self.__dict__.copy()
+        state.pop("spark", None)
+        state.pop("minio_client", None)
+        return state
+
+    def __setstate__(self, state: Dict[str, Any]) -> None:
+        self.__dict__.update(state)
+        self.spark = None
+        self.minio_client = None
+        self.output_schema = self._build_output_schema()
+
+    def _build_output_schema(self) -> T.StructType:
+        return T.StructType(
+            [
+                T.StructField("resource_id", T.StringType(), False),
+                T.StructField("resource_uid", T.StringType(), False),
+                T.StructField("source_system", T.StringType(), True),
+                T.StructField("source_url", T.StringType(), True),
+                T.StructField("catalog_provider", T.StringType(), True),
+                T.StructField("title", T.StringType(), True),
+                T.StructField("description", T.StringType(), True),
+                T.StructField("keywords", T.ArrayType(T.StringType()), True),
+                T.StructField("subjects", T.ArrayType(T.StringType()), True),
+                T.StructField("primary_subject", T.StringType(), True),
+                T.StructField("primary_subject_code", T.StringType(), True),
+                T.StructField("subject_category_name", T.StringType(), True),
+                T.StructField("subject_category_code", T.StringType(), True),
+                T.StructField("faculty_id", T.IntegerType(), True),
+                T.StructField("faculty_name", T.StringType(), True),
+                T.StructField("creator_names", T.ArrayType(T.StringType()), True),
+                T.StructField("publisher_name", T.StringType(), True),
+                T.StructField("publisher_type", T.StringType(), True),
+                T.StructField("language", T.StringType(), True),
+                T.StructField("license_name", T.StringType(), True),
+                T.StructField("license_url", T.StringType(), True),
+                T.StructField("resource_format", T.StringType(), True),
+                T.StructField("resource_format_category", T.StringType(), True),
+                T.StructField("resource_type", T.StringType(), True),
+                T.StructField("difficulty_level", T.StringType(), True),
+                T.StructField("target_audience", T.StringType(), True),
+                T.StructField("education_level", T.StringType(), True),
+                T.StructField("course_id", T.StringType(), True),
+                T.StructField("course_code", T.StringType(), True),
+                T.StructField("course_name", T.StringType(), True),
+                T.StructField("department_id", T.IntegerType(), True),
+                T.StructField("department_name", T.StringType(), True),
+                T.StructField("institution_name", T.StringType(), True),
+                T.StructField("publication_date", T.TimestampType(), True),
+                T.StructField("last_updated_at", T.TimestampType(), True),
+                T.StructField("scraped_at", T.TimestampType(), True),
+                T.StructField("bronze_source_path", T.StringType(), True),
+                T.StructField("data_quality_score", T.DoubleType(), True),
+                T.StructField("dc_xml", T.StringType(), True),
+                T.StructField("ingested_at", T.TimestampType(), False),
+            ]
+        )
+
+    def _load_reference_data(self) -> None:
+        """Load faculties and subjects reference data for canonical mapping."""
+        try:
+            subjects_data = self._load_reference_json("subjects.json")
+            if subjects_data:
+                self.reference_subject_records = subjects_data
+                for record in subjects_data:
+                    name_key = self._normalize_text(record.get("subject_name"))
+                    code_key = (record.get("subject_code") or "").strip().lower()
+                    if code_key:
+                        self.reference_subjects_by_code[code_key] = record
+                    if name_key:
+                        existing = self.reference_subjects_by_name.get(name_key)
+                        if not existing or existing.get("subject_code") in (None, ""):
+                            self.reference_subjects_by_name[name_key] = record
+                print(f"Loaded {len(self.reference_subjects_by_name)} reference subjects from {self._reference_location_desc('subjects.json')}")
+            else:
+                print("Reference subjects not found; subject normalization will use heuristics")
+
+            faculties_data = self._load_reference_json("faculties.json")
+            if faculties_data:
+                self.reference_faculty_records = faculties_data
+                for record in faculties_data:
+                    faculty_id = record.get("faculty_id")
+                    faculty_name = record.get("faculty_name") or ""
+                    if faculty_id is not None:
+                        self.reference_faculties[int(faculty_id)] = faculty_name
+                print(f"Loaded {len(self.reference_faculties)} faculties from {self._reference_location_desc('faculties.json')}")
+
+            departments_data = self._load_reference_json("departments.json")
+            if departments_data:
+                self.reference_department_records = departments_data
+                for record in departments_data:
+                    department_id = record.get("department_id")
+                    department_name = record.get("department_name") or ""
+                    if department_id is not None:
+                        self.reference_departments[int(department_id)] = department_name
+                if self.reference_departments:
+                    print(f"Loaded {len(self.reference_departments)} departments from {self._reference_location_desc('departments.json')}")
+
+            programs_data = self._load_reference_json("programs.json")
+            if programs_data:
+                self.reference_program_records = programs_data
+
+            program_subject_links = self._load_reference_json("program_subject_links.json")
+            if program_subject_links:
+                self.reference_program_subject_links_records = program_subject_links
+
+            textbooks_data = self._load_reference_json("textbooks.json")
+            if textbooks_data:
+                self.reference_textbook_records = textbooks_data
+
+            dewey_data = self._load_reference_json("dewey_classes.json")
+            if dewey_data:
+                self.reference_dewey_records = dewey_data
+
+            self.reference_enabled = bool(self.reference_subjects_by_name or self.reference_subjects_by_code)
+            if not self.reference_enabled:
+                print("Reference mapping disabled: no subjects found")
+        except Exception as exc:
+            print(f"Warning loading reference data: {exc}")
+            self.reference_enabled = False
+        finally:
+            if self.reference_storage == "minio":
+                self.minio_client = None
+
+    def _reference_location_desc(self, filename: str) -> str:
+        if self.reference_storage == "minio" and self.reference_bucket:
+            prefix = self.reference_prefix.rstrip("/")
+            object_name = f"{prefix}/{filename}" if prefix else filename
+            return f"s3://{self.reference_bucket}/{object_name}"
+        if self.reference_path:
+            return str(self.reference_path / filename)
+        return filename
+
+    def _load_reference_json(self, filename: str) -> Optional[Any]:
+        try:
+            if self.reference_storage == "minio" and self.minio_client and self.reference_bucket:
+                object_name = filename if not self.reference_prefix else f"{self.reference_prefix.rstrip('/')}/{filename}"
+                try:
+                    response = self.minio_client.get_object(self.reference_bucket, object_name)
+                    try:
+                        data = json.loads(response.read().decode("utf-8"))
+                    finally:
+                        response.close()
+                        response.release_conn()
+                    return data
+                except S3Error as s3_err:
+                    print(f"Reference object missing in MinIO ({object_name}): {s3_err}")
+                    return None
+            if self.reference_path:
+                file_path = self.reference_path / filename
+                if not file_path.exists():
+                    return None
+                with file_path.open("r", encoding="utf-8") as fh:
+                    return json.load(fh)
+            return None
+        except Exception as exc:
+            print(f"Warning reading reference file {filename}: {exc}")
             return None
 
-    def _ensure_minio_paths(self) -> None:
-        """Ensure the required MinIO bucket and silver prefix exist to avoid s3a path issues."""
-        if not self.minio_client:
-            return
+    def _create_minio_client(self) -> Optional[Minio]:
         try:
-            bucket_exists = self.minio_client.bucket_exists(self.bucket)
-            if not bucket_exists:
-                self.minio_client.make_bucket(self.bucket)
-                print(f"Created MinIO bucket: {self.bucket}")
-            # Ensure silver/ prefix has a placeholder so Iceberg can resolve path
-            placeholder_object = "silver/.placeholder"
-            from io import BytesIO
-            data = BytesIO(b"")
-            self.minio_client.put_object(self.bucket, placeholder_object, data, 0)
-            print("Ensured MinIO prefix: silver/")
+            endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000").replace("http://", "").replace("https://", "")
+            access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
+            secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
+            secure = os.getenv("MINIO_SECURE", "0").lower() in {"1", "true", "yes"}
+            client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+            return client
         except Exception as exc:
-            print(f"Warning ensuring MinIO paths: {exc}")
-    
-    def _create_database_if_not_exists(self):
-        """Create database if it doesn't exist with s3a location to avoid local FS."""
+            print(f"Warning: unable to create MinIO client ({exc})")
+            return None
+
+    def _parse_s3_uri(self, uri: str) -> Tuple[str, str]:
+        cleaned = uri.replace("s3a://", "").replace("s3://", "")
+        if "/" not in cleaned:
+            return cleaned, ""
+        bucket, prefix = cleaned.split("/", 1)
+        return bucket, prefix.rstrip("/")
+
+class SilverTransformStandalone(SilverDublinCoreTransformer):
+    """Backward-compatible alias for existing DAG imports."""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def _create_spark_session(self) -> SparkSession:
+        session = (
+            SparkSession.builder.appName("OER-Silver-Dublin-Core")
+            .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+            .config("spark.sql.catalog.%s" % self.catalog_name, "org.apache.iceberg.spark.SparkCatalog")
+            .config("spark.sql.catalog.%s.type" % self.catalog_name, "hadoop")
+            .config("spark.sql.catalog.%s.warehouse" % self.catalog_name, f"s3a://{self.bucket}/silver/")
+            .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog")
+            .config("spark.sql.catalog.lakehouse.type", "hadoop")
+            .config("spark.sql.catalog.lakehouse.warehouse", f"s3a://{self.bucket}/warehouse/")
+            .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
+            .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
+            .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
+            .config("spark.hadoop.fs.s3a.path.style.access", "true")
+            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+            .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "200"))
+            .config("spark.sql.adaptive.enabled", "true")
+            .getOrCreate()
+        )
+        session.sparkContext.setLogLevel("WARN")
+        return session
+
+    def run(self) -> None:
+        bronze_df = self._load_bronze_payloads()
+        if bronze_df is None or bronze_df.rdd.isEmpty():
+            print("No bronze payloads found for silver transformation")
+            return
+
+        normalized_df = self._normalize_to_dublin_core(bronze_df)
+        if normalized_df is None or normalized_df.rdd.isEmpty():
+            print("Bronze payloads could not be normalized, skipping write")
+            return
+
+        self._write_tables(normalized_df)
+
+    def _load_bronze_payloads(self) -> Optional[DataFrame]:
+        candidate_paths = self._resolve_bronze_paths()
+        if not candidate_paths:
+            print("No bronze input paths were resolved")
+            return None
+
         try:
-            db_location = f"s3a://{self.bucket}/silver/{self.database_name}"
-            self.spark.sql(
-                f"""
-                CREATE DATABASE IF NOT EXISTS {self.catalog_name}.{self.database_name}
-                LOCATION '{db_location}'
-                """
+            df = (
+                self.spark.read.option("recursiveFileLookup", "true")
+                .option("multiLine", "true")
+                .json(candidate_paths)
+                .withColumn("bronze_source_path", F.input_file_name())
             )
-            print(f"Database {self.catalog_name}.{self.database_name} ready")
-        except Exception as e:
-            print(f"Database creation warning: {e}")
-    
-    def _create_table_if_not_exists(self):
-        """Create Iceberg table if it doesn't exist"""
-        try:
-            # Define schema
-            schema = """
-                dc_identifier STRING,
-                dc_title STRING,
-                dc_creator ARRAY<STRING>,
-                dc_subject ARRAY<STRING>,
-                dc_description STRING,
-                dc_publisher STRING,
-                dc_contributor ARRAY<STRING>,
-                dc_date STRING,
-                dc_type STRING,
-                dc_format STRING,
-                dc_source STRING,
-                dc_language STRING,
-                dc_relation ARRAY<STRING>,
-                dc_coverage STRING,
-                dc_rights STRING,
-                source_system STRING,
-                bronze_object STRING,
-                ingested_at TIMESTAMP,
-                quality_score DOUBLE
-            """
-            
-            table_location = f"s3a://{self.bucket}/silver/{self.table_name}"
-            create_sql = f"""
-                CREATE TABLE IF NOT EXISTS {self.full_table_name} (
-                    {schema}
-                ) USING iceberg
-                PARTITIONED BY (source_system)
-                LOCATION '{table_location}'
-                TBLPROPERTIES (
-                    'format-version' = '2'
-                )
-            """
-            
-            print(f"Creating/ensuring main table at {table_location}...")
-            self.spark.sql(create_sql)
-            print(f"Table {self.full_table_name} ready")
-            
-        except Exception as e:
-            print(f"Table creation warning: {e}")
-    
-    def _create_support_tables_if_not_exists(self):
+            print(f"Loaded bronze dataset with {df.count()} raw records")
+            return df
+        except Exception as exc:
+            print(f"Failed to load bronze payloads: {exc}")
+            return None
+
+    def _resolve_bronze_paths(self) -> List[str]:
+        hint = os.getenv("BRONZE_INPUT")
+        if hint:
+            return [value.strip() for value in hint.split(",") if value.strip()]
+
+        local_candidates: Iterable[Path] = (
+            Path(self.bronze_root) if Path(self.bronze_root).exists() else None,
+            Path.cwd() / "lakehouse" / "data" / "scraped",
+            Path(__file__).resolve().parents[2] / "data" / "scraped",
+        )
+
+        resolved: List[str] = []
+        for candidate in local_candidates:
+            if candidate and candidate.exists():
+                resolved.append(str(candidate))
+
+        if resolved:
+            return resolved
+
+        return [self.bronze_root]
+
+    def _normalize_to_dublin_core(self, bronze_df: DataFrame) -> Optional[DataFrame]:
+        def transform_row(row_dict: Dict[str, Any]) -> Optional[Row]:
+            trimmed = {k: row_dict.get(k) for k in row_dict}
+            metadata = self._normalize_record(trimmed)
+            if not metadata:
+                return None
+            return Row(**metadata)
+
+        normalized_rdd = bronze_df.rdd.map(lambda row: transform_row(row.asDict(recursive=True))).filter(
+            lambda item: item is not None
+        )
+
+        if normalized_rdd.isEmpty():
+            return None
+
+        return self.spark.createDataFrame(normalized_rdd, schema=self.output_schema)
+
+    def _normalize_record(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        source_system = self._detect_source_system(record)
+        resource_id = self._select_identifier(record, source_system)
+        if not resource_id:
+            return None
+
+        now = datetime.utcnow()
+        source_url = self._ensure_str(record.get("url") or record.get("link"))
+        title = self._ensure_title(record)
+        description = self._ensure_str(record.get("description"))
+        creators = self._clean_string_list(record.get("instructors") or record.get("authors") or record.get("creators"))
+        subjects = self._derive_subjects(record)
+        primary_subject = subjects[0] if subjects else self._ensure_str(record.get("subject"))
+        subject_category_name, subject_category_code = self._derive_subject_category(primary_subject)
+
+        keywords = self._derive_keywords(record, subjects, title)
+        language = self._ensure_language(record.get("language"))
+        publisher_name = self._derive_publisher(record, source_system)
+        publisher_type = self._derive_publisher_type(publisher_name)
+        license_name, license_url = self._derive_license(record)
+        resource_format = self._derive_format(record)
+        resource_format_category = self._derive_format_category(resource_format)
+        resource_type = self._derive_resource_type(record, source_system)
+        difficulty_level, target_audience = self._derive_level(record)
+        education_level = target_audience
+
+        primary_subject_code: Optional[str] = None
+        faculty_id: Optional[int] = None
+        faculty_name: Optional[str] = None
+        department_id: Optional[int] = None
+
+        course_id = self._ensure_str(record.get("course_id") or record.get("identifier"))
+        course_code = self._ensure_str(record.get("course_number") or record.get("code"))
+        course_name = self._ensure_str(record.get("course_title") or record.get("course_name") or title)
+        department_name = self._ensure_str(record.get("department"))
+        institution_name = self._derive_institution(source_system)
+
+        reference_subject = self._match_reference_subject(primary_subject, subjects, course_code, course_id, course_name)
+        if reference_subject:
+            if reference_subject.get("subject_name"):
+                primary_subject = reference_subject["subject_name"]
+                if primary_subject and primary_subject not in subjects:
+                    subjects.insert(0, primary_subject)
+            primary_subject_code = reference_subject.get("subject_code")
+            ref_faculty_id = reference_subject.get("faculty_id")
+            if ref_faculty_id is not None:
+                faculty_id = int(ref_faculty_id)
+                faculty_name = self.reference_faculties.get(faculty_id)
+                if faculty_name:
+                    subject_category_name = faculty_name
+                    subject_category_code = f"FAC_{faculty_id:02d}"
+            ref_department_id = reference_subject.get("department_id")
+            if ref_department_id is not None:
+                department_id = int(ref_department_id)
+                department_name = self.reference_departments.get(department_id, department_name)
+
+        publication_date = self._parse_datetime(record.get("publication_date") or record.get("year"))
+        scraped_at = self._parse_datetime(record.get("scraped_at"))
+        last_updated_at = self._parse_datetime(record.get("last_updated_at") or record.get("updated_at") or scraped_at)
+        bronze_source_path = self._ensure_str(record.get("bronze_source_path"))
+
+        data_quality_score = self._compute_quality_score(
+            title=title,
+            description=description,
+            subjects=subjects,
+            keywords=keywords,
+            creators=creators,
+            publisher_name=publisher_name,
+            language=language,
+            license_name=license_name,
+            source_url=source_url,
+        )
+
+        dc_xml = self._build_dublin_core_xml(
+            identifier=resource_id,
+            title=title,
+            description=description,
+            creators=creators,
+            subjects=subjects or keywords,
+            publisher=publisher_name,
+            language=language,
+            rights=license_name,
+            source=source_system,
+            resource_type=resource_type,
+            resource_format=resource_format,
+            url=source_url,
+            audience=target_audience,
+            relation=course_id or course_code,
+            coverage=institution_name or department_name,
+            date=publication_date or scraped_at,
+        )
+
+        metadata: Dict[str, Any] = {
+            "resource_id": resource_id,
+            "resource_uid": self._hash_identifier(resource_id),
+            "source_system": source_system,
+            "source_url": source_url,
+            "catalog_provider": institution_name or publisher_name,
+            "title": title,
+            "description": description,
+            "keywords": keywords,
+            "subjects": subjects,
+            "primary_subject": primary_subject,
+            "primary_subject_code": primary_subject_code,
+            "subject_category_name": subject_category_name,
+            "subject_category_code": subject_category_code,
+            "faculty_id": faculty_id,
+            "faculty_name": faculty_name,
+            "creator_names": creators,
+            "publisher_name": publisher_name,
+            "publisher_type": publisher_type,
+            "language": language,
+            "license_name": license_name,
+            "license_url": license_url,
+            "resource_format": resource_format,
+            "resource_format_category": resource_format_category,
+            "resource_type": resource_type,
+            "difficulty_level": difficulty_level,
+            "target_audience": target_audience,
+            "education_level": education_level,
+            "course_id": course_id,
+            "course_code": course_code,
+            "course_name": course_name,
+            "department_id": department_id,
+            "department_name": department_name,
+            "institution_name": institution_name,
+            "publication_date": publication_date,
+            "last_updated_at": last_updated_at,
+            "scraped_at": scraped_at,
+            "bronze_source_path": bronze_source_path,
+            "data_quality_score": data_quality_score,
+            "dc_xml": dc_xml,
+            "ingested_at": now,
+        }
+        return metadata
+
+    def _write_tables(self, df: DataFrame) -> None:
         if not self.spark:
             return
 
-        tables = [
-            (self.subjects_table, """
-                dc_identifier STRING,
-                dc_subject STRING,
-                source_system STRING,
-                ingested_at TIMESTAMP
-            """, 'source_system'),
-            (self.relations_table, """
-                dc_identifier STRING,
-                relation_url STRING,
-                relation_type STRING,
-                source_system STRING,
-                ingested_at TIMESTAMP
-            """, 'source_system'),
-            (self.multimedia_table, """
-                media_id STRING,
-                dc_identifier STRING,
-                media_type STRING,
-                title STRING,
-                url STRING,
-                transcript_available BOOLEAN,
-                size_mb DOUBLE,
-                source_system STRING,
-                ingested_at TIMESTAMP
-            """, 'source_system'),
-            (self.quality_table, """
-                dc_identifier STRING,
-                issue_code STRING,
-                severity STRING,
-                detail STRING,
-                source_system STRING,
-                detected_at TIMESTAMP
-            """, 'source_system'),
-            (self.creators_table, """
-                dc_identifier STRING,
-                creator_name STRING,
-                normalized_name STRING,
-                role STRING,
-                source_system STRING,
-                ingested_at TIMESTAMP
-            """, 'source_system'),
-            (self.history_table, """
-                dc_identifier STRING,
-                bronze_object STRING,
-                record_checksum STRING,
-                source_system STRING,
-                ingested_at TIMESTAMP
-            """, 'source_system'),
-            (self.language_table, """
-                dc_identifier STRING,
-                raw_language STRING,
-                normalized_language STRING,
-                source_system STRING,
-                ingested_at TIMESTAMP
-            """, 'source_system')
-        ]
+        deduped_df = df.dropDuplicates(["resource_uid"]).persist()
 
-        for table_name, columns, partition_key in tables:
-            try:
-                simple_table_name = table_name.split('.')[-1]
-                table_location = f"s3a://{self.bucket}/silver/{simple_table_name}"
-                create_sql = f"""
-                    CREATE TABLE IF NOT EXISTS {table_name} (
-                        {columns}
-                    ) USING iceberg
-                    PARTITIONED BY ({partition_key})
-                    LOCATION '{table_location}'
-                    TBLPROPERTIES (
-                        'format-version' = '2'
-                    )
-                """
-                print(f"Creating/ensuring support table {simple_table_name} at {table_location}...")
-                self.spark.sql(create_sql)
-                print(f"Table {table_name} ready")
-            except Exception as exc:
-                print(f"Support table creation warning for {table_name}: {exc}")
+        fact_df = (
+            deduped_df.withColumn("subjects_count", F.coalesce(F.size("subjects"), F.lit(0)))
+            .withColumn("keywords_count", F.coalesce(F.size("keywords"), F.lit(0)))
+            .withColumn("creator_count", F.coalesce(F.size("creator_names"), F.lit(0)))
+            .select(
+                "resource_uid",
+                "resource_id",
+                "source_system",
+                "source_url",
+                "catalog_provider",
+                "title",
+                "description",
+                "primary_subject",
+                "primary_subject_code",
+                "subject_category_name",
+                "subject_category_code",
+                "faculty_id",
+                "department_id",
+                "institution_name",
+                "publisher_name",
+                "publisher_type",
+                "language",
+                "license_name",
+                "license_url",
+                "resource_format",
+                "resource_format_category",
+                "resource_type",
+                "difficulty_level",
+                "target_audience",
+                "education_level",
+                "course_id",
+                "course_code",
+                "course_name",
+                "subjects_count",
+                "keywords_count",
+                "creator_count",
+                "bronze_source_path",
+                "scraped_at",
+                "last_updated_at",
+                "publication_date",
+                "data_quality_score",
+                "dc_xml",
+                "ingested_at",
+            )
+        )
 
-    def get_bronze_files(self) -> List[Dict[str, str]]:
-        """Get list of Bronze layer files from MinIO"""
-        if not self.minio_client:
-            return []
+        subjects_df = (
+            deduped_df.select(
+                "resource_uid",
+                "source_system",
+                "primary_subject_code",
+                "ingested_at",
+                F.posexplode_outer("subjects").alias("subject_position", "subject_name"),
+            )
+            .where(F.col("subject_name").isNotNull())
+            .withColumn("is_primary", F.col("subject_position") == 0)
+            .withColumn(
+                "subject_code",
+                F.when(F.col("is_primary"), F.col("primary_subject_code")),
+            )
+            .select(
+                "resource_uid",
+                F.col("subject_name").alias("subject_name"),
+                "subject_code",
+                "is_primary",
+                "source_system",
+                "ingested_at",
+            )
+        )
 
-        try:
-            files: List[Dict[str, str]] = []
-            objects = self.minio_client.list_objects(self.bucket, prefix="bronze/", recursive=True)
+        keywords_df = (
+            deduped_df.select(
+                "resource_uid",
+                "source_system",
+                "ingested_at",
+                F.explode_outer("keywords").alias("keyword"),
+            )
+            .where(F.col("keyword").isNotNull())
+        )
 
-            for obj in objects:
-                name = obj.object_name
-                if '/.placeholder' in name:
-                    continue
-                if name.endswith((".json", ".jsonl")):
-                    files.append({
-                        'uri': f"s3a://{self.bucket}/{name}",
-                        'object_name': name
-                    })
+        creators_df = (
+            deduped_df.select(
+                "resource_uid",
+                "source_system",
+                "ingested_at",
+                F.explode_outer("creator_names").alias("creator_name"),
+            )
+            .where(F.col("creator_name").isNotNull())
+        )
 
-            print(f"Found {len(files)} bronze files")
-            return files
+        self._replace_table(
+            fact_df,
+            self.full_table_name,
+            partition_columns=["subject_category_code", "DATE(ingested_at)"],
+        )
+        if self.legacy_table_name != self.full_table_name:
+            self._replace_table(
+                deduped_df,
+                self.legacy_table_name,
+                partition_columns=["subject_category_code", "DATE(ingested_at)"],
+            )
+        self._replace_table(subjects_df, self.subjects_bridge_table, partition_columns=["DATE(ingested_at)"])
+        self._replace_table(keywords_df, self.keywords_bridge_table, partition_columns=["DATE(ingested_at)"])
+        self._replace_table(creators_df, self.creators_bridge_table, partition_columns=["DATE(ingested_at)"])
 
-        except Exception as exc:
-            print(f"Error listing bronze files: {exc}")
-            return []
+        deduped_df.unpersist(False)
+
+    def _replace_table(self, df: DataFrame, table_name: str, partition_columns: Optional[List[str]] = None) -> None:
+        temp_view = f"temp_{uuid4().hex}"
+        row_count = df.count()
+        df.createOrReplaceTempView(temp_view)
+
+        partition_clause = ""
+        if partition_columns:
+            partition_clause = f"PARTITIONED BY ({', '.join(partition_columns)})"
+
+        self.spark.sql(
+            f"""
+            CREATE OR REPLACE TABLE {table_name}
+            USING iceberg
+            {partition_clause}
+            AS SELECT * FROM {temp_view}
+            """
+        )
+        self.spark.catalog.dropTempView(temp_view)
+        print(f"Wrote {row_count} records to {table_name}")
+
+    def _write_reference_dimensions(self) -> None:
+        if not self.spark:
+            return
+
+        def create_df(records: List[Dict[str, Any]], schema: Optional[T.StructType] = None) -> Optional[DataFrame]:
+            if not records:
+                return None
+            if schema:
+                return self.spark.createDataFrame(records, schema=schema)
+            return self.spark.createDataFrame(records)
+
+        subjects_schema = T.StructType(
+            [
+                T.StructField("subject_id", T.IntegerType(), True),
+                T.StructField("subject_name", T.StringType(), True),
+                T.StructField("subject_code", T.StringType(), True),
+                T.StructField("faculty_id", T.IntegerType(), True),
+                T.StructField("department_id", T.IntegerType(), True),
+                T.StructField("subject_type_id", T.IntegerType(), True),
+                T.StructField("status_code", T.StringType(), True),
+            ]
+        )
+        faculties_schema = T.StructType(
+            [
+                T.StructField("faculty_id", T.IntegerType(), True),
+                T.StructField("faculty_name", T.StringType(), True),
+            ]
+        )
+        departments_schema = T.StructType(
+            [
+                T.StructField("department_id", T.IntegerType(), True),
+                T.StructField("department_name", T.StringType(), True),
+                T.StructField("faculty_id", T.IntegerType(), True),
+            ]
+        )
+
+        subjects_df = create_df(self.reference_subject_records, subjects_schema)
+        faculties_df = create_df(self.reference_faculty_records, faculties_schema)
+        departments_df = create_df(self.reference_department_records, departments_schema)
+        programs_df = create_df(self.reference_program_records)
+        program_subject_links_df = create_df(self.reference_program_subject_links_records)
+        textbooks_df = create_df(self.reference_textbook_records)
+        dewey_df = create_df(self.reference_dewey_records)
+
+        if subjects_df is not None:
+            self._replace_table(subjects_df, self.reference_subjects_table)
+        if faculties_df is not None:
+            self._replace_table(faculties_df, self.reference_faculties_table)
+        if departments_df is not None:
+            self._replace_table(departments_df, self.reference_departments_table)
+        if programs_df is not None:
+            self._replace_table(programs_df, self.reference_programs_table)
+        if program_subject_links_df is not None:
+            self._replace_table(program_subject_links_df, self.reference_program_subject_links_table)
+        if textbooks_df is not None:
+            self._replace_table(textbooks_df, self.reference_textbooks_table)
+        if dewey_df is not None:
+            self._replace_table(dewey_df, self.reference_dewey_table)
 
     def _detect_source_system(self, record: Dict[str, Any]) -> str:
-        candidates = [record.get('source'), record.get('source_system'), record.get('provider')]
+        candidates = [
+            record.get("source"),
+            record.get("source_system"),
+            record.get("provider"),
+            record.get("scraper"),
+        ]
         for candidate in candidates:
             if not candidate:
                 continue
-            value = str(candidate).lower()
-            if 'mit' in value or 'ocw' in value:
-                return 'mit_ocw'
-            if 'openstax' in value:
-                return 'openstax'
-            if 'open textbook library' in value or 'otl' in value:
-                return 'otl'
-        return ''
+            value = str(candidate).strip().lower()
+            if value:
+                return value
+        url_str = self._ensure_str(record.get("url") or record.get("link"))
+        if url_str:
+            hostname = url_str.lower()
+            if "openstax" in hostname:
+                return "openstax"
+            if "ocw.mit.edu" in hostname or "mit" in hostname:
+                return "mit_ocw"
+            if "open.umn.edu" in hostname:
+                return "otl"
+        return "unknown"
 
-    def _resolve_identifier(self, record: Dict[str, Any], prefix: str) -> str:
-        for key in ('url', 'identifier', 'id'):
-            value = record.get(key)
-            if isinstance(value, str) and value.strip():
-                return value.strip()
-        title = (record.get('title') or record.get('name') or '').strip()
-        base = f"{prefix}:{title}" if title else prefix
-        return hashlib.md5(base.encode('utf-8')).hexdigest()
+    def _select_identifier(self, record: Dict[str, Any], source_system: str) -> Optional[str]:
+        for key in ("resource_id", "id", "identifier", "url", "course_id"):
+            candidate = record.get(key)
+            if candidate:
+                value = self._ensure_str(candidate)
+                if value:
+                    return value
+        if source_system and record.get("title"):
+            raw = f"{source_system}:{record.get('title')}"
+            return self._hash_identifier(raw)
+        return None
 
-    def _normalize_list(self, value: Any) -> List[str]:
-        if not value:
-            return []
-        if isinstance(value, list):
-            items = [str(v) for v in value]
-        elif isinstance(value, str):
-            items = re.split(r'[;,|/]', value)
-        else:
-            items = [str(value)]
-        return [item.strip() for item in items if item and item.strip()]
+    def _ensure_title(self, record: Dict[str, Any]) -> Optional[str]:
+        for key in ("title", "name", "course_title"):
+            candidate = self._ensure_str(record.get(key))
+            if candidate:
+                return candidate
+        return None
 
-    def _normalize_language(self, value: Optional[str]) -> str:
-        if not value or not str(value).strip():
-            return 'en'
-        return str(value).strip().lower()
-
-    def _format_date(self, value: Any) -> str:
-        if not value:
-            return ''
-        if isinstance(value, datetime):
-            return value.isoformat()
-        return str(value)
-
-    def _collect_relations(self, record: Dict[str, Any]) -> List[str]:
-        urls: set[str] = set()
-        for field in ('url_pdf', 'pdf_url'):
-            candidate = record.get(field)
-            if isinstance(candidate, str) and candidate.strip():
-                urls.add(candidate.strip())
-        for key in ('videos', 'pdfs', 'download_links', 'related_links'):
-            items = record.get(key, [])
-            if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, dict):
-                        for candidate_key in ('url', 'video_url', 'download_url', 'href'):
-                            link = item.get(candidate_key)
-                            if isinstance(link, str) and link.strip():
-                                urls.add(link.strip())
-                    elif isinstance(item, str) and item.strip():
-                        urls.add(item.strip())
-        raw = record.get('raw_data')
-        if isinstance(raw, dict):
-            for key in ('videos', 'pdfs', 'related_links'):
-                items = raw.get(key, [])
-                if isinstance(items, list):
-                    for item in items:
-                        if isinstance(item, dict):
-                            link = item.get('url') or item.get('href')
-                            if isinstance(link, str) and link.strip():
-                                urls.add(link.strip())
-                        elif isinstance(item, str) and item.strip():
-                            urls.add(item.strip())
-        return sorted(urls)
-
-    def _build_coverage(self, values: List[Any]) -> str:
-        parts: List[str] = []
-        for value in values:
-            if isinstance(value, (list, tuple, set)):
-                for item in value:
-                    text = str(item).strip()
-                    if text and text not in parts:
-                        parts.append(text)
-            elif isinstance(value, str):
-                text = value.strip()
-                if text and text not in parts:
-                    parts.append(text)
-        return '; '.join(parts)
-
-    def _classify_relation(self, url: str) -> str:
-        if not url:
-            return 'external'
-        url_lower = url.lower()
-        if 'youtube' in url_lower or 'youtu.be' in url_lower:
-            return 'video'
-        if url_lower.endswith('.pdf'):
-            return 'pdf'
-        if any(url_lower.endswith(ext) for ext in ('.mp3', '.wav', '.aac', '.m4a')):
-            return 'audio'
-        if 'github.com' in url_lower or 'gitlab.com' in url_lower:
-            return 'code'
-        if 'openstax' in url_lower:
-            return 'openstax'
-        if 'ocw.mit.edu' in url_lower:
-            return 'mit_ocw'
-        return 'external'
-
-    def _normalize_creator_name(self, name: str) -> str:
-        if not name:
-            return ''
-        return re.sub(r"\s+", " ", name).strip().title()
-
-    def normalize_mit_ocw(self, record: Dict[str, Any], bronze_object: str) -> Dict[str, Any]:
-        creators = self._normalize_list(record.get('instructors'))
-        subjects = self._normalize_list(record.get('subjects') or record.get('subject'))
-        relations = self._collect_relations(record)
-        coverage = self._build_coverage([record.get('semester'), record.get('level')])
-        return {
-            'dc_identifier': self._resolve_identifier(record, 'mit_ocw'),
-            'dc_title': (record.get('title') or '').strip(),
-            'dc_creator': creators,
-            'dc_subject': subjects,
-            'dc_description': (record.get('description') or '').strip(),
-            'dc_publisher': 'MIT OpenCourseWare',
-            'dc_contributor': [],
-            'dc_date': self._format_date(record.get('scraped_at') or (record.get('raw_data') or {}).get('scraped_at')),
-            'dc_type': 'InteractiveResource',
-            'dc_format': 'text/html',
-            'dc_source': 'MIT OpenCourseWare',
-            'dc_language': self._normalize_language(record.get('language')),
-            'dc_relation': relations,
-            'dc_coverage': coverage,
-            'dc_rights': (record.get('license') or 'CC BY-NC-SA 4.0').strip(),
-            'source_system': 'mit_ocw',
-            'bronze_object': bronze_object,
-            'ingested_at': datetime.utcnow()
-        }
-
-    def normalize_openstax(self, record: Dict[str, Any], bronze_object: str) -> Dict[str, Any]:
-        creators = self._normalize_list(record.get('authors'))
-        subjects = self._normalize_list(record.get('subjects') or record.get('subject'))
-        contributors = self._normalize_list(record.get('contributors'))
-        relations = self._collect_relations(record)
-        return {
-            'dc_identifier': self._resolve_identifier(record, 'openstax'),
-            'dc_title': (record.get('title') or '').strip(),
-            'dc_creator': creators,
-            'dc_subject': subjects,
-            'dc_description': (record.get('description') or '').strip(),
-            'dc_publisher': 'OpenStax',
-            'dc_contributor': contributors,
-            'dc_date': self._format_date(record.get('publication_date') or record.get('scraped_at')),
-            'dc_type': 'Text',
-            'dc_format': 'text/html',
-            'dc_source': 'OpenStax',
-            'dc_language': self._normalize_language(record.get('language')),
-            'dc_relation': relations,
-            'dc_coverage': '',
-            'dc_rights': (record.get('license') or 'CC BY 4.0').strip(),
-            'source_system': 'openstax',
-            'bronze_object': bronze_object,
-            'ingested_at': datetime.utcnow()
-        }
-
-    def normalize_otl(self, record: Dict[str, Any], bronze_object: str) -> Dict[str, Any]:
-        creators = self._normalize_list(record.get('authors'))
-        subjects = self._normalize_list(record.get('subjects') or record.get('subject'))
-        relations = self._collect_relations(record)
-        return {
-            'dc_identifier': self._resolve_identifier(record, 'otl'),
-            'dc_title': (record.get('title') or '').strip(),
-            'dc_creator': creators,
-            'dc_subject': subjects,
-            'dc_description': (record.get('description') or '').strip(),
-            'dc_publisher': 'Open Textbook Library',
-            'dc_contributor': [],
-            'dc_date': self._format_date(record.get('publication_date') or record.get('scraped_at')),
-            'dc_type': 'Text',
-            'dc_format': 'text/html',
-            'dc_source': 'Open Textbook Library',
-            'dc_language': self._normalize_language(record.get('language')),
-            'dc_relation': relations,
-            'dc_coverage': '',
-            'dc_rights': (record.get('license') or 'Various').strip(),
-            'source_system': 'otl',
-            'bronze_object': bronze_object,
-            'ingested_at': datetime.utcnow()
-        }
-
-    def _calculate_quality_score(self, record: Dict[str, Any]) -> float:
-        score = 0.0
-        if record.get('dc_title'):
-            score += 0.2
-        if record.get('dc_description'):
-            score += 0.2
-        if record.get('dc_creator'):
-            score += 0.15
-        if record.get('dc_subject'):
-            score += 0.15
-        if record.get('dc_source'):
-            score += 0.1
-        if record.get('dc_rights'):
-            score += 0.1
-        if record.get('dc_date'):
-            score += 0.1
-        return round(min(score, 1.0), 2)
-
-    def _build_relation_rows(self, normalized: Dict[str, Any], relations: List[str]) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        for url in relations:
-            if not url:
-                continue
-            rows.append({
-                'dc_identifier': normalized['dc_identifier'],
-                'relation_url': url,
-                'relation_type': self._classify_relation(url),
-                'source_system': normalized['source_system'],
-                'ingested_at': normalized['ingested_at']
-            })
-        return rows
-
-    def _build_multimedia_rows(self, record: Dict[str, Any], normalized: Dict[str, Any]) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        base_id = normalized['dc_identifier']
-        source = normalized['source_system']
-        timestamp = normalized['ingested_at']
-
-        def _safe_float(value: Any) -> Optional[float]:
-            try:
-                if value in (None, ''):
-                    return None
-                return float(value)
-            except (TypeError, ValueError):
-                return None
-
-        def add_media(media_type: str, title: str, url: Optional[str], transcript: bool = False, size_mb: Optional[Any] = None):
-            if not url:
-                return
-            media_id = hashlib.md5(f"{base_id}|{url}|{media_type}".encode('utf-8')).hexdigest()
-            rows.append({
-                'media_id': media_id,
-                'dc_identifier': base_id,
-                'media_type': media_type,
-                'title': (title or '').strip(),
-                'url': url,
-                'transcript_available': bool(transcript),
-                'size_mb': _safe_float(size_mb),
-                'source_system': source,
-                'ingested_at': timestamp
-            })
-
-        videos = record.get('videos') or (record.get('raw_data') or {}).get('videos') or []
-        for video in videos:
-            if not isinstance(video, dict):
-                continue
-            url = video.get('url') or video.get('video_url') or video.get('href')
-            title = video.get('title') or video.get('name') or normalized['dc_title']
-            transcript_flag = video.get('transcript') or video.get('transcript_url')
-            media_type = video.get('type') or 'video'
-            add_media(media_type, title, url, bool(transcript_flag), video.get('size_mb'))
-
-        pdfs = record.get('pdfs') or (record.get('raw_data') or {}).get('pdfs') or []
-        for pdf in pdfs:
-            if not isinstance(pdf, dict):
-                continue
-            url = pdf.get('url') or pdf.get('download_url') or pdf.get('href')
-            title = pdf.get('title') or pdf.get('name') or normalized['dc_title']
-            add_media(pdf.get('category') or 'pdf', title, url, False, pdf.get('size_mb'))
-
-        url_pdf = record.get('url_pdf') or record.get('pdf_url')
-        if url_pdf:
-            add_media('pdf', normalized['dc_title'], url_pdf)
-
-        return rows
-
-    def _collect_quality_issues(self, normalized: Dict[str, Any]) -> List[Dict[str, Any]]:
-        issues: List[Dict[str, Any]] = []
-        identifier = normalized['dc_identifier']
-        source = normalized['source_system']
-        timestamp = normalized['ingested_at']
-
-        def add_issue(code: str, severity: str, detail: str):
-            issues.append({
-                'dc_identifier': identifier,
-                'issue_code': code,
-                'severity': severity,
-                'detail': detail,
-                'source_system': source,
-                'detected_at': timestamp
-            })
-
-        if not normalized.get('dc_title'):
-            add_issue('MISSING_TITLE', 'high', 'Title is missing')
-        if not normalized.get('dc_description'):
-            add_issue('MISSING_DESCRIPTION', 'medium', 'Description is missing')
-        if not normalized.get('dc_creator'):
-            add_issue('MISSING_CREATOR', 'medium', 'Creators not provided')
-        if not normalized.get('dc_subject'):
-            add_issue('MISSING_SUBJECT', 'medium', 'Subjects not provided')
-        if not normalized.get('dc_rights'):
-            add_issue('MISSING_RIGHTS', 'medium', 'Rights statement missing')
-        if not normalized.get('dc_date'):
-            add_issue('MISSING_DATE', 'low', 'Primary date missing')
-
-        return issues
-
-    def _build_creator_rows(self, normalized: Dict[str, Any]) -> List[Dict[str, Any]]:
-        rows: List[Dict[str, Any]] = []
-        identifier = normalized['dc_identifier']
-        source = normalized['source_system']
-        timestamp = normalized['ingested_at']
-        for creator in normalized.get('dc_creator', []) or []:
-            rows.append({
-                'dc_identifier': identifier,
-                'creator_name': creator,
-                'normalized_name': self._normalize_creator_name(creator),
-                'role': 'creator',
-                'source_system': source,
-                'ingested_at': timestamp
-            })
-        for contributor in normalized.get('dc_contributor', []) or []:
-            rows.append({
-                'dc_identifier': identifier,
-                'creator_name': contributor,
-                'normalized_name': self._normalize_creator_name(contributor),
-                'role': 'contributor',
-                'source_system': source,
-                'ingested_at': timestamp
-            })
-        return rows
-
-    def _build_history_row(self, normalized: Dict[str, Any], record: Dict[str, Any]) -> Dict[str, Any]:
-        checksum = hashlib.md5(json.dumps(record, sort_keys=True, default=str).encode('utf-8')).hexdigest()
-        return {
-            'dc_identifier': normalized['dc_identifier'],
-            'bronze_object': normalized['bronze_object'],
-            'record_checksum': checksum,
-            'source_system': normalized['source_system'],
-            'ingested_at': normalized['ingested_at']
-        }
-
-    def _build_language_row(self, normalized: Dict[str, Any], raw_language: Optional[str]) -> Optional[Dict[str, Any]]:
-        normalized_language = normalized.get('dc_language')
-        if raw_language is None and not normalized_language:
+    def _ensure_str(self, value: Any) -> Optional[str]:
+        if value is None:
             return None
-        return {
-            'dc_identifier': normalized['dc_identifier'],
-            'raw_language': raw_language,
-            'normalized_language': normalized_language,
-            'source_system': normalized['source_system'],
-            'ingested_at': normalized['ingested_at']
-        }
+        if isinstance(value, (list, dict)):
+            return None
+        text = str(value).strip()
+        return text or None
 
-    def process_bronze_file(self, file_uri: str, object_name: str) -> Dict[str, List[Dict[str, Any]]]:
-        aggregated: Dict[str, List[Dict[str, Any]]] = {
-            'resources': [],
-            'subjects': [],
-            'relations': [],
-            'multimedia': [],
-            'quality': [],
-            'creators': [],
-            'history': [],
-            'languages': []
-        }
-        try:
-            print(f"Processing {object_name}")
-            df = self.spark.read.option("multiline", "true").json(file_uri)
-            for row in df.toLocalIterator():
-                record = row.asDict(recursive=True)
-                source_system = self._detect_source_system(record)
-                if not source_system:
-                    print(f"Unknown source for object {object_name}, skipping record")
-                    continue
-                if source_system == 'mit_ocw':
-                    normalized = self.normalize_mit_ocw(record, object_name)
-                elif source_system == 'openstax':
-                    normalized = self.normalize_openstax(record, object_name)
-                elif source_system == 'otl':
-                    normalized = self.normalize_otl(record, object_name)
-                else:
-                    print(f"Unsupported source {source_system} in {object_name}")
-                    continue
-                normalized['quality_score'] = self._calculate_quality_score(normalized)
-                aggregated['resources'].append(normalized)
-                if normalized.get('dc_subject'):
-                    for subject in normalized['dc_subject']:
-                        if not subject:
-                            continue
-                        aggregated['subjects'].append({
-                            'dc_identifier': normalized['dc_identifier'],
-                            'dc_subject': subject,
-                            'source_system': normalized['source_system'],
-                            'ingested_at': normalized['ingested_at']
-                        })
-                relations = normalized.get('dc_relation') or []
-                aggregated['relations'].extend(self._build_relation_rows(normalized, relations))
-                aggregated['multimedia'].extend(self._build_multimedia_rows(record, normalized))
-                aggregated['quality'].extend(self._collect_quality_issues(normalized))
-                aggregated['creators'].extend(self._build_creator_rows(normalized))
-                aggregated['history'].append(self._build_history_row(normalized, record))
-                raw_language = record.get('language')
-                if not raw_language:
-                    raw_data = record.get('raw_data') or {}
-                    raw_language = raw_data.get('language') or raw_data.get('locale')
-                if isinstance(raw_language, str):
-                    raw_language = raw_language.strip() or None
-                language_row = self._build_language_row(normalized, raw_language)
-                if language_row:
-                    aggregated['languages'].append(language_row)
-            print(f"Processed {len(aggregated['resources'])} records from {object_name}")
-            return aggregated
-        except Exception as exc:
-            print(f"Error processing {object_name}: {exc}")
-            return aggregated
-
-    def _write_table(self, records: List[Dict[str, Any]], table_name: str, dedup_columns: Optional[List[str]], label: str) -> int:
-        if not records or not self.spark:
-            return 0
-        
-        # Define explicit schema for resource table
-        schema = StructType([
-            StructField("dc_identifier", StringType(), False),
-            StructField("dc_title", StringType(), True),
-            StructField("dc_creator", ArrayType(StringType()), True),
-            StructField("dc_subject", ArrayType(StringType()), True),
-            StructField("dc_description", StringType(), True),
-            StructField("dc_publisher", StringType(), True),
-            StructField("dc_contributor", ArrayType(StringType()), True),
-            StructField("dc_date", StringType(), True),
-            StructField("dc_type", StringType(), True),
-            StructField("dc_format", StringType(), True),
-            StructField("dc_source", StringType(), True),
-            StructField("dc_language", StringType(), True),
-            StructField("dc_relation", ArrayType(StringType()), True),
-            StructField("dc_coverage", StringType(), True),
-            StructField("dc_rights", StringType(), True),
-            StructField("source_system", StringType(), False),
-            StructField("bronze_object", StringType(), True),
-            StructField("ingested_at", TimestampType(), True),
-            StructField("quality_score", DoubleType(), True)
-        ])
-        
-        df = self.spark.createDataFrame(records, schema=schema)
-        if dedup_columns:
-            df = df.dropDuplicates(dedup_columns)
-        df = df.cache()
-        count = df.count()
-        df.writeTo(table_name).using("iceberg").overwritePartitions()
-        df.unpersist()
-        print(f"Wrote {count} {label} rows to {table_name}")
-        return count
-
-    def write_to_silver(self, records: List[Dict[str, Any]]):
-        self._write_table(records, self.full_table_name, ['dc_identifier', 'source_system'], 'resource')
-
-    def run(self):
-        print("Starting Bronze to Silver transformation...")
-        if not self.spark:
-            print("Spark not available, cannot proceed")
-            return
-        bronze_files = self.get_bronze_files()
-        if not bronze_files:
-            print("No bronze files found")
-            return
-        aggregated: Dict[str, List[Dict[str, Any]]] = {
-            'resources': [],
-            'subjects': [],
-            'relations': [],
-            'multimedia': [],
-            'quality': [],
-            'creators': [],
-            'history': [],
-            'languages': []
-        }
-        for file_info in bronze_files:
-            partial = self.process_bronze_file(file_info['uri'], file_info['object_name'])
-            for key in aggregated:
-                aggregated[key].extend(partial.get(key, []))
-        resources = aggregated['resources']
-        if resources:
-            self.write_to_silver(resources)
-            self._write_table(aggregated['subjects'], self.subjects_table, ['dc_identifier', 'dc_subject'], 'subject')
-            self._write_table(aggregated['relations'], self.relations_table, ['dc_identifier', 'relation_url'], 'relation')
-            self._write_table(aggregated['multimedia'], self.multimedia_table, ['media_id'], 'multimedia')
-            self._write_table(aggregated['quality'], self.quality_table, ['dc_identifier', 'issue_code'], 'quality issue')
-            self._write_table(aggregated['creators'], self.creators_table, ['dc_identifier', 'creator_name', 'role'], 'creator')
-            self._write_table(aggregated['history'], self.history_table, ['dc_identifier', 'record_checksum'], 'history entry')
-            self._write_table(aggregated['languages'], self.language_table, ['dc_identifier', 'normalized_language', 'raw_language'], 'language mapping')
-            sources: Dict[str, int] = {}
-            for record in resources:
-                source = record['source_system']
-                sources[source] = sources.get(source, 0) + 1
-            print("\nSilver layer summary:")
-
-            for source, count in sources.items():
-                print(f"{source}: {count} records")
-            avg_quality = sum(r['quality_score'] for r in resources) / len(resources)
-            print(f"Average quality score: {avg_quality:.2f}")
+    def _clean_string_list(self, value: Any) -> List[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            raw_items: Iterable[str] = (item.strip() for item in value.split(","))
+        elif isinstance(value, Iterable):
+            raw_items = (self._ensure_str(item) or "" for item in value)
         else:
-            print("No normalized records generated")
-        print("Bronze to Silver transformation completed!")
-        if self.spark:
-            self.spark.stop()
+            raw_items = ()
+        cleaned: List[str] = []
+        for item in raw_items:
+            item = (item or "").strip()
+            if item and item not in cleaned:
+                cleaned.append(item)
+        return cleaned
 
-def main():
-    """Entry point for standalone execution"""
-    transformer = SilverTransformStandalone()
+    def _normalize_text(self, value: Optional[str]) -> str:
+        if not value:
+            return ""
+        normalized = unicodedata.normalize("NFKD", value)
+        normalized = "".join(ch for ch in normalized if not unicodedata.combining(ch))
+        normalized = normalized.encode("ascii", "ignore").decode("ascii")
+        normalized = re.sub(r"[^a-z0-9]+", " ", normalized.lower())
+        return normalized.strip()
+
+    def _derive_subjects(self, record: Dict[str, Any]) -> List[str]:
+        candidates = [
+            record.get("subjects"),
+            record.get("subject"),
+            record.get("categories"),
+            record.get("tags"),
+            record.get("keywords"),
+        ]
+        subjects: List[str] = []
+        for candidate in candidates:
+            subjects.extend(self._clean_string_list(candidate))
+        return subjects[:10]
+
+    def _derive_subject_category(self, primary_subject: Optional[str]) -> Tuple[str, str]:
+        if not primary_subject:
+            return "General Studies", "GEN"
+        normalized = primary_subject.lower()
+        for rule in self.SUBJECT_CATEGORY_RULES:
+            if rule.pattern and self._regex_match(rule.pattern, normalized):
+                return rule.name, rule.code
+        return "General Studies", "GEN"
+
+    def _match_reference_subject(
+        self,
+        primary_subject: Optional[str],
+        subjects: List[str],
+        course_code: Optional[str],
+        course_id: Optional[str],
+        course_name: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        if not self.reference_enabled:
+            return None
+
+        candidate_codes = []
+        for code in (course_code, course_id):
+            if code:
+                candidate_codes.append(code.strip().lower())
+        for code in candidate_codes:
+            match = self.reference_subjects_by_code.get(code)
+            if match:
+                return match
+
+        candidate_names: List[str] = []
+        for value in (primary_subject, course_name):
+            if value:
+                candidate_names.append(value)
+        candidate_names.extend(subjects)
+
+        seen = set()
+        for name in candidate_names:
+            key = self._normalize_text(name)
+            if key and key not in seen:
+                seen.add(key)
+                match = self.reference_subjects_by_name.get(key)
+                if match:
+                    return match
+        return None
+
+    def _derive_keywords(self, record: Dict[str, Any], subjects: List[str], title: Optional[str]) -> List[str]:
+        keywords = set(subjects)
+        keywords.update(self._clean_string_list(record.get("keywords")))
+        keywords.update(self._clean_string_list(record.get("tags")))
+        if title:
+            title_tokens = [token for token in re_split_words(title) if len(token) > 3]
+            keywords.update(title_tokens[:10])
+        return sorted(keyword for keyword in keywords if keyword)
+
+    def _ensure_language(self, value: Any) -> str:
+        language = self._ensure_str(value) or "en"
+        if len(language) == 2:
+            return language.lower()
+        return language[:5].lower()
+
+    def _derive_publisher(self, record: Dict[str, Any], source_system: str) -> str:
+        publisher = self._ensure_str(record.get("publisher"))
+        if publisher:
+            return publisher
+        if source_system == "mit_ocw":
+            return "MIT OpenCourseWare"
+        if source_system == "openstax":
+            return "OpenStax"
+        if source_system == "otl":
+            return "Open Textbook Library"
+        return "Unknown Publisher"
+
+    def _derive_publisher_type(self, publisher_name: str) -> str:
+        name = (publisher_name or "").lower()
+        for keyword, publisher_type in self.PUBLISHER_TYPE_RULES:
+            if keyword in name:
+                return publisher_type
+        return "Platform"
+
+    def _derive_license(self, record: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+        name = self._ensure_str(record.get("license") or record.get("rights"))
+        url = self._ensure_str(record.get("license_url") or record.get("rights_url"))
+        if not name and record.get("legal_notice"):
+            legal = self._ensure_str(record["legal_notice"])
+            if legal:
+                name = legal[:120]
+        return name, url
+
+    def _derive_format(self, record: Dict[str, Any]) -> Optional[str]:
+        candidates = [
+            record.get("format"),
+            record.get("content_format"),
+            record.get("resource_format"),
+        ]
+        for candidate in candidates:
+            value = self._ensure_str(candidate)
+            if value:
+                return value.lower()
+        if record.get("has_videos"):
+            return "video"
+        if record.get("has_pdfs"):
+            return "pdf"
+        return None
+
+    def _derive_format_category(self, resource_format: Optional[str]) -> Optional[str]:
+        if not resource_format:
+            return None
+        fmt = resource_format.lower()
+        for keyword, category in self.FORMAT_CATEGORY_RULES:
+            if keyword in fmt:
+                return category
+        return "Document"
+
+    def _derive_resource_type(self, record: Dict[str, Any], source_system: str) -> str:
+        explicit = self._ensure_str(record.get("resource_type"))
+        if explicit:
+            return explicit.title()
+        if source_system == "mit_ocw":
+            return "Course"
+        if source_system == "openstax":
+            return "Textbook"
+        if source_system == "otl":
+            return "Textbook"
+        return "Learning Resource"
+
+    def _derive_level(self, record: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+        difficulty = self._ensure_str(record.get("difficulty") or record.get("level"))
+        audience = self._ensure_str(record.get("target_audience"))
+        if not audience and difficulty:
+            audience = {
+                "introductory": "Undergraduate",
+                "beginner": "Undergraduate",
+                "intermediate": "Undergraduate",
+                "advanced": "Graduate",
+                "graduate": "Graduate",
+            }.get(difficulty.lower())
+        return difficulty, audience
+
+    def _derive_institution(self, source_system: str) -> Optional[str]:
+        if source_system == "mit_ocw":
+            return "Massachusetts Institute of Technology"
+        if source_system == "openstax":
+            return "Rice University / OpenStax"
+        if source_system == "otl":
+            return "University of Minnesota"
+        return None
+
+    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+        if not value:
+            return None
+        if isinstance(value, datetime):
+            return value
+        text = self._ensure_str(value)
+        if not text:
+            return None
+        try:
+            if text.isdigit() and len(text) == 4:
+                return datetime(int(text), 1, 1)
+            text = text.replace("Z", "+00:00")
+            return datetime.fromisoformat(text)
+        except Exception:
+            return None
+
+    def _compute_quality_score(
+        self,
+        *,
+        title: Optional[str],
+        description: Optional[str],
+        subjects: List[str],
+        keywords: List[str],
+        creators: List[str],
+        publisher_name: Optional[str],
+        language: Optional[str],
+        license_name: Optional[str],
+        source_url: Optional[str],
+    ) -> float:
+        checks = [
+            bool(title),
+            bool(description),
+            bool(subjects),
+            bool(keywords),
+            bool(creators),
+            bool(publisher_name),
+            bool(language),
+            bool(license_name),
+            bool(source_url),
+        ]
+        score = sum(1 for flag in checks if flag) / len(checks)
+        return round(score, 3)
+
+    def _hash_identifier(self, identifier: str) -> str:
+        return hashlib.sha256(identifier.encode("utf-8")).hexdigest()
+
+    def _build_dublin_core_xml(
+        self,
+        *,
+        identifier: str,
+        title: Optional[str],
+        description: Optional[str],
+        creators: List[str],
+        subjects: List[str],
+        publisher: Optional[str],
+        language: Optional[str],
+        rights: Optional[str],
+        source: Optional[str],
+        resource_type: Optional[str],
+        resource_format: Optional[str],
+        url: Optional[str],
+        audience: Optional[str],
+        relation: Optional[str],
+        coverage: Optional[str],
+        date: Optional[datetime],
+    ) -> str:
+        ns = {
+            "xmlns:oai_dc": "http://www.openarchives.org/OAI/2.0/oai_dc/",
+            "xmlns:dc": "http://purl.org/dc/elements/1.1/",
+            "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+            "xsi:schemaLocation": "http://www.openarchives.org/OAI/2.0/oai_dc/ "
+            "http://www.openarchives.org/OAI/2.0/oai_dc.xsd",
+        }
+        root = ET.Element("oai_dc:dc", ns)
+
+        def add_element(tag: str, value: Optional[str]) -> None:
+            if value:
+                ET.SubElement(root, f"dc:{tag}").text = value
+
+        add_element("identifier", identifier)
+        if url and url != identifier:
+            add_element("identifier", url)
+        add_element("title", title)
+        add_element("description", description)
+        for creator in creators:
+            add_element("creator", creator)
+        for subject in subjects:
+            add_element("subject", subject)
+        add_element("publisher", publisher)
+        add_element("language", language)
+        add_element("rights", rights)
+        add_element("source", source)
+        add_element("type", resource_type)
+        add_element("format", resource_format)
+        add_element("relation", relation)
+        add_element("coverage", coverage)
+        add_element("audience", audience)
+        if date:
+            add_element("date", date.strftime("%Y-%m-%dT%H:%M:%SZ"))
+
+        return ET.tostring(root, encoding="utf-8").decode("utf-8")
+
+    def _regex_match(self, pattern: str, value: str) -> bool:
+        import re
+
+        return re.search(pattern, value, re.IGNORECASE) is not None
+
+
+def re_split_words(text: str) -> List[str]:
+    import re
+
+    return [token for token in re.split(r"[^A-Za-z0-9]+", text) if token]
+
+
+def main() -> None:
+    transformer = SilverDublinCoreTransformer()
     transformer.run()
+
 
 if __name__ == "__main__":
     main()
-

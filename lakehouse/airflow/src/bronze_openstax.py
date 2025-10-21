@@ -609,19 +609,6 @@ class OpenStaxScraperStandalone:
             except Exception as e:
                 print(f"Lỗi khi extract subject: {e}")
             
-            # Tạo raw_data với thông tin HTML gốc đầy đủ
-            raw_data = {
-                'html_content': str(soup),
-                'url': url,
-                    'scraped_at': datetime.now().isoformat(),
-                'scraper_version': '2.0',
-                'page_title': soup.find('title').get_text() if soup.find('title') else '',
-                'meta_description': description,
-                'all_links': [link.get('href') for link in soup.find_all('a', href=True)],
-                'all_headers': [h.get_text(strip=True) for h in soup.find_all(['h1', 'h2', 'h3', 'h4', 'h5', 'h6'])],
-                'page_text': soup.get_text(strip=True)
-            }
-            
             doc = {
                 'id': self.create_doc_hash(url, title),
                 'title': title,
@@ -631,8 +618,7 @@ class OpenStaxScraperStandalone:
                 'source': 'OpenStax',
                 'url': url,
                 'url_pdf': pdf_url,
-                'scraped_at': datetime.now().isoformat(),
-                'raw_data': raw_data
+                'scraped_at': datetime.now().isoformat()
             }
             
             print(f"Đã cào: {title}")
@@ -653,12 +639,12 @@ class OpenStaxScraperStandalone:
         
         # Tạo đường dẫn có tổ chức cho OpenStax
         timestamp = int(time.time())
-        object_name = f"bronze/{source}/{logical_date}/{file_type}_{timestamp}.jsonl"
+        object_name = f"bronze/{source}/{logical_date}/{file_type}_{timestamp}.json"
         
         # Tạo temporary file
         os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
         tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.jsonl")
+        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.json")
         
         try:
             # Ghi dữ liệu vào temp file

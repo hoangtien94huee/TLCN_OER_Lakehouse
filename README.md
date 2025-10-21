@@ -221,6 +221,7 @@ docker exec oer-airflow-scraper python /opt/airflow/src/create_schema.py
 #### Option 1: Chạy từng bước
 
 ```bash
+
 # 1. Thu thập dữ liệu từ MIT OCW
 docker exec oer-airflow-scraper python /opt/airflow/src/bronze_mit_ocw.py
 
@@ -229,6 +230,9 @@ docker exec oer-airflow-scraper python /opt/airflow/src/bronze_openstax.py
 
 # 3. Thu thập dữ liệu từ OTL
 docker exec oer-airflow-scraper python /opt/airflow/src/bronze_otl.py
+
+# Đưa giáo trình vào minIO
+python /opt/airflow/src/giaotrinh_reference_loader.py        --sql-path /opt/airflow/giaotrinh.sql        --output-dir /opt/airflow/data/reference        --upload-to-minio        --minio-prefix bronze/reference/giaotrinh
 
 # 4. Transform sang Silver layer
 docker exec oer-airflow-scraper python /opt/airflow/src/silver_transform.py

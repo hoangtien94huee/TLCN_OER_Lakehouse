@@ -19,7 +19,10 @@ scraped_data/
 scraped_pdfs/
 airflow.db
 spark_data/
+reference/
+scraped/
 
+*.sql
 # Docker
 *.env
 .env

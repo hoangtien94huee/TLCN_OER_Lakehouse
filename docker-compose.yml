@@ -39,47 +39,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Iceberg REST Catalog - Đơn giản thay thế Hive Metastore
-  iceberg-rest:
-    build:
-      context: ./lakehouse/iceberg-rest
-      dockerfile: Dockerfile
-    container_name: oer-iceberg-rest
-    ports:
-      - "8181:8181"
-    environment:
-      # Catalog configuration
-      CATALOG_WAREHOUSE: s3a://oer-lakehouse/
-      CATALOG_URI: jdbc:postgresql://postgres:5432/iceberg
-      CATALOG_JDBC_USER: iceberg
-      CATALOG_JDBC_PASSWORD: iceberg
-      # Hadoop FileSystem configuration for S3A
-      CATALOG_IO__IMPL: org.apache.iceberg.hadoop.HadoopFileIO
-      # S3A Hadoop configuration (phải dùng CATALOG_ prefix cho Iceberg REST)
-      CATALOG_S3_ENDPOINT: http://minio:9000
-      CATALOG_S3_PATH__STYLE__ACCESS: "true"
-      CATALOG_S3_ACCESS__KEY__ID: minioadmin
-      CATALOG_S3_SECRET__ACCESS__KEY: minioadmin
-      # Hadoop fs.s3a.* properties so HadoopFileIO picks them up
-      CATALOG_FS__S3A__ENDPOINT: http://minio:9000
-      CATALOG_FS__S3A__PATH__STYLE__ACCESS: "true"
-      CATALOG_FS__S3A__CONNECTION__SSL__ENABLED: "false"
-      CATALOG_FS__S3A__ACCESS__KEY: minioadmin
-      CATALOG_FS__S3A__SECRET__KEY: minioadmin
-      # CATALOG_FS__S3A__AWS__CREDENTIALS__PROVIDER: org.apache.hadoop.fs.s3a.SimpleAWSCredentialsProvider
-      # NOTE: Biến AWS_* bên dưới KHÔNG kết nối tới AWS Cloud!
-      # S3A client của Hadoop BẮT BUỘC phải có các biến này (legacy design)
-      # Chúng chỉ chứa credentials cho MinIO (S3-compatible local storage)
-      AWS_ACCESS_KEY_ID: minioadmin
-      AWS_SECRET_ACCESS_KEY: minioadmin
-      AWS_REGION: us-east-1
-    depends_on:
-      postgres:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-    restart: unless-stopped
-
   # Jupyter Notebook for Data Exploration  
   jupyter:
     image: jupyter/pyspark-notebook:latest
@@ -113,8 +72,6 @@ services:
         condition: service_healthy
       spark-master:
         condition: service_healthy
-      iceberg-rest:
-        condition: service_started
     ports:
       - "8080:8080"
     volumes:
@@ -123,7 +80,6 @@ services:
       - ./lakehouse/data/logs:/opt/airflow/logs
       - ./lakehouse/airflow/dags:/opt/airflow/dags
       - ./lakehouse/airflow/src:/opt/airflow/src
-      - ./lakehouse/data/spark:/opt/airflow/spark_data
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -174,6 +130,8 @@ services:
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
+      # Iceberg Hadoop Catalog support (NO REST needed!)
+      - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dcom.amazonaws.sdk.disableEc2Metadata=true
     ports:
       - "8081:8080" # Spark Master Web UI
       - "7077:7077" # Spark Master Port

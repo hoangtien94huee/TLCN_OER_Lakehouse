@@ -25,6 +25,14 @@ except ImportError:
     MINIO_AVAILABLE = False
 
 
+try:
+    from langchain_google_genai import ChatGoogleGenerativeAI
+    from langchain_core.messages import HumanMessage
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+
+
 @dataclass(frozen=True)
 class Faculty:
     faculty_id: int
@@ -42,6 +50,7 @@ class Department:
 class Subject:
     subject_id: int
     subject_name: str
+    subject_name_en: Optional[str]  # English translation
     subject_code: Optional[str]
     faculty_id: Optional[int]
     department_id: Optional[int]
@@ -229,13 +238,122 @@ class SqlInsertParser:
 
 class GiaotrinhReferenceExtractor:
     """Expose structured data from giaotrinh.sql using the manual INSERT parser."""
+    
+    # Class variable for translation cache file
+    TRANSLATION_CACHE_FILE = None
 
-    def __init__(self, sql_path: Path) -> None:
+    def __init__(self, sql_path: Path, cache_file: Optional[Path] = None) -> None:
         if not sql_path.exists():
             raise FileNotFoundError(f"SQL file does not exist: {sql_path}")
         sql_text = sql_path.read_text(encoding="utf-8", errors="ignore")
         self.parser = SqlInsertParser(sql_text)
+        
+        # Set up translation cache
+        self.cache_file = cache_file or Path(sql_path.parent) / "subjects_translation_cache.json"
+        self.translation_cache: Dict[str, str] = {}
+        self._load_translation_cache()
+        
+        # Initialize translator if available (prefer deep_translator for speed)
+        self.translator = None
+        
+        if LANGCHAIN_AVAILABLE:
+            try:
+                api_key = os.getenv("GOOGLE_API_KEY")
+                if not api_key:
+                    print("GOOGLE_API_KEY not set, translation disabled")
+                else:
+                    self.translator = ChatGoogleGenerativeAI(
+                        model="gemini-2.5-flash-lite",
+                        google_api_key=api_key
+                    )
+                    print("LangChain + Gemini API initialized (with caching)")
+            except Exception as exc:
+                print(f"Translation disabled: {exc}")
 
+    def _load_translation_cache(self) -> None:
+        """Load existing translations from cache file."""
+        if self.cache_file.exists():
+            try:
+                with open(self.cache_file, 'r', encoding='utf-8') as f:
+                    self.translation_cache = json.load(f)
+                print(f"✓ Loaded {len(self.translation_cache)} cached translations")
+            except Exception as exc:
+                print(f"⚠ Failed to load cache: {exc}")
+
+    def _save_translation_cache(self) -> None:
+        """Save translations to cache file."""
+        try:
+            with open(self.cache_file, 'w', encoding='utf-8') as f:
+                json.dump(self.translation_cache, f, ensure_ascii=False, indent=2)
+            print(f"✓ Saved {len(self.translation_cache)} translations to cache")
+        except Exception as exc:
+            print(f"⚠ Failed to save cache: {exc}")
+
+    def _translate_batch(self, texts: List[str]) -> Dict[str, str]:
+        """Translate multiple texts in one API call for efficiency."""
+        results = {}
+        to_translate = []
+        
+        # Filter out already cached items
+        for text in texts:
+            text = text.strip()
+            if not text:
+                continue
+            if text in self.translation_cache:
+                cached = self.translation_cache[text]
+                # Validate cached value is string, not coroutine
+                if isinstance(cached, str):
+                    results[text] = cached
+                else:
+                    print(f"  ⚠ Invalid cache for '{text}': {type(cached).__name__}")
+                    to_translate.append(text)
+            elif text not in to_translate:
+                to_translate.append(text)
+        
+        if not to_translate or not self.translator:
+            return results
+        
+        print(f"  Translating {len(to_translate)} new subjects...")
+        
+        # Batch in chunks of 20 to avoid token limit
+        batch_size = 500
+        for i in range(0, len(to_translate), batch_size):
+            batch = to_translate[i:i+batch_size]
+            try:
+                batch_text = "\n".join([f"{j+1}. {t}" for j, t in enumerate(batch)])
+                prompt = f"""Translate these Vietnamese texts to English. Output ONLY the translations numbered 1-{len(batch)}, one per line:
+{batch_text}"""
+                
+                response = self.translator.invoke([HumanMessage(content=prompt)])
+                
+                # Validate response is an AIMessage
+                if not hasattr(response, 'content'):
+                    raise ValueError(f"Response is {type(response).__name__}, not AIMessage")
+                
+                response_text = str(response.content).strip()
+                
+                if not response_text:
+                    raise ValueError("Empty response content")
+                
+                translated_lines = response_text.split("\n")
+                
+                # Parse numbered output
+                for idx, original in enumerate(batch):
+                    if idx < len(translated_lines):
+                        line = translated_lines[idx].strip()
+                        # Remove number prefix if present (e.g., "1. Translation" -> "Translation")
+                        if line and line[0].isdigit():
+                            line = line.split(".", 1)[1].strip() if "." in line else line
+                        
+                        if line and isinstance(line, str):
+                            self.translation_cache[original] = line
+                            results[original] = line
+                            print(f"    ✓ {original} → {line}")
+            except Exception as exc:
+                print(f"  ⚠ Batch {i//batch_size + 1} failed: {str(exc)[:100]}")
+        
+        return results
+    
     def faculties(self) -> List[Faculty]:
         rows = self.parser.get_rows("khoa")
         return [Faculty(int(row[0]), row[1] or "") for row in rows]
@@ -253,13 +371,29 @@ class GiaotrinhReferenceExtractor:
 
     def subjects(self) -> List[Subject]:
         rows = self.parser.get_rows("mon")
+        
+        # Extract all subject names for batch translation
+        subject_names = [row[1] or "" for row in rows if row[1]]
+        
+        # Batch translate all at once
+        if subject_names and self.translator:
+            print(f"Batch translating {len(subject_names)} subjects...")
+            translations = self._translate_batch(subject_names)
+        else:
+            translations = {}
+        
+        # Build results with translations
         result: List[Subject] = []
         for row in rows:
             subject_id, name, code, _, faculty_id, department_id, subject_type, status = row
+            subject_name = name or ""
+            subject_name_en = translations.get(subject_name) if subject_name else None
+            
             result.append(
                 Subject(
                     subject_id=int(subject_id),
-                    subject_name=name or "",
+                    subject_name=subject_name,
+                    subject_name_en=subject_name_en,
                     subject_code=code,
                     faculty_id=int(faculty_id) if faculty_id is not None else None,
                     department_id=int(department_id) if department_id is not None else None,
@@ -267,6 +401,9 @@ class GiaotrinhReferenceExtractor:
                     status_code=status,
                 )
             )
+        
+        # Save updated cache after processing all subjects
+        self._save_translation_cache()
         return result
 
     def programs(self) -> List[Program]:

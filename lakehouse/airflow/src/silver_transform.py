@@ -1,12 +1,11 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
-Silver Layer Dublin Core Transformer
-====================================
+Silver Layer Resource Transformer
+==================================
 
-This module normalizes bronze layer OER scrapes into a consistent Dublin Core
-representation stored in Iceberg. Each record includes both structured fields
-for analytics and an XML payload that follows the Dublin Core standard so that
-search and downstream systems can rely on a uniform contract.
+This module normalizes bronze layer OER scrapes into a consistent representation
+stored in Iceberg. Each record includes structured fields for analytics and a
+reference path to an XML file that follows the Dublin Core standard.
 """
 
 from __future__ import annotations
@@ -15,14 +14,30 @@ import hashlib
 import os
 import sys
 import json
-from dataclasses import dataclass
+from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Set
 import unicodedata
 import re
 import xml.etree.ElementTree as ET
 from uuid import uuid4
+
+try:
+    import numpy as np
+
+    NUMPY_AVAILABLE = True
+except ImportError:
+    NUMPY_AVAILABLE = False
+    np = None  # type: ignore
+
+try:
+    from sentence_transformers import SentenceTransformer
+
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SentenceTransformer = None  # type: ignore
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
 
 try:
     from minio import Minio
@@ -43,48 +58,8 @@ except ImportError:
     Row = SparkSession = DataFrame = None  # type: ignore
 
 
-@dataclass(frozen=True)
-class SubjectCategoryRule:
-    pattern: str
-    name: str
-    code: str
-
-
-class SilverDublinCoreTransformer:
-    """Transforms bronze JSON payloads into normalized Dublin Core XML records."""
-
-    SUBJECT_CATEGORY_RULES: Tuple[SubjectCategoryRule, ...] = (
-        SubjectCategoryRule(r"\b(computer|software|program|data|ai|machine|cs)\b", "Computer Science", "CS"),
-        SubjectCategoryRule(r"\b(math|algebra|calculus|geometry|statistics)\b", "Mathematics", "MATH"),
-        SubjectCategoryRule(r"\b(physics|chemistry|biology|science|astronomy)\b", "Natural Sciences", "SCI"),
-        SubjectCategoryRule(r"\b(engineering|mechanical|electrical|civil|aerospace)\b", "Engineering", "ENG"),
-        SubjectCategoryRule(r"\b(history|politic|sociology|psychology|anthropology|philosophy)\b", "Social Scie nces", "SOC"),
-        SubjectCategoryRule(r"\b(business|finance|management|marketing|economics)\b", "Business and Management", "BUS"),
-        SubjectCategoryRule(r"\b(language|literature|writing|art|music)\b", "Arts and Humanities", "ART"),
-        SubjectCategoryRule(r"\b(education|teaching|learning|pedagogy)\b", "Education", "EDU"),
-        SubjectCategoryRule(r"\b(health|medicine|nursing|biology|biomedical)\b", "Health Sciences", "HEALTH"),
-    )
-
-    PUBLISHER_TYPE_RULES: Tuple[Tuple[str, str], ...] = (
-        ("university", "University"),
-        ("institute", "University"),
-        ("college", "University"),
-        ("openstax", "Non-profit"),
-        ("opentextbook", "Non-profit"),
-        ("mit", "University"),
-        ("ocw", "University"),
-        ("library", "Library"),
-    )
-
-    FORMAT_CATEGORY_RULES: Tuple[Tuple[str, str], ...] = (
-        ("pdf", "Document"),
-        ("html", "Document"),
-        ("ebook", "Document"),
-        ("video", "Media"),
-        ("audio", "Media"),
-        ("interactive", "Interactive"),
-        ("notebook", "Interactive"),
-    )
+class SilverTransformer:
+    """Transforms bronze JSON payloads into normalized records with Dublin Core metadata path references."""
 
     def __init__(self) -> None:
         if not SPARK_AVAILABLE:
@@ -127,11 +102,38 @@ class SilverDublinCoreTransformer:
         self.reference_program_subject_links_records: List[Dict[str, Any]] = []
         self.reference_textbook_records: List[Dict[str, Any]] = []
         self.reference_dewey_records: List[Dict[str, Any]] = []
+        self.reference_subject_aliases: Dict[int, List[str]] = {}
         self.reference_storage: str = "local"
         self.reference_path: Optional[Path] = None
         self.reference_bucket: Optional[str] = None
         self.reference_prefix: str = ""
         self.minio_client: Optional[Minio] = None
+
+        disable_embeddings = os.getenv("SILVER_DISABLE_EMBEDDINGS", "").lower() in {"1", "true", "yes"}
+        self.embedding_model_name = os.getenv(
+            "SILVER_EMBED_MODEL", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+        )
+        threshold_env = os.getenv("SILVER_EMBED_THRESHOLD")
+        try:
+            self.embedding_similarity_threshold = float(threshold_env) if threshold_env else 0.55
+        except ValueError:
+            print(f"Invalid SILVER_EMBED_THRESHOLD '{threshold_env}', falling back to 0.55")
+            self.embedding_similarity_threshold = 0.55
+        self.embedding_enabled = (
+            not disable_embeddings and SENTENCE_TRANSFORMERS_AVAILABLE and NUMPY_AVAILABLE
+        )
+        if not self.embedding_enabled:
+            if disable_embeddings:
+                print("Subject embedding mapping disabled via SILVER_DISABLE_EMBEDDINGS")
+            elif not SENTENCE_TRANSFORMERS_AVAILABLE or not NUMPY_AVAILABLE:
+                print("Subject embedding mapping disabled: sentence-transformers or numpy unavailable")
+        self.embedding_model: Optional["SentenceTransformer"] = None
+        self._embedding_cache: Dict[str, "np.ndarray"] = {}
+        self.subject_lookup_by_id: Dict[int, Dict[str, Any]] = {}
+        self.programs_by_subject: defaultdict[int, List[int]] = defaultdict(list)
+        self._subject_embedding_matrix: Optional["np.ndarray"] = None
+        self._subject_embedding_ids: List[int] = []
+        self._subject_embedding_texts: Dict[int, str] = {}
 
         reference_uri = os.getenv("REFERENCE_DATA_URI")
         if reference_uri and reference_uri.startswith(("s3://", "s3a://")):
@@ -154,6 +156,7 @@ class SilverDublinCoreTransformer:
             self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
 
         self._load_reference_data()
+        self._prepare_subject_mappings()
         self._write_reference_dimensions()
 
         self.output_schema = self._build_output_schema()
@@ -162,12 +165,14 @@ class SilverDublinCoreTransformer:
         state = self.__dict__.copy()
         state.pop("spark", None)
         state.pop("minio_client", None)
+        state.pop("embedding_model", None)
         return state
 
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
         self.spark = None
         self.minio_client = None
+        self.embedding_model = None
         self.output_schema = self._build_output_schema()
 
     def _build_output_schema(self) -> T.StructType:
@@ -182,36 +187,35 @@ class SilverDublinCoreTransformer:
                 T.StructField("description", T.StringType(), True),
                 T.StructField("keywords", T.ArrayType(T.StringType()), True),
                 T.StructField("subjects", T.ArrayType(T.StringType()), True),
-                T.StructField("primary_subject", T.StringType(), True),
-                T.StructField("primary_subject_code", T.StringType(), True),
-                T.StructField("subject_category_name", T.StringType(), True),
-                T.StructField("subject_category_code", T.StringType(), True),
-                T.StructField("faculty_id", T.IntegerType(), True),
-                T.StructField("faculty_name", T.StringType(), True),
+                T.StructField(
+                    "matched_subjects",
+                    T.ArrayType(
+                        T.StructType(
+                            [
+                                T.StructField("subject_id", T.IntegerType(), True),
+                                T.StructField("subject_name", T.StringType(), True),
+                                T.StructField("subject_code", T.StringType(), True),
+                                T.StructField("similarity", T.DoubleType(), True),
+                                T.StructField("matched_text", T.StringType(), True),
+                            ]
+                        )
+                    ),
+                    True,
+                ),
+                T.StructField("canonical_subjects", T.ArrayType(T.StringType()), True),
+                T.StructField("program_ids", T.ArrayType(T.IntegerType()), True),
+                T.StructField("unmatched_subjects", T.ArrayType(T.StringType()), True),
                 T.StructField("creator_names", T.ArrayType(T.StringType()), True),
                 T.StructField("publisher_name", T.StringType(), True),
-                T.StructField("publisher_type", T.StringType(), True),
                 T.StructField("language", T.StringType(), True),
                 T.StructField("license_name", T.StringType(), True),
                 T.StructField("license_url", T.StringType(), True),
-                T.StructField("resource_format", T.StringType(), True),
-                T.StructField("resource_format_category", T.StringType(), True),
-                T.StructField("resource_type", T.StringType(), True),
-                T.StructField("difficulty_level", T.StringType(), True),
-                T.StructField("target_audience", T.StringType(), True),
-                T.StructField("education_level", T.StringType(), True),
-                T.StructField("course_id", T.StringType(), True),
-                T.StructField("course_code", T.StringType(), True),
-                T.StructField("course_name", T.StringType(), True),
-                T.StructField("department_id", T.IntegerType(), True),
-                T.StructField("department_name", T.StringType(), True),
-                T.StructField("institution_name", T.StringType(), True),
                 T.StructField("publication_date", T.TimestampType(), True),
                 T.StructField("last_updated_at", T.TimestampType(), True),
                 T.StructField("scraped_at", T.TimestampType(), True),
                 T.StructField("bronze_source_path", T.StringType(), True),
                 T.StructField("data_quality_score", T.DoubleType(), True),
-                T.StructField("dc_xml", T.StringType(), True),
+                T.StructField("dc_xml_path", T.StringType(), True),
                 T.StructField("ingested_at", T.TimestampType(), False),
             ]
         )
@@ -234,6 +238,27 @@ class SilverDublinCoreTransformer:
                 print(f"Loaded {len(self.reference_subjects_by_name)} reference subjects from {self._reference_location_desc('subjects.json')}")
             else:
                 print("Reference subjects not found; subject normalization will use heuristics")
+
+            aliases_data = self._load_reference_json("subject_aliases.json")
+            if isinstance(aliases_data, list):
+                alias_count = 0
+                for item in aliases_data:
+                    if not isinstance(item, dict):
+                        continue
+                    subject_id = item.get("subject_id")
+                    alias_text = item.get("alias") or item.get("text")
+                    if subject_id is None or not alias_text:
+                        continue
+                    try:
+                        sid = int(subject_id)
+                    except (TypeError, ValueError):
+                        continue
+                    self.reference_subject_aliases.setdefault(sid, []).append(str(alias_text))
+                    alias_count += 1
+                if alias_count:
+                    print(f"Loaded {alias_count} subject aliases from {self._reference_location_desc('subject_aliases.json')}")
+            elif aliases_data:
+                print("Warning: subject_aliases.json has unexpected format; ignoring")
 
             faculties_data = self._load_reference_json("faculties.json")
             if faculties_data:
@@ -317,6 +342,80 @@ class SilverDublinCoreTransformer:
             print(f"Warning reading reference file {filename}: {exc}")
             return None
 
+    def _prepare_subject_mappings(self) -> None:
+        """Pre-compute lookup structures and embeddings for curriculum alignment."""
+        self.subject_lookup_by_id = {}
+        self.programs_by_subject = defaultdict(list)
+        self._subject_embedding_matrix = None
+        self._subject_embedding_ids = []
+        self._subject_embedding_texts = {}
+
+        for record in self.reference_subject_records:
+            subject_id = record.get("subject_id")
+            if subject_id is None:
+                continue
+            try:
+                sid = int(subject_id)
+            except (TypeError, ValueError):
+                continue
+            self.subject_lookup_by_id[sid] = record
+
+        for link in self.reference_program_subject_links_records:
+            subject_id = link.get("subject_id")
+            program_id = link.get("program_id")
+            if subject_id is None or program_id is None:
+                continue
+            try:
+                sid = int(subject_id)
+                pid = int(program_id)
+            except (TypeError, ValueError):
+                continue
+            self.programs_by_subject[sid].append(pid)
+
+        if not self.embedding_enabled or not self.subject_lookup_by_id or not NUMPY_AVAILABLE:
+            return
+
+        subject_texts: List[str] = []
+        subject_ids: List[int] = []
+
+        for sid, record in self.subject_lookup_by_id.items():
+            fragments: List[str] = []
+            name = record.get("subject_name")
+            code = record.get("subject_code")
+            if name:
+                fragments.append(str(name))
+            if code:
+                fragments.append(str(code))
+            for alias in self.reference_subject_aliases.get(sid, []):
+                if alias:
+                    fragments.append(str(alias))
+            combined = " ".join(fragment.strip() for fragment in fragments if fragment and str(fragment).strip())
+            if not combined:
+                continue
+            subject_ids.append(sid)
+            subject_texts.append(combined)
+            self._subject_embedding_texts[sid] = record.get("subject_name") or combined
+
+        if not subject_ids:
+            return
+
+        vectors = self._encode_texts(subject_texts)
+        if vectors is None:
+            print("Disabling embedding-based subject matching due to encoding failure")
+            self.embedding_enabled = False
+            return
+
+        if vectors.ndim == 1:
+            vectors = vectors.reshape(1, -1)
+
+        assert np is not None  # noqa: S101
+
+        if vectors.dtype != np.float32:
+            vectors = vectors.astype(np.float32)
+
+        self._subject_embedding_matrix = vectors
+        self._subject_embedding_ids = subject_ids
+
     def _create_minio_client(self) -> Optional[Minio]:
         try:
             endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000").replace("http://", "").replace("https://", "")
@@ -336,11 +435,115 @@ class SilverDublinCoreTransformer:
         bucket, prefix = cleaned.split("/", 1)
         return bucket, prefix.rstrip("/")
 
-class SilverTransformStandalone(SilverDublinCoreTransformer):
-    """Backward-compatible alias for existing DAG imports."""
+    def _get_embedding_model(self) -> Optional["SentenceTransformer"]:
+        if not self.embedding_enabled or not SENTENCE_TRANSFORMERS_AVAILABLE:
+            return None
+        if self.embedding_model is not None:
+            return self.embedding_model
+        try:
+            model = SentenceTransformer(self.embedding_model_name)
+        except Exception as exc:
+            print(f"Warning: unable to load embedding model '{self.embedding_model_name}': {exc}")
+            self.embedding_enabled = False
+            return None
+        self.embedding_model = model
+        return model
 
-    def __init__(self) -> None:
-        super().__init__()
+    def _encode_texts(self, texts: List[str]) -> Optional["np.ndarray"]:
+        if not texts or not self.embedding_enabled or not NUMPY_AVAILABLE:
+            return None
+        model = self._get_embedding_model()
+        if not model:
+            return None
+        try:
+            vectors = model.encode(
+                texts,
+                show_progress_bar=False,
+                convert_to_numpy=True,
+                normalize_embeddings=True,
+            )
+        except Exception as exc:
+            print(f"Warning: failed to encode texts for subject mapping: {exc}")
+            return None
+        if not isinstance(vectors, np.ndarray):
+            vectors = np.asarray(vectors)
+        if vectors.dtype != np.float32:
+            vectors = vectors.astype(np.float32)
+        return vectors
+
+    def _match_subjects(
+        self,
+        raw_subjects: List[str],
+        raw_keywords: List[str],
+    ) -> Tuple[List[Dict[str, Any]], List[int], List[str]]:
+        candidates: List[str] = []
+        seen_normalized: Set[str] = set()
+        for value in raw_subjects + raw_keywords:
+            if not value:
+                continue
+            text = str(value).strip()
+            if not text:
+                continue
+            normalized = self._normalize_text(text)
+            if not normalized or normalized in seen_normalized:
+                continue
+            seen_normalized.add(normalized)
+            candidates.append(text)
+
+        if not candidates or not self.embedding_enabled or self._subject_embedding_matrix is None:
+            return [], [], candidates
+
+        assert np is not None  # noqa: S101
+
+        pending_encode = [candidate for candidate in candidates if candidate not in self._embedding_cache]
+        if pending_encode:
+            encoded = self._encode_texts(pending_encode)
+            if encoded is None:
+                return [], [], candidates
+            for text, vector in zip(pending_encode, encoded):
+                if vector is None:
+                    continue
+                vector_arr = np.asarray(vector, dtype=np.float32)
+                if vector_arr.ndim > 1:
+                    vector_arr = vector_arr.reshape(-1)
+                self._embedding_cache[text] = vector_arr
+
+        matched: Dict[int, Dict[str, Any]] = {}
+        unmatched: List[str] = []
+        subject_matrix = self._subject_embedding_matrix
+        subject_ids = self._subject_embedding_ids
+
+        for candidate in candidates:
+            vector = self._embedding_cache.get(candidate)
+            if vector is None:
+                unmatched.append(candidate)
+                continue
+            if vector.ndim > 1:
+                vector = vector.reshape(-1)
+            sims = subject_matrix.dot(vector)  # type: ignore[union-attr]
+            if sims.size == 0:
+                unmatched.append(candidate)
+                continue
+            best_index = int(np.argmax(sims))
+            best_score = float(sims[best_index])
+            if best_score < self.embedding_similarity_threshold:
+                unmatched.append(candidate)
+                continue
+            subject_id = subject_ids[best_index]
+            record = self.subject_lookup_by_id.get(subject_id, {})
+            entry = matched.get(subject_id)
+            if entry is None or best_score > entry.get("similarity", 0.0):
+                matched[subject_id] = {
+                    "subject_id": subject_id,
+                    "subject_name": record.get("subject_name"),
+                    "subject_code": record.get("subject_code"),
+                    "similarity": round(best_score, 4),
+                    "matched_text": candidate,
+                }
+
+        matched_subjects = sorted(matched.values(), key=lambda item: item["similarity"], reverse=True)
+        program_ids = sorted({pid for subject_id in matched for pid in self.programs_by_subject.get(subject_id, [])})
+        return matched_subjects, program_ids, unmatched
 
     def _create_spark_session(self) -> SparkSession:
         session = (
@@ -447,49 +650,18 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
         description = self._ensure_str(record.get("description"))
         creators = self._clean_string_list(record.get("instructors") or record.get("authors") or record.get("creators"))
         subjects = self._derive_subjects(record)
-        primary_subject = subjects[0] if subjects else self._ensure_str(record.get("subject"))
-        subject_category_name, subject_category_code = self._derive_subject_category(primary_subject)
 
         keywords = self._derive_keywords(record, subjects, title)
+        matched_subjects, matched_program_ids_list, unmatched_subject_candidates = self._match_subjects(subjects, keywords)
+        program_id_set: Set[int] = set(matched_program_ids_list)
+        canonical_subjects = [
+            str(item.get("subject_name"))
+            for item in matched_subjects
+            if item.get("subject_name")
+        ]
         language = self._ensure_language(record.get("language"))
         publisher_name = self._derive_publisher(record, source_system)
-        publisher_type = self._derive_publisher_type(publisher_name)
         license_name, license_url = self._derive_license(record)
-        resource_format = self._derive_format(record)
-        resource_format_category = self._derive_format_category(resource_format)
-        resource_type = self._derive_resource_type(record, source_system)
-        difficulty_level, target_audience = self._derive_level(record)
-        education_level = target_audience
-
-        primary_subject_code: Optional[str] = None
-        faculty_id: Optional[int] = None
-        faculty_name: Optional[str] = None
-        department_id: Optional[int] = None
-
-        course_id = self._ensure_str(record.get("course_id") or record.get("identifier"))
-        course_code = self._ensure_str(record.get("course_number") or record.get("code"))
-        course_name = self._ensure_str(record.get("course_title") or record.get("course_name") or title)
-        department_name = self._ensure_str(record.get("department"))
-        institution_name = self._derive_institution(source_system)
-
-        reference_subject = self._match_reference_subject(primary_subject, subjects, course_code, course_id, course_name)
-        if reference_subject:
-            if reference_subject.get("subject_name"):
-                primary_subject = reference_subject["subject_name"]
-                if primary_subject and primary_subject not in subjects:
-                    subjects.insert(0, primary_subject)
-            primary_subject_code = reference_subject.get("subject_code")
-            ref_faculty_id = reference_subject.get("faculty_id")
-            if ref_faculty_id is not None:
-                faculty_id = int(ref_faculty_id)
-                faculty_name = self.reference_faculties.get(faculty_id)
-                if faculty_name:
-                    subject_category_name = faculty_name
-                    subject_category_code = f"FAC_{faculty_id:02d}"
-            ref_department_id = reference_subject.get("department_id")
-            if ref_department_id is not None:
-                department_id = int(ref_department_id)
-                department_name = self.reference_departments.get(department_id, department_name)
 
         publication_date = self._parse_datetime(record.get("publication_date") or record.get("year"))
         scraped_at = self._parse_datetime(record.get("scraped_at"))
@@ -508,65 +680,47 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
             source_url=source_url,
         )
 
+        # Build Dublin Core XML and save to S3/MinIO
+        dc_subjects = subjects or keywords
         dc_xml = self._build_dublin_core_xml(
             identifier=resource_id,
             title=title,
             description=description,
             creators=creators,
-            subjects=subjects or keywords,
+            subjects=dc_subjects,
             publisher=publisher_name,
             language=language,
             rights=license_name,
             source=source_system,
-            resource_type=resource_type,
-            resource_format=resource_format,
             url=source_url,
-            audience=target_audience,
-            relation=course_id or course_code,
-            coverage=institution_name or department_name,
-            date=publication_date or scraped_at,
         )
+        dc_xml_path = self._save_dc_xml(resource_id, dc_xml)
 
         metadata: Dict[str, Any] = {
             "resource_id": resource_id,
             "resource_uid": self._hash_identifier(resource_id),
             "source_system": source_system,
             "source_url": source_url,
-            "catalog_provider": institution_name or publisher_name,
+            "catalog_provider": publisher_name,
             "title": title,
             "description": description,
             "keywords": keywords,
             "subjects": subjects,
-            "primary_subject": primary_subject,
-            "primary_subject_code": primary_subject_code,
-            "subject_category_name": subject_category_name,
-            "subject_category_code": subject_category_code,
-            "faculty_id": faculty_id,
-            "faculty_name": faculty_name,
+            "matched_subjects": matched_subjects,
+            "canonical_subjects": canonical_subjects,
+            "program_ids": sorted(program_id_set),
+            "unmatched_subjects": unmatched_subject_candidates,
             "creator_names": creators,
             "publisher_name": publisher_name,
-            "publisher_type": publisher_type,
             "language": language,
             "license_name": license_name,
             "license_url": license_url,
-            "resource_format": resource_format,
-            "resource_format_category": resource_format_category,
-            "resource_type": resource_type,
-            "difficulty_level": difficulty_level,
-            "target_audience": target_audience,
-            "education_level": education_level,
-            "course_id": course_id,
-            "course_code": course_code,
-            "course_name": course_name,
-            "department_id": department_id,
-            "department_name": department_name,
-            "institution_name": institution_name,
             "publication_date": publication_date,
             "last_updated_at": last_updated_at,
             "scraped_at": scraped_at,
             "bronze_source_path": bronze_source_path,
             "data_quality_score": data_quality_score,
-            "dc_xml": dc_xml,
+            "dc_xml_path": dc_xml_path,
             "ingested_at": now,
         }
         return metadata
@@ -589,27 +743,15 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
                 "catalog_provider",
                 "title",
                 "description",
-                "primary_subject",
-                "primary_subject_code",
-                "subject_category_name",
-                "subject_category_code",
-                "faculty_id",
-                "department_id",
-                "institution_name",
+                "subjects",
+                "matched_subjects",
+                "canonical_subjects",
+                "program_ids",
+                "unmatched_subjects",
                 "publisher_name",
-                "publisher_type",
                 "language",
                 "license_name",
                 "license_url",
-                "resource_format",
-                "resource_format_category",
-                "resource_type",
-                "difficulty_level",
-                "target_audience",
-                "education_level",
-                "course_id",
-                "course_code",
-                "course_name",
                 "subjects_count",
                 "keywords_count",
                 "creator_count",
@@ -618,7 +760,7 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
                 "last_updated_at",
                 "publication_date",
                 "data_quality_score",
-                "dc_xml",
+                "dc_xml_path",
                 "ingested_at",
             )
         )
@@ -627,20 +769,14 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
             deduped_df.select(
                 "resource_uid",
                 "source_system",
-                "primary_subject_code",
                 "ingested_at",
                 F.posexplode_outer("subjects").alias("subject_position", "subject_name"),
             )
             .where(F.col("subject_name").isNotNull())
             .withColumn("is_primary", F.col("subject_position") == 0)
-            .withColumn(
-                "subject_code",
-                F.when(F.col("is_primary"), F.col("primary_subject_code")),
-            )
             .select(
                 "resource_uid",
-                F.col("subject_name").alias("subject_name"),
-                "subject_code",
+                "subject_name",
                 "is_primary",
                 "source_system",
                 "ingested_at",
@@ -670,13 +806,13 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
         self._replace_table(
             fact_df,
             self.full_table_name,
-            partition_columns=["subject_category_code", "DATE(ingested_at)"],
+            partition_columns=["DATE(ingested_at)"],
         )
         if self.legacy_table_name != self.full_table_name:
             self._replace_table(
                 deduped_df,
                 self.legacy_table_name,
-                partition_columns=["subject_category_code", "DATE(ingested_at)"],
+                partition_columns=["DATE(ingested_at)"],
             )
         self._replace_table(subjects_df, self.subjects_bridge_table, partition_columns=["DATE(ingested_at)"])
         self._replace_table(keywords_df, self.keywords_bridge_table, partition_columns=["DATE(ingested_at)"])
@@ -852,15 +988,6 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
             subjects.extend(self._clean_string_list(candidate))
         return subjects[:10]
 
-    def _derive_subject_category(self, primary_subject: Optional[str]) -> Tuple[str, str]:
-        if not primary_subject:
-            return "General Studies", "GEN"
-        normalized = primary_subject.lower()
-        for rule in self.SUBJECT_CATEGORY_RULES:
-            if rule.pattern and self._regex_match(rule.pattern, normalized):
-                return rule.name, rule.code
-        return "General Studies", "GEN"
-
     def _match_reference_subject(
         self,
         primary_subject: Optional[str],
@@ -924,13 +1051,6 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
             return "Open Textbook Library"
         return "Unknown Publisher"
 
-    def _derive_publisher_type(self, publisher_name: str) -> str:
-        name = (publisher_name or "").lower()
-        for keyword, publisher_type in self.PUBLISHER_TYPE_RULES:
-            if keyword in name:
-                return publisher_type
-        return "Platform"
-
     def _derive_license(self, record: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         name = self._ensure_str(record.get("license") or record.get("rights"))
         url = self._ensure_str(record.get("license_url") or record.get("rights_url"))
@@ -939,81 +1059,6 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
             if legal:
                 name = legal[:120]
         return name, url
-
-    def _derive_format(self, record: Dict[str, Any]) -> Optional[str]:
-        candidates = [
-            record.get("format"),
-            record.get("content_format"),
-            record.get("resource_format"),
-        ]
-        for candidate in candidates:
-            value = self._ensure_str(candidate)
-            if value:
-                return value.lower()
-        if record.get("has_videos"):
-            return "video"
-        if record.get("has_pdfs"):
-            return "pdf"
-        return None
-
-    def _derive_format_category(self, resource_format: Optional[str]) -> Optional[str]:
-        if not resource_format:
-            return None
-        fmt = resource_format.lower()
-        for keyword, category in self.FORMAT_CATEGORY_RULES:
-            if keyword in fmt:
-                return category
-        return "Document"
-
-    def _derive_resource_type(self, record: Dict[str, Any], source_system: str) -> str:
-        explicit = self._ensure_str(record.get("resource_type"))
-        if explicit:
-            return explicit.title()
-        if source_system == "mit_ocw":
-            return "Course"
-        if source_system == "openstax":
-            return "Textbook"
-        if source_system == "otl":
-            return "Textbook"
-        return "Learning Resource"
-
-    def _derive_level(self, record: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
-        difficulty = self._ensure_str(record.get("difficulty") or record.get("level"))
-        audience = self._ensure_str(record.get("target_audience"))
-        if not audience and difficulty:
-            audience = {
-                "introductory": "Undergraduate",
-                "beginner": "Undergraduate",
-                "intermediate": "Undergraduate",
-                "advanced": "Graduate",
-                "graduate": "Graduate",
-            }.get(difficulty.lower())
-        return difficulty, audience
-
-    def _derive_institution(self, source_system: str) -> Optional[str]:
-        if source_system == "mit_ocw":
-            return "Massachusetts Institute of Technology"
-        if source_system == "openstax":
-            return "Rice University / OpenStax"
-        if source_system == "otl":
-            return "University of Minnesota"
-        return None
-
-    def _parse_datetime(self, value: Any) -> Optional[datetime]:
-        if not value:
-            return None
-        if isinstance(value, datetime):
-            return value
-        text = self._ensure_str(value)
-        if not text:
-            return None
-        try:
-            if text.isdigit() and len(text) == 4:
-                return datetime(int(text), 1, 1)
-            text = text.replace("Z", "+00:00")
-            return datetime.fromisoformat(text)
-        except Exception:
-            return None
 
     def _compute_quality_score(
         self,
@@ -1057,13 +1102,7 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
         language: Optional[str],
         rights: Optional[str],
         source: Optional[str],
-        resource_type: Optional[str],
-        resource_format: Optional[str],
         url: Optional[str],
-        audience: Optional[str],
-        relation: Optional[str],
-        coverage: Optional[str],
-        date: Optional[datetime],
     ) -> str:
         ns = {
             "xmlns:oai_dc": "http://www.openarchives.org/OAI/2.0/oai_dc/",
@@ -1091,21 +1130,28 @@ class SilverTransformStandalone(SilverDublinCoreTransformer):
         add_element("language", language)
         add_element("rights", rights)
         add_element("source", source)
-        add_element("type", resource_type)
-        add_element("format", resource_format)
-        add_element("relation", relation)
-        add_element("coverage", coverage)
-        add_element("audience", audience)
-        if date:
-            add_element("date", date.strftime("%Y-%m-%dT%H:%M:%SZ"))
 
         return ET.tostring(root, encoding="utf-8").decode("utf-8")
 
-    def _regex_match(self, pattern: str, value: str) -> bool:
-        import re
-
-        return re.search(pattern, value, re.IGNORECASE) is not None
-
+    def _save_dc_xml(self, resource_id: str, dc_xml: str) -> str:
+        """
+        Saves the Dublin Core XML to S3/MinIO and returns the path.
+        Falls back to local temporary storage if S3 is unavailable.
+        """
+        try:
+            # Try to save to S3/MinIO using Spark
+            xml_path = f"s3a://{self.bucket}/silver/dc_xml/{resource_id}.xml"
+            
+            # Write using Spark's RDD mechanism to ensure compatibility with Hadoop/S3A
+            xml_rdd = self.spark.sparkContext.parallelize([dc_xml])
+            xml_rdd.saveAsTextFile(xml_path.replace(".xml", ""), compression=None)
+            
+            print(f"Saved DC XML for {resource_id} to {xml_path}")
+            return xml_path
+        except Exception as exc:
+            print(f"Warning: Failed to save DC XML to S3 for {resource_id}: {exc}")
+            # Fallback: still return the S3 path, assume external process will handle it
+            return f"s3a://{self.bucket}/silver/dc_xml/{resource_id}.xml"
 
 def re_split_words(text: str) -> List[str]:
     import re
@@ -1113,8 +1159,9 @@ def re_split_words(text: str) -> List[str]:
     return [token for token in re.split(r"[^A-Za-z0-9]+", text) if token]
 
 
+
 def main() -> None:
-    transformer = SilverDublinCoreTransformer()
+    transformer = SilverTransformer()
     transformer.run()
 
 

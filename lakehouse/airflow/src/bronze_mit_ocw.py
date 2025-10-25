@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Optimized version of MIT OCW scraper with reduced redundancy.
 """
@@ -10,7 +10,7 @@ import hashlib
 import requests
 import re
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -58,7 +58,7 @@ class MITOCWScraper:
         self.base_url = "https://ocw.mit.edu"
         self.source = "mit_ocw"
         self.delay = delay
-        # Bắt buộc dùng Selenium cho MIT OCW
+        # Báº¯t buá»™c dÃ¹ng Selenium cho MIT OCW
         self.use_selenium = True  # Force Selenium for MIT OCW
         self.output_dir = output_dir
         self.batch_size = batch_size
@@ -71,10 +71,10 @@ class MITOCWScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.82 Safari/537.36'
         })
         
-        # Multimedia settings - chỉ focus vào lecture notes
-        self.enable_video_scraping = os.getenv('ENABLE_VIDEO_SCRAPING', '0') == '1'  # Tắt video mặc định
-        self.enable_pdf_scraping = os.getenv('ENABLE_PDF_SCRAPING', '1') == '1'
-        self.max_pdf_size_mb = float(os.getenv('MAX_PDF_SIZE_MB', '50.0'))  # Tăng limit cho lecture notes
+        # Multimedia settings - chá»‰ focus vÃ o lecture notes
+        self.enable_video_scraping = os.getenv('ENABLE_VIDEO_SCRAPING', '0') == '1'  # Táº¯t video máº·c Ä‘á»‹nh
+        self.enable_pdf_scraping = os.getenv('ENABLE_PDF_SCRAPING', '0') == '1'
+        self.max_pdf_size_mb = float(os.getenv('MAX_PDF_SIZE_MB', '50.0'))  # TÄƒng limit cho lecture notes
         self.download_pdfs = os.getenv('DOWNLOAD_PDFS', '1') == '1'
         
         # Smart download configuration 
@@ -82,19 +82,24 @@ class MITOCWScraper:
         self.important_categories = set(os.getenv('IMPORTANT_CATEGORIES', 'lecture_notes,textbook,handout,reading').split(','))
         self.skip_categories = set(os.getenv('SKIP_CATEGORIES', 'exam,assignment,quiz').split(','))
         
-        # Create directories
-        self.local_storage = Path("/tmp/mit_ocw_scrape")
-        self.local_storage.mkdir(exist_ok=True)
-        (self.local_storage / "pdfs").mkdir(exist_ok=True)
-        (self.local_storage / "transcripts").mkdir(exist_ok=True)
-        
+        # Temporary directory for processing (will be cleaned up)
+        # Only used for temporary processing before uploading to MinIO
+        self.temp_storage = Path("/tmp/mit_ocw_temp")
+        self.temp_storage.mkdir(exist_ok=True, parents=True)
+
+        self.output_path = Path(self.output_dir)
+        self.output_path.mkdir(parents=True, exist_ok=True)
+
         # MinIO setup
         self._setup_minio()
-        
-        # Bắt buộc setup Selenium
+        self.existing_course_ids = self._load_existing_course_ids()
+        if self.existing_course_ids:
+            print(f"[MIT OCW] Loaded {len(self.existing_course_ids)} existing courses; duplicates will be skipped.")
+
+        # Báº¯t buá»™c setup Selenium
         self._setup_selenium()
         
-        # Kiểm tra Selenium đã setup thành công
+        # Kiá»ƒm tra Selenium Ä‘Ã£ setup thÃ nh cÃ´ng
         if not self.driver:
             raise Exception("Selenium WebDriver is required for MIT OCW scraping but failed to initialize")
         
@@ -165,6 +170,15 @@ class MITOCWScraper:
                 self.driver.quit()
             except Exception as e:
                 print(f"Error closing WebDriver: {e}")
+        
+        # Clean up temporary files
+        if hasattr(self, 'temp_storage') and self.temp_storage.exists():
+            try:
+                import shutil
+                shutil.rmtree(self.temp_storage, ignore_errors=True)
+                print("Cleaned up temporary storage")
+            except Exception as e:
+                print(f"Error cleaning temp storage: {e}")
     
     def scrape_with_selenium(self) -> List[Dict[str, Any]]:
         """Legacy method for compatibility with existing DAG"""
@@ -176,21 +190,30 @@ class MITOCWScraper:
         
         try:
             # Get course URLs
-            course_urls = self._get_course_urls()
+            course_urls = list(self._get_course_urls())
             print(f"Found {len(course_urls)} courses")
             
             if self.max_documents:
-                course_urls = list(course_urls)[:self.max_documents]
+                course_urls = course_urls[:self.max_documents]
                 print(f"Limited to {len(course_urls)} courses for processing")
             
             # Scrape courses
             documents = []
+            skipped_courses = 0
+            total_candidates = len(course_urls)
             for i, url in enumerate(course_urls, 1):
-                print(f"[{i}/{len(course_urls)}] Scraping: {url}")
+                course_hash = self.create_document_id(self.source, url)
+                if course_hash in self.existing_course_ids:
+                    skipped_courses += 1
+                    print(f"[{i}/{total_candidates}] Skipping already scraped course: {url}")
+                    continue
+
+                print(f"[{i}/{total_candidates}] Scraping: {url}")
                 
                 course_data = self._scrape_course(url)
                 if course_data:
                     documents.append(course_data)
+                    self.existing_course_ids.add(course_data.get('id', course_hash))
                     
                     # Log progress
                     videos = course_data.get('videos', [])
@@ -218,8 +241,10 @@ class MITOCWScraper:
                     print(f"Success: {title}")
                 else:
                     print(f"Failed to scrape course: {url}")
-                
                 time.sleep(self.delay)
+
+            if skipped_courses:
+                print(f"[MIT OCW] Skipped {skipped_courses} courses already processed.")
             
             # Print summary but don't save yet - let DAG handle saving
             total_courses = len(documents)
@@ -380,7 +405,7 @@ class MITOCWScraper:
                             page_videos = self._extract_videos_from_page(resource_soup, link_url, course_info)
                             videos.extend(page_videos)
                         
-                        # Lấy PDF từ lectures, lecture_notes, và materials (có thể chứa lecture notes)
+                        # Láº¥y PDF tá»« lectures, lecture_notes, vÃ  materials (cÃ³ thá»ƒ chá»©a lecture notes)
                         if self.enable_pdf_scraping and link_type in ['lectures', 'lecture_notes', 'materials']:
                             page_pdfs = self._extract_pdfs_from_page(resource_soup, link_url, course_info)
                             pdfs.extend(page_pdfs)
@@ -1201,12 +1226,20 @@ class MITOCWScraper:
                 if not PDF_PROCESSING_AVAILABLE:
                     return None
                 
-                # Save temporarily and extract text
-                temp_file = self.local_storage / "transcripts" / "temp_transcript.pdf"
+                # Save temporarily for processing only
+                temp_file = self.temp_storage / "temp_transcript.pdf"
                 with open(temp_file, 'wb') as f:
                     f.write(response.content)
                 
-                return self._extract_pdf_text(temp_file)
+                text = self._extract_pdf_text(temp_file)
+                
+                # Clean up temp file immediately
+                try:
+                    temp_file.unlink()
+                except:
+                    pass
+                
+                return text
             else:
                 # Handle text-based transcripts
                 return response.text
@@ -1247,13 +1280,13 @@ class MITOCWScraper:
             return []
     
     def _process_pdf_link(self, link, pdf_url: str, course_info: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Process individual PDF link - chỉ xử lý lecture notes"""
+        """Process individual PDF link - chá»‰ xá»­ lÃ½ lecture notes"""
         try:
             # Extract title and classify type
             pdf_title = link.get_text().strip() or "MIT OCW Document"
             pdf_category = self._classify_pdf_type(link, pdf_title, pdf_url)
             
-            # Bỏ qua PDF không phải educational materials ngay từ đầu
+            # Bá» qua PDF khÃ´ng pháº£i educational materials ngay tá»« Ä‘áº§u
             if pdf_category == 'rejected':
                 return None
             
@@ -1306,7 +1339,7 @@ class MITOCWScraper:
             return None
     
     def _classify_pdf_type(self, link_element, title: str, url: str) -> str:
-        """Classify PDF type - ưu tiên lecture materials"""
+        """Classify PDF type - Æ°u tiÃªn lecture materials"""
         context = ""
         parent = link_element.parent
         for _ in range(2):
@@ -1316,34 +1349,34 @@ class MITOCWScraper:
         
         combined_text = (title + " " + url + " " + context).lower()
         
-        # Lecture notes và slides
+        # Lecture notes vÃ  slides
         lecture_keywords = ['lecture', 'notes', 'slides', 'slide', 'presentation', 'handout']
         if any(keyword in combined_text for keyword in lecture_keywords):
             return 'lecture_notes'
         
-        # Readings có thể có giá trị
+        # Readings cÃ³ thá»ƒ cÃ³ giÃ¡ trá»‹
         reading_keywords = ['reading', 'textbook', 'book', 'chapter']
         if any(keyword in combined_text for keyword in reading_keywords):
             return 'reading_material'
         
-        # Từ chối assignments và exams
+        # Tá»« chá»‘i assignments vÃ  exams
         reject_keywords = ['assignment', 'homework', 'problem', 'pset', 'exam', 'test', 'quiz', 'midterm', 'final']
         if any(keyword in combined_text for keyword in reject_keywords):
             return 'rejected'
         
-        # Mặc định coi như educational material
+        # Máº·c Ä‘á»‹nh coi nhÆ° educational material
         return 'educational_material'
     
     def _should_download_pdf(self, pdf_data: Dict[str, Any]) -> bool:
-        """Decide whether to download PDF - chấp nhận lecture materials"""
+        """Decide whether to download PDF - cháº¥p nháº­n lecture materials"""
         category = pdf_data.get('category', 'document')
         
-        # Chấp nhận các loại educational materials
+        # Cháº¥p nháº­n cÃ¡c loáº¡i educational materials
         accepted_categories = ['lecture_notes', 'reading_material', 'educational_material']
         if category in accepted_categories:
             return True
         
-        # Từ chối rejected category
+        # Tá»« chá»‘i rejected category
         return category != 'rejected'
     
     def _get_pdf_size(self, pdf_url: str) -> float:
@@ -1374,36 +1407,43 @@ class MITOCWScraper:
                 print(f"WARNING: URL returns HTML instead of PDF: {pdf_url}")
                 return None, None
             
-            # Save file
+            # Save file temporarily for processing
             pdf_filename = f"{pdf_id}.pdf"
-            pdf_path = self.local_storage / "pdfs" / pdf_filename
+            temp_pdf_path = self.temp_storage / pdf_filename
             
-            with open(pdf_path, 'wb') as f:
+            with open(temp_pdf_path, 'wb') as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
             
             # Validate and extract text
-            if not self._is_valid_pdf(pdf_path):
+            if not self._is_valid_pdf(temp_pdf_path):
                 print(f"WARNING: Invalid PDF file: {pdf_url}")
                 text_content = None
             else:
-                text_content = self._extract_pdf_text(pdf_path)
+                text_content = self._extract_pdf_text(temp_pdf_path)
             
-            # Upload to MinIO
+            # Upload to MinIO bronze layer immediately
+            minio_path = None
             if self.minio_client:
                 try:
                     course_id = pdf_data.get('course_id', 'unknown')
                     category = pdf_data.get('category', 'document')
                     minio_path = f"bronze/mit_ocw/pdfs/{course_id}/{category}/{pdf_filename}"
                     
-                    self.minio_client.fput_object(self.minio_bucket, minio_path, str(pdf_path))
+                    self.minio_client.fput_object(self.minio_bucket, minio_path, str(temp_pdf_path))
                     
                     size_mb = pdf_data.get('size_mb', 0)
                     print(f"[BRONZE] PDF uploaded: {course_id}/{category}/{pdf_filename} ({size_mb:.1f}MB)")
                 except Exception as e:
                     print(f"WARNING: Failed to upload PDF to MinIO: {e}")
             
-            return pdf_path, text_content
+            # Clean up temp file immediately after upload
+            try:
+                temp_pdf_path.unlink()
+            except Exception as e:
+                print(f"Warning: Could not delete temp file: {e}")
+            
+            return minio_path, text_content
             
         except Exception as e:
             print(f"ERROR downloading PDF {pdf_id}: {e}")
@@ -1483,7 +1523,7 @@ class MITOCWScraper:
         if not data:
             return
         
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         
         # Calculate stats
         total_courses = len(data)
@@ -1496,13 +1536,21 @@ class MITOCWScraper:
         print(f"Videos: {total_videos} (transcripts: {videos_with_transcripts})")
         print(f"PDFs: {total_pdfs}")
         
-        # Save to local file
+        # Save to local file in JSON array format (like the old file)
         filename = f"mit_ocw_bronze_{timestamp}.json"
         output_file = Path(self.output_dir) / filename
         output_file.parent.mkdir(exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        for record in data:
+            if isinstance(record, dict):
+                course_id = record.get('id')
+                if not course_id and record.get('url'):
+                    course_id = self.create_document_id(self.source, record['url'])
+                if course_id:
+                    self.existing_course_ids.add(course_id)
         
         print(f"Saved to: {output_file}")
         
@@ -1528,12 +1576,20 @@ class MITOCWScraper:
         current_timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
         filename = f"mit_ocw_bronze_{current_timestamp}.json"
         
-        # Save to local file first
+        # Save to local file first in JSON array format
         output_file = Path(self.output_dir) / filename
         output_file.parent.mkdir(exist_ok=True)
         
         with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
+        for record in data:
+            if isinstance(record, dict):
+                course_id = record.get('id')
+                if not course_id and record.get('url'):
+                    course_id = self.create_document_id(self.source, record['url'])
+                if course_id:
+                    self.existing_course_ids.add(course_id)
         
         # Upload to MinIO
         if self.minio_client:
@@ -1548,6 +1604,54 @@ class MITOCWScraper:
         
         return None
 
+
+
+    def _load_existing_course_ids(self) -> Set[str]:
+        existing: Set[str] = set()
+        try:
+            if not self.output_path.exists():
+                return existing
+            for json_file in sorted(self.output_path.glob("mit_ocw_bronze_*.json")):
+                try:
+                    with open(json_file, "r", encoding="utf-8") as handle:
+                        content = handle.read().strip()
+                    if not content:
+                        continue
+                    records: List[Dict[str, Any]] = []
+                    
+                    # Check if content is JSON array (new format like old file)
+                    if content.startswith("["):
+                        try:
+                            parsed = json.loads(content)
+                            if isinstance(parsed, list):
+                                records = [item for item in parsed if isinstance(item, dict)]
+                        except json.JSONDecodeError:
+                            records = []
+                    else:
+                        # Handle JSON Lines format (old new format)
+                        for line in content.splitlines():
+                            line = line.strip()
+                            if not line:
+                                continue
+                            try:
+                                parsed_line = json.loads(line)
+                            except json.JSONDecodeError:
+                                continue
+                            if isinstance(parsed_line, dict):
+                                records.append(parsed_line)
+                    
+                    for record in records:
+                        course_id = record.get("id")
+                        if not course_id and record.get("url"):
+                            course_id = self.create_document_id(self.source, record["url"])
+                        if course_id:
+                            existing.add(course_id)
+                except Exception as exc:
+                    print(f"[MIT OCW] Skipping existing file {json_file.name}: {exc}")
+                    continue
+        except Exception as exc:
+            print(f"[MIT OCW] Unable to scan existing bronze files: {exc}")
+        return existing
 
     def _extract_instructors_advanced(self, soup) -> str:
         """Extract instructors using multiple methods"""
@@ -1774,3 +1878,5 @@ if __name__ == "__main__":
     # Run scraper
     documents = run_mit_ocw_scraper(max_documents=max_docs)
     print(f"Completed! Scraped {len(documents)} courses.")
+
+

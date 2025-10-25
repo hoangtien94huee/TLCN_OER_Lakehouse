@@ -21,7 +21,7 @@ services:
 
   # MinIO Object Storage (for data lakehouse)
   minio:
-    image: minio/minio:RELEASE.2024-06-13T22-53-53Z
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
     container_name: oer-minio
     command: server --console-address ":9001" /data
     environment:
@@ -70,8 +70,6 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      spark-master:
-        condition: service_healthy
     ports:
       - "8080:8080"
     volumes:
@@ -97,6 +95,8 @@ services:
       - MINIO_SECRET_KEY=minioadmin
       - MINIO_SECURE=0
       - MINIO_BUCKET=oer-lakehouse
+      # Google Gemini API for subject translation
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
       # Bronze layer PDF processing configuration
       - DOWNLOAD_STRATEGY=selective
       - MAX_PDF_SIZE_MB=20
@@ -104,8 +104,10 @@ services:
       - SKIP_CATEGORIES=exam,assignment,quiz
       # Spark cluster configuration
       - SPARK_MASTER=spark://spark-master:7077
-      - SPARK_HOME=/opt/spark
-      - PYSPARK_PYTHON=/usr/local/bin/python
+      - PYSPARK_PYTHON=python3
+      - PYSPARK_DRIVER_PYTHON=python3
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - PYSPARK_SUBMIT_ARGS=--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565 pyspark-shell
       # Optional: download and upload PDFs for OTL
       - OTL_DOWNLOAD_PDFS=0
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
@@ -119,17 +121,19 @@ services:
 
   # Spark Master
   spark-master:
-    build:
-      context: ./lakehouse/spark
-      dockerfile: Dockerfile
+    image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-master
     environment:
       - SPARK_MODE=master
+      - PYSPARK_PYTHON=python3
+      - PYSPARK_DRIVER_PYTHON=python3
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
+      - PYTHONPATH=/opt/airflow:/opt/airflow/dags
       # Iceberg Hadoop Catalog support (NO REST needed!)
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dcom.amazonaws.sdk.disableEc2Metadata=true
     ports:
@@ -138,34 +142,40 @@ services:
     volumes:
       - ./lakehouse/data/spark:/data/spark
       - ./lakehouse/data/iceberg-jars:/opt/spark/jars/iceberg
+      - ./lakehouse/airflow/src:/opt/airflow/src
+      - ./lakehouse/airflow/dags:/opt/airflow/dags
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
+      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080" ]
       interval: 30s
       timeout: 10s
       retries: 3
 
   # Spark Worker
   spark-worker:
-    build:
-      context: ./lakehouse/spark
-      dockerfile: Dockerfile
+    image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-worker
     environment:
       - SPARK_MODE=worker
+      - PYSPARK_PYTHON=python3
+      - PYSPARK_DRIVER_PYTHON=python3
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_CORES=2
+      - SPARK_WORKER_MEMORY=1g
+      - SPARK_WORKER_CORES=1
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
+      - PYTHONPATH=/opt/airflow:/opt/airflow/dags
     ports:
       - "8082:8081" # Spark Worker Web UI
     volumes:
       - ./lakehouse/data/spark:/data/spark
       - ./lakehouse/data/iceberg-jars:/opt/spark/jars/iceberg
+      - ./lakehouse/airflow/src:/opt/airflow/src
+      - ./lakehouse/airflow/dags:/opt/airflow/dags
     depends_on:
       - spark-master
     restart: unless-stopped

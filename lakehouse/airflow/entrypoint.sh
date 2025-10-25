@@ -15,15 +15,15 @@ python3 /opt/airflow/scripts/create_schema.py || echo "MinIO init completed"
 echo "Initializing Airflow database..."
 airflow db init
 
-# Create admin user (only if not exists)
-echo "Creating admin user..."
+# Create admin user
+echo "Creating Airflow admin user..."
 airflow users create \
     --username admin \
+    --password admin \
     --firstname Admin \
     --lastname User \
     --role Admin \
-    --email admin@example.com \
-    --password admin || echo "Admin user already exists"
+    --email admin@example.com || echo "Admin user already exists"
 
 # Start Airflow scheduler in background
 echo "Starting Airflow scheduler..."

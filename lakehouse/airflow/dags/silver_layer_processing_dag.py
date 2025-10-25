@@ -26,9 +26,10 @@ import json
 import os
 
 
+# Reference data now uploaded to MinIO
 os.environ.setdefault("REFERENCE_DATA_URI", "s3a://oer-lakehouse/bronze/reference/giaotrinh")
 
-from src.silver_transform import SilverTransformStandalone
+from src.silver_transform import SilverTransformer
 
 # DAG Configuration
 default_args = {
@@ -139,7 +140,7 @@ def process_mit_ocw_task(**context):
     
     try:
         # Use the unified silver transform for all sources
-        transformer = SilverTransformStandalone()
+        transformer = SilverTransformer()
         transformer.run()
         
         # Create a basic result summary
@@ -285,11 +286,11 @@ def generate_processing_report(**context):
     # Store detailed results
     for source, result in report['results'].items():
         if result.get('status') == 'success':
-            print(f"✅ {source}: {result.get('quality_resources', 0)} resources")
+            print(f"{source}: {result.get('quality_resources', 0)} resources")
         elif result.get('status') == 'error':
-            print(f"❌ {source}: {result.get('error', 'Unknown error')}")
+            print(f"{source}: {result.get('error', 'Unknown error')}")
         else:
-            print(f"⏭️ {source}: Skipped")
+            print(f"{source}: Skipped")
     
     return report
 
@@ -360,13 +361,13 @@ def validate_silver_data_quality(**context):
     for source, result in validation_results.items():
         status = result.get('status', 'unknown')
         if status == 'validated':
-            print(f"✅ {source}: {result['files_count']} files, {result['total_size_bytes']} bytes")
+            print(f"{source}: {result['files_count']} files, {result['total_size_bytes']} bytes")
         elif status == 'missing':
-            print(f"⚠️ {source}: No silver files found")
+            print(f"{source}: No silver files found")
         elif status == 'suspicious':
-            print(f"⚠️ {source}: Files found but size is suspicious")
+            print(f"{source}: Files found but size is suspicious")
         else:
-            print(f"❌ {source}: {result.get('error', 'Validation failed')}")
+            print(f"{source}: {result.get('error', 'Validation failed')}")
     
     return validation_results
 
@@ -384,43 +385,6 @@ check_bronze_task = PythonOperator(
     python_callable=check_bronze_data_availability,
     dag=dag,
 )
-
-# # External task sensors - Re-enabled for production use
-# wait_for_mit_scraping = ExternalTaskSensor(
-#     task_id='wait_for_mit_ocw_scraping',
-#     external_dag_id='mit_ocw_scraper_daily',
-#     external_task_id='health_check',
-#     timeout=7200,  # 2 hour timeout for monthly jobs
-#     poke_interval=600,  # Check every 10 minutes
-#     dag=dag,
-#     mode='reschedule',  # Free up worker slots while waiting
-#     allowed_states=['success'],
-#     failed_states=['failed', 'upstream_failed', 'skipped']
-# )
-
-# wait_for_openstax_scraping = ExternalTaskSensor(
-#     task_id='wait_for_openstax_scraping',
-#     external_dag_id='openstax_scraper_daily',
-#     external_task_id='health_check',
-#     timeout=7200,
-#     poke_interval=600,
-#     dag=dag,
-#     mode='reschedule',
-#     allowed_states=['success'],
-#     failed_states=['failed', 'upstream_failed', 'skipped']
-# )
-
-# wait_for_otl_scraping = ExternalTaskSensor(
-#     task_id='wait_for_otl_scraping',
-#     external_dag_id='otl_scraper_daily',
-#     external_task_id='health_check',
-#     timeout=7200,
-#     poke_interval=600,
-#     dag=dag,
-#     mode='reschedule',
-#     allowed_states=['success'],
-#     failed_states=['failed', 'upstream_failed', 'skipped']
-# )
 
 # Processing tasks for each source
 process_mit_ocw_silver = PythonOperator(
@@ -477,10 +441,6 @@ end_task = DummyOperator(
 
 # === DAG Dependencies ===
 
-# Production workflow with external task dependencies
-# start_task >> [wait_for_mit_scraping, wait_for_openstax_scraping, wait_for_otl_scraping]
-# [wait_for_mit_scraping, wait_for_openstax_scraping, wait_for_otl_scraping] >> check_bronze_task
-
 # Process each source in parallel after bronze check
 start_task >> check_bronze_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
 
@@ -493,51 +453,3 @@ validate_quality_task >> [generate_report_task, cleanup_task]
 # Final health check and end
 [generate_report_task, cleanup_task] >> health_check_task >> end_task
 
-# === DAG Documentation ===
-
-dag.doc_md = """
-# Silver Layer Processing DAG
-
-This DAG transforms raw OER data from the Bronze layer into clean, standardized data in the Silver layer.
-
-## Workflow Steps:
-
-1. **Wait for Scraping**: External sensors wait for bronze data collection to complete
-2. **Check Bronze Data**: Verify that fresh bronze data is available for processing
-3. **Parallel Processing**: Transform data from each source system using Apache Spark:
-   - MIT OpenCourseWare
-   - OpenStax
-   - Open Textbook Library
-4. **Quality Validation**: Validate the generated silver layer data
-5. **Reporting**: Generate comprehensive processing reports
-6. **Cleanup**: Clean up temporary processing artifacts
-
-## Key Features:
-
-- **Data Standardization**: Unifies data schemas across different OER sources
-- **Quality Assurance**: Applies data quality rules and deduplication
-- **Parallel Processing**: Processes multiple sources simultaneously for efficiency
-- **Error Handling**: Robust error handling with detailed logging
-- **Monitoring**: Comprehensive reporting and validation
-
-## Dependencies:
-
-- Apache Spark cluster must be running
-- MinIO object storage must be accessible
-- Bronze layer data must be available
-
-## Outputs:
-
-- Standardized JSON files in MinIO oer-lakehouse bucket (silver layer)
-- Processing reports with quality metrics
-- Validation results for downstream monitoring
-
-## Schedule:
-
-Runs monthly (every 30 days) after scraping DAGs complete, ensuring all bronze data is processed together. Manual triggering available for ad-hoc processing.
-
-**Schedule Alignment:**
-- Scraper DAGs: Every 30 days
-- Silver Layer DAG: Every 30 days (waits for scrapers)
-- Processing Window: 2 hours timeout for completion
-"""

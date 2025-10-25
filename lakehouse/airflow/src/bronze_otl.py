@@ -559,22 +559,20 @@ class OTLScraperStandalone:
             return []
     
     def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "otl", logical_date: str = None, file_type: str = "textbooks"):
-        """Save data to MinIO with organized path structure"""
+        """Save data to MinIO with standardized bronze layer path structure"""
         if not self.minio_client or not documents:
             print("MinIO not available or no documents to save")
             return ""
         
-        if logical_date is None:
-            logical_date = datetime.now().strftime("%Y-%m-%d")
-        
-        # Create organized path for OTL
-        timestamp = int(time.time())
-        object_name = f"bronze/{source}/{logical_date}/{file_type}_{timestamp}.jsonl"
+        # Create filename theo chuẩn bronze layer giống MIT OCW
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{source}_bronze_{timestamp}.json"
+        object_name = f"bronze/{source}/json/{filename}"
         
         # Create temporary file
         os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
         tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.jsonl")
+        tmp_path = os.path.join(tmp_dir, filename)
         
         try:
             # Write data to temp file

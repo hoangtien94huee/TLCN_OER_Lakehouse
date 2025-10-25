@@ -1,49 +1,26 @@
-# Core dependencies
-apache-airflow==2.7.1
-sqlalchemy==1.4.53
+# Airflow orchestrator dependencies (Spark jobs run on cluster)
+apache-airflow==2.9.2
+sqlalchemy<2.0
 
-# Scraping dependencies  
+# Scraping & ingestion toolchain
 selenium==4.27.1
 beautifulsoup4==4.12.2
 requests==2.31.0
-psycopg2-binary==2.9.7
-
-# Object storage and lakehouse
+psycopg2-binary==2.9.9
 minio==7.1.17
-pyiceberg[s3fs,duckdb]==0.6.1
-# pyhive removed - using Iceberg REST Catalog instead
-thrift==0.16.0
-sasl==0.3.1
 
-# Data processing
-pandas==2.0.3
-pyspark==3.5.0
+# Spark client to submit work to the cluster
+pyspark==3.5.4
 py4j==0.10.9.7
-findspark==2.0.1
 
-# Data quality and validation
-pydantic==1.10.12
+# Validation & content processing
 jsonschema==4.19.1
-
-# Data transformation and utilities  
 python-dateutil==2.8.2
-fuzzywuzzy==0.18.0
-python-Levenshtein==0.23.0
-
-# Text processing
 nltk==3.8.1
-
-# Video and multimedia processing
 yt-dlp==2023.9.24
 youtube-transcript-api==0.6.1
-
-# PDF processing  
 PyPDF2==3.0.1
 pdfplumber==0.10.4
-pdfminer.six==20231228
-
-# File handling and utils
-pathlib2==2.3.7
-
-# Schema modeling
-dataclasses-json==0.6.1
+numpy==1.26.4
+langchain==0.1.13
+langchain-google-genai==0.0.13

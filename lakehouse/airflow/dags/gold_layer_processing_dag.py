@@ -1,4 +1,4 @@
-"""
+﻿"""
 OER Lakehouse - Gold Layer Processing DAG
 =========================================
 
@@ -23,10 +23,12 @@ from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
 from airflow.sensors.external_task import ExternalTaskSensor
 from airflow.operators.dummy import DummyOperator
+from airflow.exceptions import AirflowSkipException
+from airflow.datasets import Dataset
 import json
 import os
 
-from src.gold_analytics import GoldAnalyticsStandalone
+from src.gold_analytics import GoldAnalyticsBuilder
 from src.giaotrinh_reference_loader import main as load_reference_catalog
 
 # DAG Configuration
@@ -38,6 +40,7 @@ default_args = {
     'email_on_retry': False,
     'retries': 2,
     'retry_delay': timedelta(minutes=15),
+    'execution_timeout': timedelta(hours=2),  # Add timeout
 }
 
 dag = DAG(
@@ -57,7 +60,7 @@ def validate_silver_layer_availability(**context):
     """Validate that Silver layer data is available and ready for processing"""
     from minio import Minio
     
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     logger = context['task_instance'].log
     
     logger.info(f"[Silver Validation] Checking Silver layer data for {execution_date}")
@@ -71,73 +74,47 @@ def validate_silver_layer_availability(**context):
             secure=os.getenv('MINIO_SECURE', '0').lower() in {'1', 'true', 'yes'}
         )
         
-        bucket_name = 'oer-lakehouse'
-        sources = ['mit_ocw', 'openstax', 'otl']
-        
+        bucket_name = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
+        required_tables = {
+            "oer_resources": "silver/default/oer_resources/metadata/",
+            "reference_subjects": "silver/default/reference_subjects/metadata/",
+            "reference_programs": "silver/default/reference_programs/metadata/",
+            "reference_program_subject_links": "silver/default/reference_program_subject_links/metadata/",
+        }
+
         validation_results = {}
-        total_silver_files = 0
-        
-        for source in sources:
+        for table_name, prefix in required_tables.items():
             try:
-                # Check for silver files (could be from today or recent days)
-                objects = list(minio_client.list_objects(
-                    bucket_name=bucket_name,
-                    prefix=f"silver/{source}/",
-                    recursive=True
-                ))
-                
-                silver_files = [
-                    obj for obj in objects 
-                    if obj.object_name.endswith('.json') and
-                    (datetime.utcnow() - obj.last_modified).days <= 7  # Within 7 days
-                ]
-                
-                if silver_files:
-                    total_size = sum(obj.size for obj in silver_files)
-                    validation_results[source] = {
-                        'files_count': len(silver_files),
-                        'total_size_bytes': total_size,
-                        'latest_file': max(silver_files, key=lambda x: x.last_modified).object_name,
-                        'status': 'available'
-                    }
-                    total_silver_files += len(silver_files)
-                    logger.info(f"✅ {source}: {len(silver_files)} files, {total_size} bytes")
+                has_metadata = any(
+                    minio_client.list_objects(
+                        bucket_name=bucket_name,
+                        prefix=prefix,
+                        recursive=True
+                    )
+                )
+                if has_metadata:
+                    validation_results[table_name] = {'status': 'available'}
+                    logger.info(f"[Silver Validation] Found metadata for table {table_name}")
                 else:
-                    validation_results[source] = {
-                        'files_count': 0,
-                        'status': 'missing'
-                    }
-                    logger.warning(f"⚠️ {source}: No recent Silver files found")
-                    
+                    validation_results[table_name] = {'status': 'missing'}
+                    logger.warning(f"[Silver Validation] Missing metadata for table {table_name}")
             except Exception as e:
-                validation_results[source] = {
-                    'status': 'error',
-                    'error': str(e)
-                }
-                logger.error(f"❌ {source}: {e}")
-        
-        # Overall validation
-        available_sources = [
-            source for source, result in validation_results.items()
-            if result.get('status') == 'available'
-        ]
-        
+                validation_results[table_name] = {'status': 'error', 'error': str(e)}
+                logger.error(f"[Silver Validation] Error checking table {table_name}: {e}")
+
+        all_available = all(result.get('status') == 'available' for result in validation_results.values())
+
         validation_summary = {
             'execution_date': execution_date,
-            'total_sources_checked': len(sources),
-            'available_sources': len(available_sources),
-            'available_source_names': available_sources,
-            'total_silver_files': total_silver_files,
-            'ready_for_gold_processing': len(available_sources) >= 1,  # At least 1 source required
-            'validation_details': validation_results
+            'tables_checked': len(required_tables),
+            'validation_details': validation_results,
+            'ready_for_gold_processing': all_available
         }
-        
-        logger.info(f"[Silver Validation] Summary: {available_sources}/{len(sources)} sources available")
-        logger.info(f"[Silver Validation] Ready for Gold processing: {validation_summary['ready_for_gold_processing']}")
-        
-        if not validation_summary['ready_for_gold_processing']:
-            raise ValueError("Insufficient Silver layer data for Gold processing")
-        
+
+        if all_available:
+            logger.info("[Silver Validation] All required Iceberg tables present; ready for gold processing")
+        else:
+            logger.warning("[Silver Validation] Some Iceberg tables are missing; gold processing will be skipped")
         return validation_summary
         
     except Exception as e:
@@ -145,33 +122,18 @@ def validate_silver_layer_availability(**context):
         raise
 
 def refresh_reference_datasets(**context):
-    """Refresh faculty/subject taxonomy from giaotrinh.sql before gold processing."""
+    """Ensure reference datasets are available."""
     logger = context['task_instance'].log
-    airflow_root = Path(__file__).resolve().parents[2]
-    sql_default = airflow_root.parent / "giaotrinh.sql"
-    if not sql_default.exists():
-        sql_default = airflow_root / "giaotrinh.sql"
-    sql_path = Path(os.getenv("REFERENCE_SQL_PATH", str(sql_default)))
-    output_dir = Path(os.getenv("REFERENCE_DATA_DIR", str(airflow_root / "data" / "reference")))
-    minio_prefix = os.getenv("REFERENCE_MINIO_PREFIX", "bronze/reference/giaotrinh")
-
-    logger.info(f"[Reference] Refreshing taxonomy from {sql_path}")
-    if not sql_path.exists():
-        raise FileNotFoundError(f"Reference SQL file not found at {sql_path}")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    load_reference_catalog(str(sql_path), str(output_dir), upload_to_minio=True, minio_prefix=minio_prefix)
-
     bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
-    reference_uri = f"s3a://{bucket}/{minio_prefix.strip('/')}"
+    prefix = os.getenv("REFERENCE_MINIO_PREFIX", "bronze/reference/giaotrinh")
+    reference_uri = f"s3a://{bucket}/{prefix.strip('/')}"
     os.environ["REFERENCE_DATA_URI"] = reference_uri
-    os.environ["REFERENCE_DATA_DIR"] = str(output_dir)
-
-    logger.info(f"[Reference] Reference datasets written to {output_dir} and uploaded to {reference_uri}")
+    os.environ["REFERENCE_DATA_DIR"] = str(Path(__file__).resolve().parents[2] / "data" / "reference")
+    logger.info(f"[Reference] Using existing reference datasets at {reference_uri}")
 
 def create_analytics_tables(**context):
     """Create analytics tables in Gold layer"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     logger = context['task_instance'].log
     
     logger.info(f"[Analytics] Creating analytics tables for {execution_date}")
@@ -181,22 +143,54 @@ def create_analytics_tables(**context):
         validation_result = context['task_instance'].xcom_pull(
             task_ids='validate_silver_layer', key='return_value'
         )
+        if not validation_result:
+            logger.warning("[Analytics] No validation result found; skipping gold build")
+            raise AirflowSkipException("Silver validation did not return any result")
+        if not validation_result.get('ready_for_gold_processing', False):
+            logger.warning("[Analytics] Silver layer not ready; skipping gold build")
+            raise AirflowSkipException("Silver layer data not ready for gold processing")
         
         available_sources = validation_result.get('available_source_names', [])
         logger.info(f"[Analytics] Processing sources: {available_sources}")
         
-        # Set context for Gold layer processing
-        gold_context = context.copy()
-        gold_context['dag_run'] = type('DagRun', (), {
-            'conf': {'source_systems': available_sources}
-        })()
+        # Set environment variables for Spark in Docker
+        os.environ.setdefault("SPARK_MASTER_URL", "spark://spark-master:7077")
+        os.environ.setdefault("MINIO_ENDPOINT", "http://minio:9000")
+        os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
+        os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin")
+        os.environ.setdefault("MINIO_BUCKET", "oer-lakehouse")
         
         # Process to Gold layer using standalone analytics
         os.environ.setdefault(
             "REFERENCE_DATA_DIR",
             str(Path(__file__).resolve().parents[2] / "data" / "reference")
         )
-        analytics = GoldAnalyticsStandalone()
+        
+        logger.info("[Analytics] Initializing Gold Analytics processor...")
+        
+        # Add retry logic for Spark session creation
+        max_retries = 3
+        retry_count = 0
+        analytics = None
+        
+        while retry_count < max_retries:
+            try:
+                analytics = GoldAnalyticsBuilder()
+                logger.info("[Analytics] Spark session created successfully")
+                break
+            except Exception as spark_error:
+                retry_count += 1
+                logger.warning(f"[Analytics] Spark session creation failed (attempt {retry_count}/{max_retries}): {spark_error}")
+                if retry_count >= max_retries:
+                    raise RuntimeError(f"Failed to create Spark session after {max_retries} attempts: {spark_error}")
+                # Wait before retry
+                import time
+                time.sleep(30)
+        
+        if analytics is None:
+            raise RuntimeError("Failed to initialize Gold Analytics processor")
+            
+        logger.info("[Analytics] Running gold layer processing...")
         analytics.run()
         
         # Create a result summary
@@ -204,12 +198,13 @@ def create_analytics_tables(**context):
             'status': 'success',
             'processing_duration_seconds': 0,
             'tables_created': [
-                'source_summary',
-                'subject_analysis', 
-                'quality_metrics',
-                'author_analysis',
-                'ml_features',
-                'library_export'
+                'dim_programs',
+                'dim_subjects',
+                'dim_sources',
+                'dim_languages',
+                'dim_date',
+                'fact_program_coverage',
+                'fact_oer_resources'
             ],
             'processing_errors': []
         }
@@ -222,11 +217,19 @@ def create_analytics_tables(**context):
         
         return result
         
+    except AirflowSkipException:
+        # Re-raise skip exceptions
+        raise
     except Exception as e:
         logger.error(f"[Analytics] Failed to create analytics tables: {e}")
+        logger.error(f"[Analytics] Error type: {type(e).__name__}")
+        import traceback
+        logger.error(f"[Analytics] Full traceback: {traceback.format_exc()}")
+        
         error_result = {
             'status': 'error',
             'error': str(e),
+            'error_type': type(e).__name__,
             'execution_date': execution_date
         }
         context['task_instance'].xcom_push(key='analytics_result', value=error_result)
@@ -236,7 +239,7 @@ def validate_gold_layer_quality(**context):
     """Validate the quality and completeness of Gold layer data"""
     from minio import Minio
     
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     logger = context['task_instance'].log
     
     logger.info(f"[Gold Validation] Validating Gold layer data for {execution_date}")
@@ -251,64 +254,76 @@ def validate_gold_layer_quality(**context):
         )
         
         bucket_name = 'oer-lakehouse'
-        gold_layers = ['analytics', 'ml_features', 'aggregations', 'library_ready']
+        # Check Gold Iceberg tables
+        gold_tables = {
+            'dim_programs': 'gold/analytics/dim_programs/metadata/',
+            'dim_subjects': 'gold/analytics/dim_subjects/metadata/',
+            'dim_sources': 'gold/analytics/dim_sources/metadata/',
+            'dim_languages': 'gold/analytics/dim_languages/metadata/',
+            'dim_date': 'gold/analytics/dim_date/metadata/',
+            'fact_program_coverage': 'gold/analytics/fact_program_coverage/metadata/',
+            'fact_oer_resources': 'gold/analytics/fact_oer_resources/metadata/',
+        }
         
         validation_results = {}
         
-        for layer in gold_layers:
+        for table_name, prefix in gold_tables.items():
             try:
-                # Check for gold layer files
-                objects = list(minio_client.list_objects(
-                    bucket_name=bucket_name,
-                    prefix=f"gold/{layer}/",
-                    recursive=True
-                ))
+                # Check for Iceberg metadata
+                has_metadata = any(
+                    minio_client.list_objects(
+                        bucket_name=bucket_name,
+                        prefix=prefix,
+                        recursive=True
+                    )
+                )
                 
-                # Filter recent files
-                recent_files = [
-                    obj for obj in objects 
-                    if (datetime.utcnow() - obj.last_modified).hours <= 24  # Within 24 hours
-                ]
-                
-                if recent_files:
-                    total_size = sum(obj.size for obj in recent_files)
-                    validation_results[layer] = {
-                        'files_count': len(recent_files),
+                if has_metadata:
+                    # Check data files
+                    data_prefix = prefix.replace('/metadata/', '/data/')
+                    objects = list(minio_client.list_objects(
+                        bucket_name=bucket_name,
+                        prefix=data_prefix,
+                        recursive=True
+                    ))
+                    
+                    total_size = sum(obj.size for obj in objects) if objects else 0
+                    validation_results[table_name] = {
+                        'status': 'validated' if total_size > 0 else 'empty',
+                        'files_count': len(objects),
                         'total_size_bytes': total_size,
-                        'status': 'validated' if total_size > 1000 else 'suspicious',
-                        'file_types': list(set(obj.object_name.split('.')[-1] for obj in recent_files))
                     }
-                    logger.info(f"✅ {layer}: {len(recent_files)} files, {total_size} bytes")
+                    logger.info(f"[Gold Validation] {table_name}: {len(objects)} files, {total_size} bytes")
                 else:
-                    validation_results[layer] = {
+                    validation_results[table_name] = {
+                        'status': 'missing',
                         'files_count': 0,
-                        'status': 'missing'
                     }
-                    logger.warning(f"⚠️ {layer}: No recent files found")
+                    logger.warning(f"[Gold Validation] {table_name}: No metadata found")
                     
             except Exception as e:
-                validation_results[layer] = {
+                validation_results[table_name] = {
                     'status': 'error',
                     'error': str(e)
                 }
-                logger.error(f"❌ {layer}: {e}")
+                logger.error(f"[Gold Validation] {table_name}: {e}")
         
         # Calculate validation summary
-        validated_layers = [
-            layer for layer, result in validation_results.items()
+        validated_tables = [
+            table for table, result in validation_results.items()
             if result.get('status') == 'validated'
         ]
         
         validation_summary = {
             'execution_date': execution_date,
-            'total_layers_checked': len(gold_layers),
-            'validated_layers': len(validated_layers),
-            'validated_layer_names': validated_layers,
-            'validation_passed': len(validated_layers) >= 2,  # At least 2 layers should be validated
-            'layer_details': validation_results
+            'total_tables_checked': len(gold_tables),
+            'validated_tables': len(validated_tables),
+            'validated_table_names': validated_tables,
+            'validation_passed': len(validated_tables) >= 5,  # At least 5 tables should be validated
+            'table_details': validation_results
         }
         
-        logger.info(f"[Gold Validation] Summary: {validated_layers}/{len(gold_layers)} layers validated")
+        logger.info(f"[Gold Validation] Summary: {len(validated_tables)}/{len(gold_tables)} tables validated")
         logger.info(f"[Gold Validation] Validation passed: {validation_summary['validation_passed']}")
         
         return validation_summary
@@ -319,7 +334,7 @@ def validate_gold_layer_quality(**context):
 
 def generate_gold_layer_report(**context):
     """Generate comprehensive Gold layer processing report"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     logger = context['task_instance'].log
     
     logger.info(f"[Gold Report] Generating processing report for {execution_date}")
@@ -356,13 +371,13 @@ def generate_gold_layer_report(**context):
             },
             'output_validation': {
                 'gold_layer_validation': quality_result,
-                'validated_layers': quality_result.get('validated_layer_names', []),
+                'validated_tables': quality_result.get('validated_table_names', []),
                 'validation_passed': quality_result.get('validation_passed', False)
             },
             'summary': {
                 'silver_sources_processed': len(validation_result.get('available_source_names', [])),
                 'gold_tables_created': len(analytics_result.get('tables_created', [])),
-                'gold_layers_validated': len(quality_result.get('validated_layer_names', [])),
+                'gold_tables_validated': len(quality_result.get('validated_table_names', [])),
                 'total_processing_time': analytics_result.get('processing_duration_seconds', 0),
                 'data_quality_score': quality_result.get('validation_passed', False) and analytics_result.get('status') == 'success'
             }
@@ -400,7 +415,7 @@ def generate_gold_layer_report(**context):
 
 def cleanup_gold_processing_artifacts(**context):
     """Clean up temporary processing artifacts"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     logger = context['task_instance'].log
     
     logger.info(f"[Gold Cleanup] Cleaning up Gold layer processing artifacts for {execution_date}")
@@ -417,19 +432,6 @@ def cleanup_gold_processing_artifacts(**context):
 start_task = DummyOperator(
     task_id='start_gold_processing',
     dag=dag,
-)
-
-# External dependency - wait for Silver layer processing
-wait_for_silver_processing = ExternalTaskSensor(
-    task_id='wait_for_silver_processing',
-    external_dag_id='silver_layer_processing',
-    external_task_id='end_silver_processing',
-    timeout=3600,  # 1 hour timeout
-    poke_interval=300,  # Check every 5 minutes
-    dag=dag,
-    mode='reschedule',
-    allowed_states=['success'],
-    failed_states=['failed', 'upstream_failed', 'skipped']
 )
 
 # Validate Silver layer data availability
@@ -489,80 +491,8 @@ end_task = DummyOperator(
 
 # === DAG Dependencies ===
 
-# Linear workflow with external dependency
-# start_task >> wait_for_silver_processing >> validate_silver_task
-start_task >> validate_silver_task
-validate_silver_task >> refresh_reference_task >> create_analytics_task >> validate_quality_task
+# Direct workflow without external dependency
+start_task >> validate_silver_task >> refresh_reference_task
+refresh_reference_task >> create_analytics_task >> validate_quality_task
 validate_quality_task >> generate_report_task >> cleanup_task
 cleanup_task >> health_check_task >> end_task
-
-# === DAG Documentation ===
-
-dag.doc_md = """
-# Gold Layer Processing DAG
-
-This DAG creates analytics-ready data in the Gold layer from standardized Silver layer data.
-
-## Workflow Steps:
-
-1. **Wait for Silver Processing**: External sensor waits for Silver layer processing to complete
-2. **Validate Silver Data**: Verify that Silver layer data is available and ready for processing
-3. **Create Analytics Tables**: Generate analytics tables including:
-   - Subject statistics and trends
-   - Data quality metrics and reports
-   - Usage analytics and insights
-4. **Generate ML Features**: Create machine learning features for:
-   - Content embeddings for similarity search
-   - Subject classification features
-   - Quality assessment features
-5. **Create Library-Ready Data**: Format data for library system integration:
-   - MARC 21 compatible records
-   - Dublin Core metadata
-   - OPAC feed ready data
-6. **Validate Gold Layer**: Ensure Gold layer data quality and completeness
-7. **Generate Reports**: Create comprehensive processing reports
-8. **Cleanup**: Clean up temporary processing artifacts
-
-## Key Features:
-
-- **Business Intelligence**: Creates pre-aggregated analytics tables for fast reporting
-- **ML Pipeline**: Generates features for recommendation and analysis systems
-- **Library Integration**: Prepares data in standard library formats
-- **Quality Assurance**: Comprehensive validation at each step
-- **Error Recovery**: Robust error handling with detailed logging
-
-## Dependencies:
-
-- Silver layer processing must complete successfully
-- Apache Spark cluster must be running with ML libraries
-- MinIO object storage must be accessible
-- Iceberg REST Catalog for table management
-
-## Outputs:
-
-### Analytics Layer:
-- `subject_statistics`: Subject-level analytics and trends
-- `quality_reports`: Data quality metrics by source and type
-- `usage_metrics`: Usage analytics and insights
-
-### ML Features Layer:
-- `content_embeddings`: Text embeddings for similarity search
-- `subject_features`: Subject classification features
-- `quality_features`: Quality assessment features
-
-### Library Ready Layer:
-- `marc_ready`: MARC 21 compatible records
-- `dublin_core`: Dublin Core metadata format
-- `opac_feed`: OPAC integration ready data
-
-## Schedule:
-
-Runs monthly after Silver layer processing completes. Depends on external task sensor for proper sequencing.
-
-**Processing Flow:**
-- Bronze Layer: Raw data collection
-- Silver Layer: Data standardization and cleaning
-- Gold Layer: Analytics and business intelligence (this DAG)
-
-**Typical Processing Time:** 15-30 minutes depending on data volume
-"""

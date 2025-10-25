@@ -629,28 +629,25 @@ class OpenStaxScraperStandalone:
             return None
     
     def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "openstax", logical_date: str = None, file_type: str = "books"):
-        """Lưu dữ liệu vào MinIO với đường dẫn có tổ chức"""
+        """Lưu dữ liệu vào MinIO với đường dẫn có tổ chức theo chuẩn bronze layer"""
         if not self.minio_enable or not self.minio_client or not documents:
             print("MinIO không được bật hoặc không có dữ liệu để lưu")
             return ""
         
-        if logical_date is None:
-            logical_date = datetime.now().strftime("%Y-%m-%d")
-        
-        # Tạo đường dẫn có tổ chức cho OpenStax
-        timestamp = int(time.time())
-        object_name = f"bronze/{source}/{logical_date}/{file_type}_{timestamp}.json"
+        # Tạo filename theo chuẩn bronze layer giống MIT OCW
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{source}_bronze_{timestamp}.json"
+        object_name = f"bronze/{source}/json/{filename}"
         
         # Tạo temporary file
         os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
         tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, f"{source}_{file_type}_{timestamp}.json")
+        tmp_path = os.path.join(tmp_dir, filename)
         
         try:
-            # Ghi dữ liệu vào temp file
+            # Ghi dữ liệu vào temp file theo format JSON array (giống MIT OCW)
             with open(tmp_path, 'w', encoding='utf-8') as f:
-                for doc in documents:
-                    f.write(json.dumps(doc, ensure_ascii=False) + "\n")
+                json.dump(documents, f, ensure_ascii=False, indent=2)
             
             # Upload lên MinIO với organized path
             self.minio_client.fput_object(self.minio_bucket, object_name, tmp_path)

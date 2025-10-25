@@ -45,20 +45,47 @@ class SchemaCreatorStandalone:
         print(f"Schema Creator initialized")
     
     def _create_spark_session(self) -> Optional[SparkSession]:
-        """Create Spark session with Iceberg configuration"""
+        """Create Spark session with Iceberg configuration - optimized for minimal Airflow load"""
         try:
-            spark = SparkSession.builder \
-                .appName("OER-Schema-Creator") \
-                .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions") \
-                .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog") \
-                .config("spark.sql.catalog.lakehouse.type", "rest") \
-                .config("spark.sql.catalog.lakehouse.uri", os.getenv('ICEBERG_REST_URI', 'http://iceberg-rest:8181')) \
-                .config("spark.hadoop.fs.s3a.access.key", os.getenv('MINIO_ACCESS_KEY', 'minioadmin')) \
-                .config("spark.hadoop.fs.s3a.secret.key", os.getenv('MINIO_SECRET_KEY', 'minioadmin')) \
-                .config("spark.hadoop.fs.s3a.endpoint", os.getenv('MINIO_ENDPOINT', 'http://minio:9000')) \
-                .config("spark.hadoop.fs.s3a.path.style.access", "true") \
-                .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem") \
+            builder = (
+                SparkSession.builder.appName("OER-Schema-Creator")
+                .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))
+                .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+                .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog")
+                .config("spark.sql.catalog.lakehouse.type", "hadoop")
+                .config(
+                    "spark.sql.catalog.lakehouse.warehouse",
+                    f"s3a://{os.getenv('MINIO_BUCKET', 'oer-lakehouse')}/warehouse/",
+                )
+                .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
+                .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
+                .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
+                .config("spark.hadoop.fs.s3a.path.style.access", "true")
+                .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+                .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            )
+
+            packages = os.getenv("SPARK_JARS_PACKAGES")
+            if packages:
+                builder = builder.config("spark.jars.packages", packages)
+                print(f"[Schema Creator] Using Spark packages: {packages}")
+
+            python_exec = os.getenv("PYSPARK_PYTHON")
+            if python_exec:
+                builder = builder.config("spark.pyspark.python", python_exec)
+            driver_python = os.getenv("PYSPARK_DRIVER_PYTHON")
+            if driver_python:
+                builder = builder.config("spark.pyspark.driver.python", driver_python)
+
+            spark = (
+                builder.config("spark.driver.memory", "256m")
+                .config("spark.driver.maxResultSize", "128m")
+                .config("spark.sql.shuffle.partitions", "2")
+                .config("spark.default.parallelism", "2")
+                .config("spark.sql.adaptive.enabled", "true")
+                .config("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
                 .getOrCreate()
+            )
             
             spark.sparkContext.setLogLevel("WARN")
             print("Spark session created for schema operations")

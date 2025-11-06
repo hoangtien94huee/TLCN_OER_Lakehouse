@@ -516,7 +516,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="Extract giaotrinh.sql into JSON reference datasets")
     parser.add_argument("--sql-path", default="giaotrinh.sql", help="Path to giaotrinh.sql dump")
-    parser.add_argument("--output-dir", default="lakehouse/data/reference", help="Directory to store JSON outputs")
+    parser.add_argument("--output-dir", default="data/reference", help="Directory to store JSON outputs")
     parser.add_argument("--upload-to-minio", action="store_true", help="Upload generated JSON files to MinIO")
     parser.add_argument(
         "--minio-prefix",

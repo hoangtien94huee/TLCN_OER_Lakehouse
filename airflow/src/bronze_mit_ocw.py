@@ -58,7 +58,6 @@ class MITOCWScraper:
         self.base_url = "https://ocw.mit.edu"
         self.source = "mit_ocw"
         self.delay = delay
-        # Báº¯t buá»™c dÃ¹ng Selenium cho MIT OCW
         self.use_selenium = True  # Force Selenium for MIT OCW
         self.output_dir = output_dir
         self.batch_size = batch_size
@@ -295,7 +294,7 @@ class MITOCWScraper:
         try:
             last_height = self.driver.execute_script("return document.body.scrollHeight")
             scroll_attempts = 0
-            max_scrolls = 10
+            max_scrolls = 200
             
             while scroll_attempts < max_scrolls:
                 # Scroll down

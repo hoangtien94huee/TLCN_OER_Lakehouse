@@ -47,10 +47,9 @@ COPY requirements.txt /opt/airflow/
 # Install Python dependencies (force no hash check to avoid mismatch)
 RUN pip install --no-cache-dir --no-deps -r /opt/airflow/requirements.txt ||     pip install --no-cache-dir --force-reinstall -r /opt/airflow/requirements.txt
 
-# Copy source code, dags, and scripts
+# Copy source code and dags
 COPY src/ /opt/airflow/src/
 COPY dags/ /opt/airflow/dags/
-COPY scripts/ /opt/airflow/scripts/
 
 # Copy entrypoint script
 COPY entrypoint.sh /opt/airflow/entrypoint.sh

@@ -12,6 +12,9 @@ venv/
 
 # Jupyter Notebooks
 .ipynb_checkpoints/
+spark-warehouse/
+metastore_db/
+derby.log
 
 # Airflow/Logs/Data - Runtime folders
 logs/

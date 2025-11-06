@@ -50,9 +50,9 @@ services:
       # Connect to Spark cluster
       - SPARK_MASTER=spark://spark-master:7077
     volumes:
-      - ./lakehouse/airflow/notebooks:/home/jovyan/notebooks
-      - ./lakehouse/airflow/dags:/home/jovyan/workflows
-      - ./lakehouse/airflow/src:/home/jovyan/oer_project
+      - ./airflow/notebooks:/home/jovyan/notebooks
+      - ./airflow/dags:/home/jovyan/workflows
+      - ./airflow/src:/home/jovyan/oer_project
     depends_on:
       - minio
       - spark-master
@@ -62,7 +62,7 @@ services:
   # Airflow Scraper
   oer-scraper:
     build:
-      context: ./lakehouse/airflow
+      context: ./airflow
       dockerfile: Dockerfile
     container_name: oer-airflow-scraper
     depends_on:
@@ -73,11 +73,11 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./lakehouse/data/scraped:/opt/airflow/scraped_data
-      - ./lakehouse/data:/opt/airflow/database
-      - ./lakehouse/data/logs:/opt/airflow/logs
-      - ./lakehouse/airflow/dags:/opt/airflow/dags
-      - ./lakehouse/airflow/src:/opt/airflow/src
+      - ./data/scraped:/opt/airflow/scraped_data
+      - ./data:/opt/airflow/database
+      - ./data/logs:/opt/airflow/logs
+      - ./airflow/dags:/opt/airflow/dags
+      - ./airflow/src:/opt/airflow/src
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -140,10 +140,10 @@ services:
       - "8081:8080" # Spark Master Web UI
       - "7077:7077" # Spark Master Port
     volumes:
-      - ./lakehouse/data/spark:/data/spark
-      - ./lakehouse/data/iceberg-jars:/opt/spark/jars/iceberg
-      - ./lakehouse/airflow/src:/opt/airflow/src
-      - ./lakehouse/airflow/dags:/opt/airflow/dags
+      - ./data/spark:/data/spark
+      - ./data/iceberg-jars:/opt/spark/jars/iceberg
+      - ./airflow/src:/opt/airflow/src
+      - ./airflow/dags:/opt/airflow/dags
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080" ]
@@ -160,8 +160,8 @@ services:
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=1g
-      - SPARK_WORKER_CORES=1
+      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=4
       - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
@@ -172,10 +172,10 @@ services:
     ports:
       - "8082:8081" # Spark Worker Web UI
     volumes:
-      - ./lakehouse/data/spark:/data/spark
-      - ./lakehouse/data/iceberg-jars:/opt/spark/jars/iceberg
-      - ./lakehouse/airflow/src:/opt/airflow/src
-      - ./lakehouse/airflow/dags:/opt/airflow/dags
+      - ./data/spark:/data/spark
+      - ./data/iceberg-jars:/opt/spark/jars/iceberg
+      - ./airflow/src:/opt/airflow/src
+      - ./airflow/dags:/opt/airflow/dags
     depends_on:
       - spark-master
     restart: unless-stopped

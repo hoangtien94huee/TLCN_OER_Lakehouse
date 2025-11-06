@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 """
 Gold Layer Analytics Builder
 ============================
@@ -104,7 +104,7 @@ class GoldAnalyticsBuilder:
         faculties_df = self._load_table(self.reference_faculties_table, "Faculties")
 
         if oer_df is None:
-            print("❌ No OER data available, skipping Gold layer build")
+            print("Γ¥î No OER data available, skipping Gold layer build")
             return
 
         # Build dimensions
@@ -142,7 +142,7 @@ class GoldAnalyticsBuilder:
         self._write_table(fact_oer_resources, self.fact_oer_resources_table, "fact_oer_resources")
 
         print("\n" + "=" * 80)
-        print("✅ Gold Analytics Layer Build Complete!")
+        print("Γ£à Gold Analytics Layer Build Complete!")
         print("=" * 80)
 
     def _load_table(self, table_name: str, description: str) -> Optional[DataFrame]:
@@ -150,13 +150,13 @@ class GoldAnalyticsBuilder:
         try:
             df = self.spark.table(table_name)
             if df.rdd.isEmpty():
-                print(f"⚠️  {description}: Table empty")
+                print(f"ΓÜá∩╕Å  {description}: Table empty")
                 return None
             count = df.count()
-            print(f"✅ {description}: Loaded {count:,} records")
+            print(f"Γ£à {description}: Loaded {count:,} records")
             return df
         except Exception as exc:
-            print(f"⚠️  {description}: Table not found ({table_name})")
+            print(f"ΓÜá∩╕Å  {description}: Table not found ({table_name})")
             return None
 
     def _build_dim_programs(self, programs_df: Optional[DataFrame], faculties_df: Optional[DataFrame]) -> DataFrame:
@@ -335,7 +335,7 @@ class GoldAnalyticsBuilder:
         Grain: One row per Program
         """
         if programs_df is None or subjects_df is None or program_subject_links_df is None:
-            print("⚠️  Missing reference data, creating empty fact_program_coverage")
+            print("ΓÜá∩╕Å  Missing reference data, creating empty fact_program_coverage")
             return self.spark.createDataFrame(
                 [],
                 T.StructType([
@@ -363,7 +363,7 @@ class GoldAnalyticsBuilder:
             F.countDistinct("resource_uid").alias("oer_count")
         )
 
-        # Join program → subjects → OER count
+        # Join program ΓåÆ subjects ΓåÆ OER count
         program_subjects = program_subject_links_df.join(
             subjects_df,
             "subject_id",
@@ -488,15 +488,15 @@ class GoldAnalyticsBuilder:
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
         """Write DataFrame to Gold Iceberg table."""
         if df is None or df.rdd.isEmpty():
-            print(f"⚠️  {description}: No data to write")
+            print(f"ΓÜá∩╕Å  {description}: No data to write")
             return
 
         try:
             count = df.count()
             df.writeTo(table_name).using("iceberg").createOrReplace()
-            print(f"✅ {description}: Wrote {count:,} records to {table_name}")
+            print(f"Γ£à {description}: Wrote {count:,} records to {table_name}")
         except Exception as exc:
-            print(f"❌ {description}: Failed to write - {exc}")
+            print(f"Γ¥î {description}: Failed to write - {exc}")
 
 
 def main() -> None:

@@ -23,7 +23,6 @@ try:
     from pyspark.sql import DataFrame, SparkSession
     from pyspark.sql import functions as F
     from pyspark.sql import types as T
-    from pyspark.sql.window import Window
 
     SPARK_AVAILABLE = True
 except ImportError:
@@ -59,6 +58,7 @@ class GoldAnalyticsBuilder:
         self.dim_sources_table = f"{self.gold_catalog}.{self.gold_database}.dim_sources"
         self.dim_languages_table = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
         self.dim_date_table = f"{self.gold_catalog}.{self.gold_database}.dim_date"
+        self.dim_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
         self.fact_program_coverage_table = f"{self.gold_catalog}.{self.gold_database}.fact_program_coverage"
         self.fact_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
 
@@ -69,6 +69,7 @@ class GoldAnalyticsBuilder:
     def _create_spark_session(self) -> SparkSession:
         session = (
             SparkSession.builder.appName("OER-Gold-Analytics")
+            .master(os.getenv("SPARK_MASTER", "local[*]"))
             .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
             .config(f"spark.sql.catalog.{self.silver_catalog}", "org.apache.iceberg.spark.SparkCatalog")
             .config(f"spark.sql.catalog.{self.silver_catalog}.type", "hadoop")
@@ -83,6 +84,10 @@ class GoldAnalyticsBuilder:
             .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
             .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
+            .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))
+            .config("spark.driver.maxResultSize", os.getenv("SPARK_DRIVER_MAXRESULTSIZE", "2g"))
+            .config("spark.sql.debug.maxToStringFields", "500")  # Increase field limit for complex schemas
             .getOrCreate()
         )
         session.sparkContext.setLogLevel("WARN")
@@ -117,6 +122,7 @@ class GoldAnalyticsBuilder:
         dim_sources = self._build_dim_sources(oer_df)
         dim_languages = self._build_dim_languages(oer_df)
         dim_date = self._build_dim_date(oer_df)
+        dim_oer_resources = self._build_dim_oer_resources(oer_df)
 
         # Build facts
         print("\n" + "=" * 80)
@@ -124,9 +130,16 @@ class GoldAnalyticsBuilder:
         print("=" * 80)
         
         fact_program_coverage = self._build_fact_program_coverage(
-            oer_df, programs_df, subjects_df, program_subject_links_df
+            oer_df,
+            programs_df,
+            subjects_df,
+            program_subject_links_df,
+            dim_programs,
+            dim_date,
         )
-        fact_oer_resources = self._build_fact_oer_resources(oer_df, dim_subjects, dim_sources, dim_languages, dim_date)
+        fact_oer_resources = self._build_fact_oer_resources(
+            oer_df, dim_sources, dim_languages, dim_date
+        )
 
         # Write tables
         print("\n" + "=" * 80)
@@ -138,11 +151,12 @@ class GoldAnalyticsBuilder:
         self._write_table(dim_sources, self.dim_sources_table, "dim_sources")
         self._write_table(dim_languages, self.dim_languages_table, "dim_languages")
         self._write_table(dim_date, self.dim_date_table, "dim_date")
+        self._write_table(dim_oer_resources, self.dim_oer_resources_table, "dim_oer_resources")
         self._write_table(fact_program_coverage, self.fact_program_coverage_table, "fact_program_coverage")
         self._write_table(fact_oer_resources, self.fact_oer_resources_table, "fact_oer_resources")
 
         print("\n" + "=" * 80)
-        print("Γ£à Gold Analytics Layer Build Complete!")
+        print("Gold Analytics Layer Build Complete!")
         print("=" * 80)
 
     def _load_table(self, table_name: str, description: str) -> Optional[DataFrame]:
@@ -165,19 +179,22 @@ class GoldAnalyticsBuilder:
         
         Business use: Group coverage by program
         """
+        schema = T.StructType(
+            [
+                T.StructField("program_key", T.LongType(), False),
+                T.StructField("program_id", T.IntegerType(), False),
+                T.StructField("program_name", T.StringType(), True),
+                T.StructField("program_code", T.StringType(), True),
+                T.StructField("faculty_name", T.StringType(), True),
+                T.StructField("published_year", T.StringType(), True),
+                T.StructField("effective_from", T.DateType(), True),
+                T.StructField("effective_to", T.DateType(), True),
+                T.StructField("is_current", T.BooleanType(), False),
+            ]
+        )
         if programs_df is None:
             # Return empty dimension
-            return self.spark.createDataFrame(
-                [],
-                T.StructType([
-                    T.StructField("program_key", T.IntegerType(), False),
-                    T.StructField("program_id", T.IntegerType(), False),
-                    T.StructField("program_name", T.StringType(), True),
-                    T.StructField("program_code", T.StringType(), True),
-                    T.StructField("faculty_name", T.StringType(), True),
-                    T.StructField("published_year", T.StringType(), True),
-                ])
-            )
+            return self.spark.createDataFrame([], schema)
 
         # Join with faculties
         if faculties_df is not None:
@@ -203,7 +220,27 @@ class GoldAnalyticsBuilder:
                 F.col("published_year"),
             )
 
-        return dim.dropDuplicates(["program_id"]).orderBy("program_id")
+        dim = dim.select(
+            F.abs(
+                F.xxhash64(
+                    F.coalesce(F.col("program_id"), F.lit(0)),
+                    F.coalesce(F.col("program_code"), F.lit("")),
+                )
+            ).alias("program_key"),
+            F.col("program_id"),
+            F.col("program_name"),
+            F.col("program_code"),
+            F.col("faculty_name"),
+            F.col("published_year"),
+        ).withColumn("effective_from", F.current_date()).withColumn(
+            "effective_to", F.lit(None).cast(T.DateType())
+        ).withColumn("is_current", F.lit(True))
+
+        return (
+            dim.dropDuplicates(["program_id"])
+            .orderBy("program_id")
+            .select(schema.fieldNames())
+        )
 
     def _build_dim_subjects(self, subjects_df: Optional[DataFrame], faculties_df: Optional[DataFrame]) -> DataFrame:
         """
@@ -211,18 +248,21 @@ class GoldAnalyticsBuilder:
         
         Business use: Track which subjects have OER
         """
+        schema = T.StructType(
+            [
+                T.StructField("subject_key", T.LongType(), False),
+                T.StructField("subject_id", T.IntegerType(), False),
+                T.StructField("subject_name", T.StringType(), True),
+                T.StructField("subject_name_en", T.StringType(), True),
+                T.StructField("subject_code", T.StringType(), True),
+                T.StructField("faculty_name", T.StringType(), True),
+                T.StructField("effective_from", T.DateType(), True),
+                T.StructField("effective_to", T.DateType(), True),
+                T.StructField("is_current", T.BooleanType(), False),
+            ]
+        )
         if subjects_df is None:
-            return self.spark.createDataFrame(
-                [],
-                T.StructType([
-                    T.StructField("subject_key", T.IntegerType(), False),
-                    T.StructField("subject_id", T.IntegerType(), False),
-                    T.StructField("subject_name", T.StringType(), True),
-                    T.StructField("subject_name_en", T.StringType(), True),
-                    T.StructField("subject_code", T.StringType(), True),
-                    T.StructField("faculty_name", T.StringType(), True),
-                ])
-            )
+            return self.spark.createDataFrame([], schema)
 
         if faculties_df is not None:
             dim = subjects_df.join(
@@ -247,7 +287,27 @@ class GoldAnalyticsBuilder:
                 F.lit(None).cast(T.StringType()).alias("faculty_name"),
             )
 
-        return dim.dropDuplicates(["subject_id"]).orderBy("subject_id")
+        dim = dim.select(
+            F.abs(
+                F.xxhash64(
+                    F.coalesce(F.col("subject_id"), F.lit(0)),
+                    F.coalesce(F.col("subject_code"), F.lit("")),
+                )
+            ).alias("subject_key"),
+            F.col("subject_id"),
+            F.col("subject_name"),
+            F.col("subject_name_en"),
+            F.col("subject_code"),
+            F.col("faculty_name"),
+        ).withColumn("effective_from", F.current_date()).withColumn(
+            "effective_to", F.lit(None).cast(T.DateType())
+        ).withColumn("is_current", F.lit(True))
+
+        return (
+            dim.dropDuplicates(["subject_id"])
+            .orderBy("subject_id")
+            .select(schema.fieldNames())
+        )
 
     def _build_dim_sources(self, oer_df: DataFrame) -> DataFrame:
         """
@@ -260,9 +320,13 @@ class GoldAnalyticsBuilder:
             F.col("catalog_provider"),
         ).dropDuplicates()
 
-        window = Window.orderBy("source_system")
         return sources.select(
-            F.row_number().over(window).alias("source_key"),
+            F.abs(
+                F.xxhash64(
+                    F.coalesce(F.col("source_system"), F.lit("")),
+                    F.coalesce(F.col("catalog_provider"), F.lit("")),
+                )
+            ).alias("source_key"),
             F.col("source_system").alias("source_code"),
             F.col("catalog_provider").alias("source_name"),
         )
@@ -277,9 +341,8 @@ class GoldAnalyticsBuilder:
             F.coalesce(F.col("language"), F.lit("unknown")).alias("language_code")
         ).dropDuplicates()
 
-        window = Window.orderBy("language_code")
         return languages.select(
-            F.row_number().over(window).alias("language_key"),
+            F.abs(F.xxhash64(F.col("language_code"))).alias("language_key"),
             F.col("language_code"),
         )
 
@@ -301,6 +364,9 @@ class GoldAnalyticsBuilder:
             oer_df.select(F.to_date(F.col("ingested_at")).alias("date"))
         ).where(F.col("date").isNotNull()).dropDuplicates()
 
+        fallback_date = self.spark.range(1).select(F.current_date().alias("date"))
+        dates_df = dates_df.union(fallback_date).dropDuplicates()
+
         # Build date dimension with attributes
         dim_date = dates_df.select(
             F.col("date").alias("date_key"),
@@ -317,12 +383,43 @@ class GoldAnalyticsBuilder:
 
         return dim_date
 
+    def _build_dim_oer_resources(self, oer_df: DataFrame) -> DataFrame:
+        """
+        Dimension: OER Resources (Descriptive Attributes)
+        
+        Business use: Store all descriptive information about OER resources
+        Grain: One row per OER resource
+        """
+        dim = oer_df.select(
+            F.col("resource_uid").alias("resource_key"),
+            F.col("resource_id"),
+            F.col("title"),
+            F.col("description"),
+            F.col("source_url"),
+            F.col("catalog_provider"),
+            F.col("publisher_name"),
+            F.col("license_name"),
+            F.col("license_url"),
+            F.col("subjects"),
+            F.col("keywords"),
+            F.col("creator_names"),
+            F.col("matched_subjects"),
+            F.col("canonical_subjects"),
+            F.col("unmatched_subjects"),
+            F.col("dc_xml_path"),
+            F.col("bronze_source_path"),
+        )
+        
+        return dim.dropDuplicates(["resource_key"]).orderBy("resource_key")
+
     def _build_fact_program_coverage(
         self,
         oer_df: DataFrame,
         programs_df: Optional[DataFrame],
         subjects_df: Optional[DataFrame],
         program_subject_links_df: Optional[DataFrame],
+        dim_programs: DataFrame,
+        dim_date: DataFrame,
     ) -> DataFrame:
         """
         Fact Table: Program Coverage
@@ -335,17 +432,21 @@ class GoldAnalyticsBuilder:
         Grain: One row per Program
         """
         if programs_df is None or subjects_df is None or program_subject_links_df is None:
-            print("ΓÜá∩╕Å  Missing reference data, creating empty fact_program_coverage")
+            print("[Warning] Missing reference data, creating empty fact_program_coverage")
             return self.spark.createDataFrame(
                 [],
                 T.StructType([
+                    T.StructField("program_key", T.LongType(), True),
                     T.StructField("program_id", T.IntegerType(), False),
                     T.StructField("program_name", T.StringType(), True),
+                    T.StructField("faculty_name", T.StringType(), True),
                     T.StructField("total_subjects", T.IntegerType(), True),
                     T.StructField("subjects_with_oer", T.IntegerType(), True),
                     T.StructField("coverage_pct", T.DoubleType(), True),
                     T.StructField("total_oer_resources", T.IntegerType(), True),
                     T.StructField("avg_oer_per_subject", T.DoubleType(), True),
+                    T.StructField("snapshot_date", T.DateType(), True),
+                    T.StructField("snapshot_date_key", T.DateType(), True),
                 ])
             )
 
@@ -363,7 +464,7 @@ class GoldAnalyticsBuilder:
             F.countDistinct("resource_uid").alias("oer_count")
         )
 
-        # Join program ΓåÆ subjects ΓåÆ OER count
+        # Join program -> subjects -> OER count
         program_subjects = program_subject_links_df.join(
             subjects_df,
             "subject_id",
@@ -391,19 +492,40 @@ class GoldAnalyticsBuilder:
             F.round(F.col("total_oer_resources") / F.col("total_subjects"), 2)
         )
 
-        # Join program name
+        # Join surrogate program metadata
+        dim_program_lookup = dim_programs.select(
+            "program_id",
+            "program_key",
+            "program_name",
+            "faculty_name",
+        ).dropDuplicates(["program_id"])
+
         fact = program_coverage.join(
-            programs_df.select("program_id", "program_name"),
+            dim_program_lookup,
             "program_id",
             "left"
-        ).select(
+        ).withColumn(
+            "snapshot_date",
+            F.current_date()
+        )
+
+        snapshot_lookup = dim_date.select(
+            F.col("date").alias("snapshot_date"),
+            F.col("date_key").alias("snapshot_date_key"),
+        ).dropDuplicates(["snapshot_date"])
+
+        fact = fact.join(snapshot_lookup, "snapshot_date", "left").select(
+            "program_key",
             "program_id",
             "program_name",
+            "faculty_name",
             "total_subjects",
             "subjects_with_oer",
             "coverage_pct",
             "total_oer_resources",
             "avg_oer_per_subject",
+            "snapshot_date",
+            "snapshot_date_key",
         ).orderBy(F.desc("coverage_pct"))
 
         return fact
@@ -411,75 +533,78 @@ class GoldAnalyticsBuilder:
     def _build_fact_oer_resources(
         self,
         oer_df: DataFrame,
-        dim_subjects: DataFrame,
         dim_sources: DataFrame,
         dim_languages: DataFrame,
         dim_date: DataFrame,
     ) -> DataFrame:
         """
-        Fact Table: OER Resources (Denormalized)
+        Fact Table: OER Resources (Keys + Measures Only)
         
         Business Questions:
-        1. Find all OER for subject X
-        2. Filter OER by source/language
-        3. View OER details for recommendations
+        1. How many OER resources by source/language?
+        2. What's the average quality score?
+        3. Count resources by matched subjects/programs
         
         Grain: One row per OER resource
+        
+        Contains:
+        - Keys (resource_key, source_key, language_key, date_keys, program_ids)
+        - Measures (counts, scores)
         """
         # Join with dimension keys
         fact = oer_df.alias("oer")
 
-        # Join source dimension
+        # Join source dimension to get source_key
         fact = fact.join(
-            dim_sources.alias("src"),
+            dim_sources.select("source_key", "source_code").alias("src"),
             F.col("oer.source_system") == F.col("src.source_code"),
             "left"
         )
 
-        # Join language dimension
+        # Join language dimension to get language_key
         fact = fact.join(
-            dim_languages.alias("lang"),
+            dim_languages.select("language_key", "language_code").alias("lang"),
             F.coalesce(F.col("oer.language"), F.lit("unknown")) == F.col("lang.language_code"),
             "left"
         )
 
-        # Join date dimensions for each date column
+        # Join date dimensions for date keys
         fact = fact.join(
-            dim_date.alias("pub_date"),
-            F.to_date(F.col("oer.publication_date")) == F.col("pub_date.date"),
+            dim_date.select(F.col("date").alias("pub_date"), F.col("date_key").alias("pub_date_key")),
+            F.to_date(F.col("oer.publication_date")) == F.col("pub_date"),
             "left"
         ).join(
-            dim_date.alias("ing_date"),
-            F.to_date(F.col("oer.ingested_at")) == F.col("ing_date.date"),
+            dim_date.select(F.col("date").alias("ing_date"), F.col("date_key").alias("ing_date_key")),
+            F.to_date(F.col("oer.ingested_at")) == F.col("ing_date"),
             "left"
         )
 
-        # Select denormalized columns
+        # Select only keys and measures (NO descriptive attributes)
         fact = fact.select(
+            # Primary Key
             F.col("oer.resource_uid").alias("resource_key"),
-            F.col("oer.resource_id"),
-            F.col("oer.title"),
-            F.col("oer.description"),
-            F.col("oer.source_url"),
+            
+            # Foreign Keys to Dimensions
             F.col("src.source_key"),
-            F.col("src.source_name"),
             F.col("lang.language_key"),
-            F.col("lang.language_code"),
-            F.col("oer.publisher_name"),
-            F.col("oer.license_name"),
-            F.col("oer.subjects"),
-            F.col("oer.keywords"),
-            F.col("oer.creator_names"),
-            F.col("oer.matched_subjects"),
-            F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
+            F.col("pub_date_key").alias("publication_date_key"),
+            F.col("ing_date_key").alias("ingested_date_key"),
+            
+            # Array of foreign keys
             F.col("oer.program_ids"),
+            
+            # Measures (numeric facts)
+            F.size(F.col("oer.subjects")).alias("subjects_count"),
+            F.size(F.col("oer.keywords")).alias("keywords_count"),
+            F.size(F.col("oer.creator_names")).alias("creator_count"),
+            F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
             F.size(F.col("oer.program_ids")).alias("matched_programs_count"),
             F.col("oer.data_quality_score"),
-            F.col("pub_date.date_key").alias("publication_date_key"),
+            
+            # Timestamps (for time-series analysis)
             F.col("oer.publication_date"),
             F.col("oer.last_updated_at"),
             F.col("oer.scraped_at"),
-            F.col("ing_date.date_key").alias("ingested_date_key"),
             F.col("oer.ingested_at"),
         )
 
@@ -488,15 +613,15 @@ class GoldAnalyticsBuilder:
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
         """Write DataFrame to Gold Iceberg table."""
         if df is None or df.rdd.isEmpty():
-            print(f"ΓÜá∩╕Å  {description}: No data to write")
+            print(f" {description}: No data to write")
             return
 
         try:
             count = df.count()
             df.writeTo(table_name).using("iceberg").createOrReplace()
-            print(f"Γ£à {description}: Wrote {count:,} records to {table_name}")
+            print(f" {description}: Wrote {count:,} records to {table_name}")
         except Exception as exc:
-            print(f"Γ¥î {description}: Failed to write - {exc}")
+            print(f" {description}: Failed to write - {exc}")
 
 
 def main() -> None:

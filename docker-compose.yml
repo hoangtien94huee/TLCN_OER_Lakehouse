@@ -104,10 +104,16 @@ services:
       - SKIP_CATEGORIES=exam,assignment,quiz
       # Spark cluster configuration
       - SPARK_MASTER=spark://spark-master:7077
+      - SPARK_DEPLOY_MODE=client
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - PYSPARK_SUBMIT_ARGS=--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565 pyspark-shell
+      # Spark Memory Configuration (reduce to fit cluster)
+      - SPARK_DRIVER_MEMORY=1g
+      - SPARK_EXECUTOR_MEMORY=1g
+      - SPARK_DRIVER_MAXRESULTSIZE=512m
+      - SPARK_SHUFFLE_PARTITIONS=4
       # Optional: download and upload PDFs for OTL
       - OTL_DOWNLOAD_PDFS=0
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
@@ -127,6 +133,9 @@ services:
       - SPARK_MODE=master
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
+      - SPARK_DRIVER_MEMORY=1g
+      - SPARK_EXECUTOR_MEMORY=1g
+      - SPARK_DRIVER_MAXRESULTSIZE=512m
       - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
@@ -160,8 +169,8 @@ services:
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=4g
-      - SPARK_WORKER_CORES=4
+      - SPARK_WORKER_MEMORY=1g
+      - SPARK_WORKER_CORES=2
       - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
@@ -180,6 +189,24 @@ services:
       - spark-master
     restart: unless-stopped
 
+  # Dremio for BI access (Power BI, SQL clients)
+  dremio:
+    image: dremio/dremio-oss:26.0.5
+    container_name: oer-dremio
+    depends_on:
+      minio:
+        condition: service_healthy
+    ports:
+      - "9047:9047"   # Web UI
+      - "31010:31010" # JDBC/ODBC
+      - "32010:32010" # Flight SQL
+    environment:
+      - DREMIO_JAVA_SERVER_EXTRA_OPTS=-Ddremio.s3.compat=true -Ddremio.s3.unsigned=true
+      - SERVICES_HEAP_SIZE=2G
+    volumes:
+      - dremio_data:/opt/dremio/data
+    restart: unless-stopped
+
 volumes:
   scraped_data:
   database:
@@ -189,3 +216,4 @@ volumes:
   minio_data:
   spark_data:
   notebooks:
+  dremio_data:

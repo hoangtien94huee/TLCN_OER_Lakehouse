@@ -190,6 +190,7 @@ services:
     restart: unless-stopped
 
   # Dremio for BI access (Power BI, SQL clients)
+    # Dremio for BI access (Power BI, SQL clients)
   dremio:
     image: dremio/dremio-oss:26.0.5
     container_name: oer-dremio
@@ -201,11 +202,25 @@ services:
       - "31010:31010" # JDBC/ODBC
       - "32010:32010" # Flight SQL
     environment:
-      - DREMIO_JAVA_SERVER_EXTRA_OPTS=-Ddremio.s3.compat=true -Ddremio.s3.unsigned=true
+      - DREMIO_JAVA_SERVER_EXTRA_OPTS=-Ddremio.s3.compat=true -Ddremio.s3.unsigned=true -Dcom.amazonaws.sdk.disableEc2Metadata=true
       - SERVICES_HEAP_SIZE=2G
+      # MinIO connection hints
+      - MINIO_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      # Disable SSL for Arrow Flight (local development)
+      - DREMIO_FLIGHT_SSL_ENABLED=false
+      - DREMIO_FLIGHT_ENCRYPTION_ENABLED=false
     volumes:
       - dremio_data:/opt/dremio/data
+      - ./config/dremio:/opt/dremio/conf
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9047"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
 
 volumes:
   scraped_data:

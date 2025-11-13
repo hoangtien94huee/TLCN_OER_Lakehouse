@@ -593,19 +593,10 @@ class GoldAnalyticsBuilder:
             # Array of foreign keys
             F.col("oer.program_ids"),
             
-            # Measures (numeric facts)
-            F.size(F.col("oer.subjects")).alias("subjects_count"),
-            F.size(F.col("oer.keywords")).alias("keywords_count"),
-            F.size(F.col("oer.creator_names")).alias("creator_count"),
+            # Measures (numeric facts) - Only meaningful aggregatable metrics
             F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
             F.size(F.col("oer.program_ids")).alias("matched_programs_count"),
             F.col("oer.data_quality_score"),
-            
-            # Timestamps (for time-series analysis)
-            F.col("oer.publication_date"),
-            F.col("oer.last_updated_at"),
-            F.col("oer.scraped_at"),
-            F.col("oer.ingested_at"),
         )
 
         return fact.orderBy(F.desc("data_quality_score"))

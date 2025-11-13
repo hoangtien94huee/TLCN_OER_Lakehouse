@@ -78,6 +78,7 @@ services:
       - ./data/logs:/opt/airflow/logs
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/src:/opt/airflow/src
+      - ./data/iceberg-jars:/opt/airflow/jars:ro  
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor

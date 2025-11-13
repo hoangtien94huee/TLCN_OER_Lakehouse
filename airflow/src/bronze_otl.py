@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
-"""
-Open Textbook Library Scraper - Bronze Layer
-=============================================
 
-Standalone script to scrape Open Textbook Library and store to MinIO bronze layer.
-Based on building-lakehouse pattern with advanced Selenium support.
+"""
+Open Textbook Library Scraper - Bronze Layer - FAST MODE
+=========================================================
+
+Optimized version with parallel processing and speed improvements.
+Saves as JSON Array matching the exact format.
 """
 
 import os
@@ -18,8 +18,9 @@ from datetime import datetime
 from typing import List, Dict, Any
 from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-# Selenium imports for live mode
+# Selenium imports
 try:
     from selenium import webdriver
     from selenium.webdriver.chrome.options import Options
@@ -44,37 +45,62 @@ except ImportError:
 # Configuration constants
 BASE_URL = "https://open.umn.edu"
 
-# Throttling/backoff configuration via ENV (safe defaults)
-DEFAULT_DELAY_BASE_SEC = float(os.getenv('OTL_DELAY_BASE_SEC', '0.8'))
-DEFAULT_DELAY_JITTER_SEC = float(os.getenv('OTL_DELAY_JITTER_SEC', '0.4'))
+# ✅ FAST MODE Configuration
+FAST_MODE = os.getenv('OTL_FAST_MODE', 'true').lower() in ['1', 'true', 'yes']
+PARALLEL_MODE = os.getenv('OTL_PARALLEL', 'true').lower() in ['1', 'true', 'yes']
+MAX_WORKERS = int(os.getenv('OTL_MAX_WORKERS', '4'))
+SKIP_PDF_DOWNLOAD = os.getenv('OTL_SKIP_PDF', 'false').lower() in ['1', 'true', 'yes']
+
+# Speed optimizations
+if FAST_MODE:
+    DEFAULT_DELAY_BASE_SEC = 0.2
+    DEFAULT_DELAY_JITTER_SEC = 0.1
+    PER_BOOK_DELAY_SEC = 0.2
+    SUBJECT_COOLDOWN_SEC = 2.0
+    SCROLL_WAIT_SEC = 0.5
+    PAGE_LOAD_WAIT_SEC = 0.5
+else:
+    DEFAULT_DELAY_BASE_SEC = float(os.getenv('OTL_DELAY_BASE_SEC', '0.8'))
+    DEFAULT_DELAY_JITTER_SEC = float(os.getenv('OTL_DELAY_JITTER_SEC', '0.4'))
+    PER_BOOK_DELAY_SEC = float(os.getenv('OTL_PER_BOOK_DELAY_SEC', '0.6'))
+    SUBJECT_COOLDOWN_SEC = float(os.getenv('OTL_SUBJECT_COOLDOWN_SEC', '5.0'))
+    SCROLL_WAIT_SEC = 2.0
+    PAGE_LOAD_WAIT_SEC = 1.0
+
 RETRY_BACKOFF_BASE_SEC = float(os.getenv('OTL_RETRY_BACKOFF_BASE_SEC', '2.0'))
 RETRY_BACKOFF_MAX_SEC = float(os.getenv('OTL_RETRY_BACKOFF_MAX_SEC', '10.0'))
 WAIT_UNTIL_CLEAR = (os.getenv('OTL_WAIT_UNTIL_CLEAR', 'false').lower() in ['1','true','yes'])
 WAIT_MAX_MINUTES = int(os.getenv('OTL_WAIT_MAX_MINUTES', '15'))
-PER_BOOK_DELAY_SEC = float(os.getenv('OTL_PER_BOOK_DELAY_SEC', '0.6'))
-SUBJECT_COOLDOWN_SEC = float(os.getenv('OTL_SUBJECT_COOLDOWN_SEC', '3.0'))
 FORCE_RANDOM_UA = (os.getenv('OTL_FORCE_RANDOM_UA', 'true').lower() in ['1','true','yes'])
 CUSTOM_UA = os.getenv('OTL_USER_AGENT', '').strip()
 PROXY_SERVER = os.getenv('OTL_PROXY', '').strip()
-BOOK_MAX_ATTEMPTS = int(os.getenv('OTL_BOOK_MAX_ATTEMPTS', '4'))
-RETRY_PDF_ON_MISS = (os.getenv('OTL_RETRY_PDF_ON_MISS', 'true').lower() in ['1','true','yes'])
+BOOK_MAX_ATTEMPTS = int(os.getenv('OTL_BOOK_MAX_ATTEMPTS', '2' if FAST_MODE else '4'))
+RETRY_PDF_ON_MISS = (os.getenv('OTL_RETRY_PDF_ON_MISS', 'false' if FAST_MODE else 'true').lower() in ['1','true','yes'])
+
+# PDF Download Configuration
+DOWNLOAD_PDFS = not SKIP_PDF_DOWNLOAD
+PDF_PATH = '/opt/airflow/scraped_pdfs/otl'
 
 # Helper functions
 def _sleep(base_sec: float = DEFAULT_DELAY_BASE_SEC, jitter_sec: float = DEFAULT_DELAY_JITTER_SEC) -> None:
+    """Sleep with jitter"""
     delay = max(0.0, base_sec) + max(0.0, jitter_sec) * random.random()
     time.sleep(delay)
 
 def _backoff_sleep(attempt_index: int) -> None:
+    """Exponential backoff sleep"""
     delay = RETRY_BACKOFF_BASE_SEC * (2 ** max(0, attempt_index - 1))
     time.sleep(min(delay, RETRY_BACKOFF_MAX_SEC))
 
 def _with_cache_bust(url: str) -> str:
+    """Add cache-busting timestamp to URL"""
     if not url:
         return url
     ts = str(int(time.time() * 1000))
     return f"{url}&ts={ts}" if ('?' in url) else f"{url}?ts={ts}"
 
 def _pick_user_agent() -> str:
+    """Pick random user agent"""
     if CUSTOM_UA:
         return CUSTOM_UA
     ua_pool = [
@@ -85,6 +111,7 @@ def _pick_user_agent() -> str:
     return random.choice(ua_pool)
 
 def _md5_id(url: str, title: str) -> str:
+    """Generate MD5 hash ID"""
     return hashlib.md5(f"{url}_{title}".encode("utf-8")).hexdigest()
 
 def _ensure_not_retry_later(driver) -> BeautifulSoup:
@@ -127,6 +154,79 @@ def _ensure_not_retry_later(driver) -> BeautifulSoup:
                 break
         return soup
 
+def _download_pdf(pdf_url: str, book_id: str, title: str, minio_client=None, bucket: str = 'oer-lakehouse') -> bool:
+    """Download PDF file and upload to MinIO"""
+    if SKIP_PDF_DOWNLOAD:
+        return False
+        
+    try:
+        safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
+        safe_title = safe_title.replace(' ', '_')[:50]
+        filename = f"{book_id}_{safe_title}.pdf"
+        
+        os.makedirs(PDF_PATH, exist_ok=True)
+        filepath = os.path.join(PDF_PATH, filename)
+        
+        if FAST_MODE:
+            print(f"[PDF] Downloading: {filename[:30]}...")
+        else:
+            print(f"[OTL] [PDF] Downloading: {filename}")
+        
+        session = requests.Session()
+        session.headers.update({
+            'User-Agent': _pick_user_agent(),
+            'Accept': 'application/pdf,application/octet-stream,*/*',
+            'Referer': BASE_URL
+        })
+        
+        max_attempts = 2 if FAST_MODE else 3
+        for attempt in range(max_attempts):
+            try:
+                response = session.get(pdf_url, stream=True, timeout=60 if FAST_MODE else 120, allow_redirects=True)
+                response.raise_for_status()
+                
+                with open(filepath, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                
+                file_size = os.path.getsize(filepath) / (1024 * 1024)
+                
+                if file_size < 0.01:
+                    os.remove(filepath)
+                    if attempt < max_attempts - 1:
+                        time.sleep(1)
+                        continue
+                    return False
+                
+                if FAST_MODE:
+                    print(f"[PDF] ✓ {filename[:30]}... ({file_size:.1f}MB)")
+                else:
+                    print(f"[OTL] [PDF] ✓ Downloaded: {filename} ({file_size:.2f} MB)")
+                
+                if minio_client:
+                    minio_path = f"bronze/otl-pdfs/{filename}"
+                    try:
+                        minio_client.fput_object(bucket, minio_path, filepath, content_type='application/pdf')
+                        if not FAST_MODE:
+                            print(f"[OTL] [PDF] ✓ Uploaded to MinIO: {minio_path}")
+                    except S3Error as e:
+                        print(f"[PDF] MinIO upload failed: {e}")
+                
+                return True
+                
+            except requests.exceptions.RequestException as e:
+                if attempt < max_attempts - 1:
+                    time.sleep(1)
+                continue
+        
+        return False
+        
+    except Exception as e:
+        if not FAST_MODE:
+            print(f"[OTL] [PDF] Download failed for {pdf_url}: {e}")
+        return False
+
 class OTLScraperStandalone:
     """Standalone Open Textbook Library scraper for bronze layer"""
     
@@ -134,20 +234,143 @@ class OTLScraperStandalone:
         self.base_url = BASE_URL + "/opentextbooks"
         self.source = "otl"
         self.delay = DEFAULT_DELAY_BASE_SEC
-        self.max_books = int(os.getenv('MAX_DOCUMENTS', 50))
+        self.max_books = int(os.getenv('MAX_DOCUMENTS', 999999))  # No limit by default
         self.use_selenium = SELENIUM_AVAILABLE
         
-        # MinIO setup
         self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
         self.minio_client = self._setup_minio() if MINIO_AVAILABLE else None
         
-        # HTTP session
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': _pick_user_agent()
-        })
+        self.session.headers.update({'User-Agent': _pick_user_agent()})
         
-        print(f"OTL Scraper initialized - Max books: {self.max_books}, Selenium: {self.use_selenium}")
+        self.pdf_downloaded_count = 0
+        self.pdf_failed_count = 0
+        
+        # Get subjects dynamically
+        self.subjects = self._get_subjects()
+        
+        mode_str = "FAST" if FAST_MODE else "NORMAL"
+        parallel_str = f"PARALLEL ({MAX_WORKERS} workers)" if PARALLEL_MODE else "SEQUENTIAL"
+        
+        print(f"OTL Scraper initialized - {mode_str} MODE - {parallel_str}")
+        print(f"Max books per subject: {self.max_books if self.max_books < 999999 else 'UNLIMITED'}")
+        print(f"Selenium: {self.use_selenium}")
+        print(f"Download PDFs: {DOWNLOAD_PDFS}")
+        print(f"Subjects to scrape: {len(self.subjects)}")
+    
+    def _get_subjects(self) -> List[Dict[str, str]]:
+        """Get list of ALL subjects dynamically from OTL website"""
+        subjects = []
+        
+        print("[OTL] Fetching subjects list from website...")
+        
+        try:
+            driver = self._init_driver(headless=True)
+            if not driver:
+                print("[OTL] Selenium not available, using fallback subjects")
+                return self._get_subjects_fallback()
+            
+            driver.get(self.base_url)
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            time.sleep(2 if FAST_MODE else 3)
+            
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            
+            seen_urls = set()
+            
+            # Find "Textbooks by Subject" section
+            subject_section = soup.find(string=re.compile(r'Textbooks by Subject', re.I))
+            if subject_section:
+                parent = subject_section.find_parent(['div', 'section'])
+                if parent:
+                    for link in parent.find_all('a', href=True):
+                        href = link.get('href', '')
+                        if '/subjects/' in href:
+                            full_url = urljoin(BASE_URL, href)
+                            subject_name = link.get_text(strip=True)
+                            
+                            if full_url not in seen_urls and subject_name:
+                                subjects.append({
+                                    'name': subject_name,
+                                    'url': full_url
+                                })
+                                seen_urls.add(full_url)
+                                if not FAST_MODE:
+                                    print(f"[OTL] Found subject: {subject_name}")
+            
+            # Fallback: All links with /subjects/
+            if not subjects:
+                for link in soup.find_all('a', href=re.compile(r'/subjects/[a-z-]+')):
+                    href = link.get('href', '')
+                    full_url = urljoin(BASE_URL, href)
+                    subject_name = link.get_text(strip=True)
+                    
+                    if any(x in full_url for x in ['/subjects/all', '/subjects?', '/subjects#']):
+                        continue
+                    
+                    if full_url not in seen_urls and subject_name:
+                        subjects.append({
+                            'name': subject_name,
+                            'url': full_url
+                        })
+                        seen_urls.add(full_url)
+            
+            driver.quit()
+            
+            if subjects:
+                print(f"[OTL] ✓ Total {len(subjects)} subjects found")
+                return subjects
+            else:
+                print("[OTL] No subjects found, using fallback list")
+                return self._get_subjects_fallback()
+                
+        except Exception as e:
+            print(f"[OTL] Error fetching subjects: {e}")
+            return self._get_subjects_fallback()
+    
+    def _get_subjects_fallback(self) -> List[Dict[str, str]]:
+        """Fallback comprehensive subject list"""
+        base = self.base_url
+        return [
+            {'name': 'Accounting', 'url': f"{base}/subjects/accounting"},
+            {'name': 'Finance', 'url': f"{base}/subjects/finance"},
+            {'name': 'Human Resources', 'url': f"{base}/subjects/human-resources"},
+            {'name': 'Management', 'url': f"{base}/subjects/management"},
+            {'name': 'Marketing', 'url': f"{base}/subjects/marketing"},
+            {'name': 'Business', 'url': f"{base}/subjects/business"},
+            {'name': 'Computer Science', 'url': f"{base}/subjects/computer-science"},
+            {'name': 'Databases', 'url': f"{base}/subjects/databases"},
+            {'name': 'Information Systems', 'url': f"{base}/subjects/information-systems"},
+            {'name': 'Programming Languages', 'url': f"{base}/subjects/programming-languages"},
+            {'name': 'Education', 'url': f"{base}/subjects/education"},
+            {'name': 'Engineering Technology', 'url': f"{base}/subjects/engineering-technology"},
+            {'name': 'Civil Engineering', 'url': f"{base}/subjects/civil-engineering"},
+            {'name': 'Electrical Engineering', 'url': f"{base}/subjects/electrical-engineering"},
+            {'name': 'Mechanical Engineering', 'url': f"{base}/subjects/mechanical-engineering"},
+            {'name': 'Humanities', 'url': f"{base}/subjects/humanities"},
+            {'name': 'History', 'url': f"{base}/subjects/history"},
+            {'name': 'Philosophy', 'url': f"{base}/subjects/philosophy"},
+            {'name': 'Languages', 'url': f"{base}/subjects/languages"},
+            {'name': 'Literature', 'url': f"{base}/subjects/literature"},
+            {'name': 'Journalism Media Communications', 'url': f"{base}/subjects/journalism-media-studies-communications"},
+            {'name': 'Law', 'url': f"{base}/subjects/law"},
+            {'name': 'Mathematics', 'url': f"{base}/subjects/mathematics"},
+            {'name': 'Statistics', 'url': f"{base}/subjects/statistics"},
+            {'name': 'Medicine', 'url': f"{base}/subjects/medicine"},
+            {'name': 'Nursing', 'url': f"{base}/subjects/nursing"},
+            {'name': 'Health Sciences', 'url': f"{base}/subjects/health-sciences"},
+            {'name': 'Natural Sciences', 'url': f"{base}/subjects/natural-sciences"},
+            {'name': 'Biology', 'url': f"{base}/subjects/biology"},
+            {'name': 'Chemistry', 'url': f"{base}/subjects/chemistry"},
+            {'name': 'Physics', 'url': f"{base}/subjects/physics"},
+            {'name': 'Astronomy', 'url': f"{base}/subjects/astronomy"},
+            {'name': 'Social Sciences', 'url': f"{base}/subjects/social-sciences"},
+            {'name': 'Economics', 'url': f"{base}/subjects/economics"},
+            {'name': 'Psychology', 'url': f"{base}/subjects/psychology"},
+            {'name': 'Sociology', 'url': f"{base}/subjects/sociology"},
+            {'name': 'Political Science', 'url': f"{base}/subjects/political-science"},
+            {'name': 'Anthropology', 'url': f"{base}/subjects/anthropology"},
+        ]
     
     def _setup_minio(self):
         """Setup MinIO client"""
@@ -159,7 +382,6 @@ class OTLScraperStandalone:
             
             client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
             
-            # Ensure bucket exists
             if not client.bucket_exists(self.bucket):
                 client.make_bucket(self.bucket)
                 print(f"Created bucket: {self.bucket}")
@@ -170,7 +392,7 @@ class OTLScraperStandalone:
             return None
     
     def _init_driver(self, headless: bool = True):
-        """Initialize Selenium Chrome driver with anti-detection features"""
+        """Initialize Selenium Chrome driver"""
         if not SELENIUM_AVAILABLE:
             return None
             
@@ -185,6 +407,13 @@ class OTLScraperStandalone:
             options.add_argument("--disable-blink-features=AutomationControlled")
             options.add_experimental_option('excludeSwitches', ['enable-automation'])
             options.add_experimental_option('useAutomationExtension', False)
+            
+            # ✅ FAST MODE: Disable more features
+            if FAST_MODE:
+                options.add_argument("--disable-extensions")
+                options.add_argument("--disable-gpu")
+                options.add_argument("--disable-software-rasterizer")
+                options.add_argument("--disable-dev-shm-usage")
 
             ua = _pick_user_agent() if FORCE_RANDOM_UA or CUSTOM_UA else None
             if ua:
@@ -194,12 +423,14 @@ class OTLScraperStandalone:
                 options.add_argument(f"--proxy-server={PROXY_SERVER}")
             
             try:
-                prefs = {"profile.managed_default_content_settings.images": 2}
+                prefs = {
+                    "profile.managed_default_content_settings.images": 2,
+                    "profile.default_content_setting_values.notifications": 2
+                }
                 options.add_experimental_option("prefs", prefs)
             except Exception:
                 pass
             
-            # Try ChromeDriver paths
             chromedriver_paths = ['/usr/local/bin/chromedriver', '/usr/bin/chromedriver', 'chromedriver']
             
             driver = None
@@ -208,7 +439,6 @@ class OTLScraperStandalone:
                     if os.path.exists(path) or path == 'chromedriver':
                         service = Service(path)
                         driver = webdriver.Chrome(service=service, options=options)
-                        print(f"Selenium ready with: {path}")
                         break
                 except Exception:
                     continue
@@ -229,7 +459,7 @@ class OTLScraperStandalone:
             return None
     
     def parse_book_detail_html(self, html: str, book_url: str, subjects: List[str]) -> Dict[str, Any]:
-        """Parse a book detail HTML into the required output schema"""
+        """Parse book detail HTML - EXACT FORMAT MATCH"""
         soup = BeautifulSoup(html, 'html.parser')
 
         # Title
@@ -249,7 +479,7 @@ class OTLScraperStandalone:
             if p:
                 description = p.get_text('\n', strip=True)
 
-        # Authors
+        # Authors - parse as list
         authors: List[str] = []
         for p in soup.find_all('p'):
             txt = (p.get_text(' ', strip=True) or '')
@@ -268,7 +498,6 @@ class OTLScraperStandalone:
                     if val and val not in authors:
                         authors.append(val)
         
-        # Heuristic: authors appear as plain <p> lines inside #info above metadata fields
         if not authors:
             info_div = soup.select_one('#info')
             if info_div:
@@ -278,10 +507,8 @@ class OTLScraperStandalone:
                     if not txt:
                         continue
                     ltxt = txt.lower()
-                    # Skip reviews and star rows
                     if 'review' in ltxt:
                         continue
-                    # If this looks like a metadata field, stop after we started authors block
                     meta_prefixes = (
                         'copyright year', 'publisher', 'language', 'isbn', 'license',
                         'format', 'pages', 'doi', 'edition'
@@ -291,184 +518,198 @@ class OTLScraperStandalone:
                             break
                         else:
                             continue
-                    # Treat as author line(s)
                     started_block = True
                     parts = [re.sub(r'\s+', ' ', x).strip() for x in re.split(r',| and ', txt) if x.strip()]
                     for a in parts:
                         if a and a not in authors:
                             authors.append(a)
 
-        # Extract PDF URL if present
+        # Extract PDF URL
         pdf_url = ''
         for a in soup.select('#book-types a[href]'):
             label = (a.get_text(strip=True) or '').lower()
-            if 'pdf' in label:
-                pdf_url = urljoin(BASE_URL, a['href'])
+            href = a.get('href', '')
+            if 'pdf' in label or '.pdf' in href.lower():
+                pdf_url = urljoin(BASE_URL, href)
+                break
+        
+        if not pdf_url:
+            for a in soup.select('a[href*=".pdf"]'):
+                pdf_url = urljoin(BASE_URL, a.get('href', ''))
+                break
+        
+        if not pdf_url:
+            for a in soup.select('a[data-format="pdf"]'):
+                pdf_url = urljoin(BASE_URL, a.get('href', ''))
                 break
 
+        # ✅ EXACT FORMAT MATCH - Simple object
         doc = {
-            'id': _md5_id(book_url, title or book_url),
-            'title': title,
-            'description': description,
-            'authors': authors,
-            'subject': subjects or [],
-            'source': 'Open Textbook Library',
-            'url': book_url,
-            'url_pdf': pdf_url or '',
-            'scraped_at': datetime.now().isoformat()
+            "id": _md5_id(book_url, title or book_url),
+            "title": title,
+            "description": description,
+            "authors": authors,  # Always list
+            "subject": subjects,  # Always list
+            "source": "Open Textbook Library",
+            "url": book_url,
+            "url_pdf": pdf_url or "",
+            "pdf_downloaded": False,
+            "scraped_at": datetime.now().isoformat()
         }
         return doc
     
     def get_textbooks_list_selenium(self, subject_name: str = "All", subject_url: str = None) -> List[Dict[str, Any]]:
-        """Get list of textbooks using Selenium with advanced features"""
+        """Get ALL textbooks using Selenium with infinite scroll - OPTIMIZED"""
         results = []
         driver = self._init_driver(headless=True)
         
         if not driver:
-            print("Selenium not available, falling back to requests method")
-            return self.get_textbooks_list_fallback()
+            print("Selenium not available")
+            return results
         
         try:
             if not subject_url:
-                subject_url = f"{self.base_url}/subjects"
+                subject_url = self.base_url
             
-            print(f"[OTL] Starting scrape for subject: {subject_name}")
+            if FAST_MODE:
+                print(f"[{subject_name}] Loading...")
+            else:
+                print(f"[OTL] Loading: {subject_url}")
             
-            # Collect listing URLs with pagination first, fallback to scroll
-            def _with_scroll(u: str) -> str:
-                if 'scroll=true' in (u or ''):
-                    return u
-                return f"{u}&scroll=true" if ('?' in u) else f"{u}?scroll=true"
-
-            current_url = _with_scroll(subject_url)
-            urls: List[str] = []
-            visited_pages: set[str] = set()
-            page_no = 1
+            driver.get(subject_url)
+            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            time.sleep(1 if FAST_MODE else 3)
             
-            while len(urls) < self.max_books:
-                driver.get(current_url)
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                soup = _ensure_not_retry_later(driver)
+            # ✅ FAST SCROLLING
+            if FAST_MODE:
+                print(f"[{subject_name}] Fast scrolling...")
+            else:
+                print("[OTL] Scrolling to load all books...")
+            
+            last_height = driver.execute_script("return document.body.scrollHeight")
+            urls_found = 0
+            no_new_count = 0
+            max_no_new = 3 if FAST_MODE else 5
+            scroll_attempt = 0
+            max_scrolls = 50 if FAST_MODE else 100
+            
+            while True:
+                scroll_attempt += 1
                 
-                # Find textbook URLs
-                for h2 in soup.select('div.row.short-description h2 > a[href]'):
-                    href = (h2.get('href') or '').strip()
+                # ✅ AGGRESSIVE SCROLL in fast mode
+                if FAST_MODE:
+                    for _ in range(3):
+                        driver.execute_script("window.scrollBy(0, 2000);")
+                    time.sleep(SCROLL_WAIT_SEC)
+                else:
+                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+                    time.sleep(SCROLL_WAIT_SEC)
+                
+                soup = BeautifulSoup(driver.page_source, 'html.parser')
+                current_books = len(soup.select('a[href*="/opentextbooks/textbooks/"]'))
+                
+                if current_books > urls_found:
+                    if FAST_MODE:
+                        if scroll_attempt % 5 == 0:
+                            print(f"[{subject_name}] Scroll {scroll_attempt}: {current_books} books")
+                    else:
+                        print(f"[OTL] Scroll {scroll_attempt}: {current_books} books (+{current_books - urls_found})")
+                    urls_found = current_books
+                    no_new_count = 0
+                else:
+                    no_new_count += 1
+                
+                new_height = driver.execute_script("return document.body.scrollHeight")
+                
+                if no_new_count >= max_no_new or scroll_attempt >= max_scrolls:
+                    if not FAST_MODE:
+                        print(f"[OTL] ✓ Reached end after {scroll_attempt} scrolls")
+                    break
+                
+                last_height = new_height
+            
+            # ✅ COLLECT ALL BOOK URLs
+            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            urls = []
+            
+            selectors = [
+                'a[href*="/opentextbooks/textbooks/"]',
+                'div.short-description h2 > a',
+            ]
+            
+            for selector in selectors:
+                elements = soup.select(selector)
+                
+                for elem in elements:
+                    href = elem.get('href', '')
                     if not href:
                         continue
-                    full = urljoin(BASE_URL, href)
-                    if '/opentextbooks/textbooks/' in full and full not in urls:
-                        urls.append(full)
-                        if len(urls) >= self.max_books:
-                            break
-                
-                print(f"[OTL] Page {page_no} listing count so far: {len(urls)}")
-                
-                # Check for next page
-                next_a = soup.select_one('#pagination a[rel="next"][href]')
-                if not next_a or len(urls) >= self.max_books:
-                    break
                     
-                next_url = _with_scroll(urljoin(BASE_URL, next_a.get('href') or ''))
-                next_url = _with_cache_bust(next_url)
-                if not next_url or next_url in visited_pages:
-                    break
+                    full_url = urljoin(BASE_URL, href)
                     
-                visited_pages.add(next_url)
-                page_no += 1
-                current_url = next_url
-                _sleep()
-
-            # Fallback to scroll if pagination failed
-            if not urls:
-                print("[OTL] Pagination failed, using scroll fallback")
-                last_count = 0
-                stable_rounds = 0
-                while len(urls) < self.max_books:
-                    soup = BeautifulSoup(driver.page_source, 'html.parser')
-                    for h2 in soup.select('div.row.short-description h2 > a[href]'):
-                        href = (h2.get('href') or '').strip()
-                        if not href:
+                    if '/opentextbooks/textbooks/' in full_url and full_url not in urls:
+                        if any(x in full_url for x in ['/submit', '/newest', '/in_development']):
                             continue
-                        full = urljoin(BASE_URL, href)
-                        if '/opentextbooks/textbooks/' in full and full not in urls:
-                            urls.append(full)
-                            if len(urls) >= self.max_books:
-                                break
-                    
-                    driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-                    WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                    _sleep(0.4, 0.4)
-                    
-                    if len(urls) == last_count:
-                        stable_rounds += 1
-                    else:
-                        stable_rounds = 0
-                        last_count = len(urls)
-                    
-                    if stable_rounds >= 3:
-                        break
+                        urls.append(full_url)
+            
+            urls = list(dict.fromkeys(urls))
+            
+            print(f"[{subject_name}] ✓ {len(urls)} books found")
+            
+            if len(urls) > self.max_books:
+                urls = urls[:self.max_books]
 
-            print(f"[OTL] Found {len(urls)} book URLs for subject '{subject_name}'")
-
-            # Visit each book and parse
-            for idx, url in enumerate(urls, start=1):
-                if len(results) >= self.max_books:
-                    break
-                    
-                print(f"[OTL] Scraping book {idx}/{len(urls)}: {url}")
+            # ✅ VISIT EACH BOOK
+            for idx, url in enumerate(urls, 1):
+                if FAST_MODE:
+                    if idx % 10 == 0 or idx == 1 or idx == len(urls):
+                        print(f"[{subject_name}] [{idx}/{len(urls)}]")
+                else:
+                    print(f"[OTL] [{idx}/{len(urls)}] {url}")
                 
-                # Per-book delay and cache-busting
-                if PER_BOOK_DELAY_SEC > 0:
-                    time.sleep(PER_BOOK_DELAY_SEC + DEFAULT_DELAY_JITTER_SEC * random.random())
+                time.sleep(PER_BOOK_DELAY_SEC)
                 
-                attempts = 0
-                doc = None
-                while attempts < max(1, BOOK_MAX_ATTEMPTS):
-                    attempts += 1
-                    driver.get(_with_cache_bust(url))
-                    try:
-                        WebDriverWait(driver, 12).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                    except Exception:
-                        pass
-                    
-                    # Ensure not stuck on retry page
-                    soup = _ensure_not_retry_later(driver)
-                    
-                    # Give the page a moment for dynamic blocks
-                    _sleep(0.4, 0.4)
-                    
-                    # Scroll to trigger lazy loads
-                    try:
-                        driver.execute_script("var el=document.getElementById('Formats'); if(el){el.scrollIntoView({behavior:'instant',block:'center'});} else {window.scrollTo(0, document.body.scrollHeight);} ")
-                        WebDriverWait(driver, 4).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-                    except Exception:
-                        pass
+                try:
+                    driver.get(url)
+                    WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+                    time.sleep(PAGE_LOAD_WAIT_SEC)
                     
                     html = driver.page_source
-                    doc_try = self.parse_book_detail_html(html, url, [subject_name])
-                    missing_title = not (doc_try.get('title') or '').strip()
-                    missing_pdf = not bool(doc_try.get('url_pdf'))
+                    doc = self.parse_book_detail_html(html, url, [subject_name])
                     
-                    if not missing_title and (not RETRY_PDF_ON_MISS or not missing_pdf):
-                        doc = doc_try
-                        break
+                    # Download PDF
+                    if doc and DOWNLOAD_PDFS and doc.get('url_pdf'):
+                        pdf_success = _download_pdf(
+                            doc['url_pdf'],
+                            doc['id'],
+                            doc.get('title', 'unknown'),
+                            self.minio_client,
+                            self.bucket
+                        )
+                        doc['pdf_downloaded'] = pdf_success
+                        
+                        if pdf_success:
+                            self.pdf_downloaded_count += 1
+                        else:
+                            self.pdf_failed_count += 1
                     
-                    # If missing title or pdf, backoff and retry
-                    _backoff_sleep(attempts)
-                
-                if not doc:
-                    doc = self.parse_book_detail_html(driver.page_source, url, [subject_name])
-                
-                if doc:
-                    results.append(doc)
-                    has_pdf = 'url_pdf' in doc and bool(doc['url_pdf'])
-                    print(f"[OTL] Parsed book {idx}/{len(urls)} | title='{doc.get('title','')}' | pdf={has_pdf}")
+                    if doc:
+                        results.append(doc)
+                        if not FAST_MODE:
+                            print(f"[OTL] ✓ {doc.get('title', 'N/A')}")
+                        
+                except Exception as e:
+                    if not FAST_MODE:
+                        print(f"[OTL] ✗ Failed: {e}")
+                    continue
 
-            print(f"[OTL] Selenium scraping completed: {len(results)} textbooks")
+            print(f"[{subject_name}] ✓ Complete: {len(results)} books")
             return results
             
         except Exception as e:
-            print(f"[OTL] Error in Selenium scraping: {e}")
+            print(f"[{subject_name}] ERROR: {e}")
+            import traceback
+            traceback.print_exc()
             return results
         finally:
             try:
@@ -476,178 +717,204 @@ class OTLScraperStandalone:
             except Exception:
                 pass
     
-    def get_textbooks_list_fallback(self) -> List[Dict[str, Any]]:
-        """Fallback method using requests"""
-        try:
-            print("Fetching OTL textbooks list with requests fallback...")
-            
-            textbooks = []
-            page = 1
-            
-            while len(textbooks) < self.max_books:
-                browse_url = f"{self.base_url}/browse"
-                if page > 1:
-                    browse_url += f"?page={page}"
-                
-                print(f"Fetching page {page}...")
-                response = self.session.get(browse_url, timeout=30)
-                response.raise_for_status()
-                
-                soup = BeautifulSoup(response.content, 'html.parser')
-                
-                # Find textbook cards/items
-                book_elements = soup.find_all('div', class_='textbook-item') or \
-                               soup.find_all('article', class_='textbook') or \
-                               soup.find_all('a', href=lambda x: x and '/textbook/' in str(x))
-                
-                if not book_elements:
-                    print("No more textbooks found")
-                    break
-                
-                page_books = 0
-                for elem in book_elements:
-                    if len(textbooks) >= self.max_books:
-                        break
-                    
-                    try:
-                        # Extract basic info
-                        title_elem = elem.find('h3') or elem.find('h2') or elem.find('a')
-                        link_elem = elem.find('a') or elem
-                        
-                        if not title_elem or not link_elem:
-                            continue
-                        
-                        title = title_elem.get_text().strip()
-                        href = link_elem.get('href', '')
-                        
-                        if not href or not title:
-                            continue
-                        
-                        # Build full URL
-                        if href.startswith('/'):
-                            full_url = f"https://open.umn.edu{href}"
-                        elif not href.startswith('http'):
-                            full_url = urljoin(self.base_url, href)
-                        else:
-                            full_url = href
-                        
-                        textbook = {
-                            'title': title,
-                            'url': full_url,
-                            'source': self.source,
-                            'found_at': datetime.now().isoformat()
-                        }
-                        
-                        textbooks.append(textbook)
-                        page_books += 1
-                        
-                    except Exception as e:
-                        print(f"Error extracting textbook: {e}")
-                        continue
-                
-                if page_books == 0:
-                    break
-                
-                page += 1
-                time.sleep(self.delay)
-            
-            print(f"Found {len(textbooks)} textbooks")
-            return textbooks
-            
-        except Exception as e:
-            print(f"Error fetching textbooks list: {e}")
-            return []
+    def scrape_single_subject(self, subject: Dict[str, str]) -> List[Dict[str, Any]]:
+        """Scrape a single subject - for parallel execution"""
+        return self.get_textbooks_list_selenium(
+            subject_name=subject['name'],
+            subject_url=subject['url']
+        )
     
-    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "otl", logical_date: str = None, file_type: str = "textbooks"):
-        """Save data to MinIO with standardized bronze layer path structure"""
+    def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "otl", logical_date: str = None):
+        """Save to MinIO bronze layer - EXACT FORMAT MATCH"""
         if not self.minio_client or not documents:
-            print("MinIO not available or no documents to save")
+            print("MinIO not available or no documents")
             return ""
         
-        # Create filename theo chuẩn bronze layer giống MIT OCW
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{source}_bronze_{timestamp}.json"
+        # ✅ Match exact filename format: otl_bronze_merged_YYYYMMDD_HHMMSS.json
+        filename = f"{source}_bronze_merged_{timestamp}.json"
         object_name = f"bronze/{source}/json/{filename}"
         
-        # Create temporary file
-        os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
-        tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, filename)
+        os.makedirs('/tmp', exist_ok=True)
+        tmp_path = os.path.join('/tmp', filename)
         
         try:
-            # Write data to temp file
+            # ✅ SAVE AS PURE JSON ARRAY - NO WRAPPER METADATA
+            # Format: [ {...}, {...}, {...} ]
             with open(tmp_path, 'w', encoding='utf-8') as f:
-                for doc in documents:
-                    f.write(json.dumps(doc, ensure_ascii=False) + "\n")
+                json.dump(documents, f, ensure_ascii=False, indent=2)
             
-            # Upload to MinIO with organized path
-            self.minio_client.fput_object(self.bucket, object_name, tmp_path)
+            self.minio_client.fput_object(
+                self.bucket, 
+                object_name, 
+                tmp_path, 
+                content_type='application/json'
+            )
             os.remove(tmp_path)
             
-            print(f"[MinIO] OTL saved: s3://{self.bucket}/{object_name}")
-            print(f"[MinIO] Total {len(documents)} textbooks saved")
+            print(f"\n[MinIO] Saved: s3://{self.bucket}/{object_name}")
+            print(f"[MinIO] Books: {len(documents)}")
+            if DOWNLOAD_PDFS:
+                print(f"[MinIO] PDFs Downloaded: {self.pdf_downloaded_count}")
+                print(f"[MinIO] PDFs Failed: {self.pdf_failed_count}")
             
             return object_name
             
         except Exception as e:
-            print(f"[MinIO] Error saving to MinIO: {e}")
-            # Still try to remove temp file
+            print(f"[MinIO] Error: {e}")
             try:
                 os.remove(tmp_path)
             except:
                 pass
             return ""
     
-    def run(self):
-        """Main execution function for bronze layer scraping"""
-        print("Starting OTL bronze layer scraping...")
+    def run_parallel(self):
+        """Main execution - PARALLEL MODE"""
+        print("="*70)
+        print(f"OTL SCRAPER - FAST MODE - PARALLEL ({MAX_WORKERS} workers)")
+        print("="*70)
+        print(f"PDF Download: {DOWNLOAD_PDFS}")
+        print(f"Subjects: {len(self.subjects)}")
+        print("="*70)
         
         start_time = time.time()
-        documents = []
+        all_documents = []
         
         try:
-            # Use Selenium scraping if available, otherwise fallback
-            if self.use_selenium:
-                documents = self.get_textbooks_list_selenium("All")
-            else:
-                documents = self.get_textbooks_list_fallback()
+            with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                future_to_subject = {
+                    executor.submit(self.scrape_single_subject, subject): subject 
+                    for subject in self.subjects
+                }
+                
+                completed = 0
+                for future in as_completed(future_to_subject):
+                    subject = future_to_subject[future]
+                    completed += 1
+                    
+                    try:
+                        documents = future.result()
+                        all_documents.extend(documents)
+                        print(f"\n[Progress] {completed}/{len(self.subjects)} subjects | {len(all_documents)} total books")
+                    except Exception as e:
+                        print(f"[Error] Subject '{subject['name']}' failed: {e}")
             
-            # Save to MinIO bronze layer
-            if documents:
-                print("Saving to bronze layer...")
-                self.save_to_minio(documents, "otl", datetime.now().strftime("%Y-%m-%d"))
+            if all_documents:
+                print(f"\n{'='*70}")
+                print("SAVING TO MINIO...")
+                self.save_to_minio(all_documents, "otl", datetime.now().strftime("%Y-%m-%d"))
+            
+        except Exception as e:
+            print(f"\n=== ERROR: {e} ===")
+            if all_documents:
+                self.save_to_minio(all_documents, "otl", datetime.now().strftime("%Y-%m-%d"))
+            raise
+        
+        end_time = time.time()
+        print(f"\n{'='*70}")
+        print("FINAL STATISTICS")
+        print(f"{'='*70}")
+        print(f"Time: {end_time - start_time:.1f}s ({(end_time - start_time)/60:.1f}m)")
+        print(f"Subjects: {len(self.subjects)}")
+        print(f"Books: {len(all_documents)}")
+        if DOWNLOAD_PDFS:
+            print(f"PDFs Downloaded: {self.pdf_downloaded_count}")
+        print(f"Speedup: ~{len(self.subjects)/MAX_WORKERS:.1f}x faster")
+        print(f"{'='*70}")
+        
+        return {
+            'status': 'success',
+            'mode': 'parallel',
+            'workers': MAX_WORKERS,
+            'subjects_scraped': len(self.subjects),
+            'total_books': len(all_documents),
+            'pdf_downloaded': self.pdf_downloaded_count,
+            'execution_time': end_time - start_time
+        }
+    
+    def run_sequential(self):
+        """Main execution - SEQUENTIAL MODE"""
+        print("="*70)
+        print(f"OTL SCRAPER - {'FAST' if FAST_MODE else 'NORMAL'} MODE - SEQUENTIAL")
+        print("="*70)
+        print(f"PDF Download: {DOWNLOAD_PDFS}")
+        print(f"Subjects: {len(self.subjects)}")
+        print("="*70)
+        
+        start_time = time.time()
+        all_documents = []
+        
+        try:
+            for idx, subject in enumerate(self.subjects, 1):
+                print(f"\n{'='*70}")
+                print(f"SUBJECT [{idx}/{len(self.subjects)}]: {subject['name']}")
+                print(f"{'='*70}")
+                
+                subject_start = time.time()
+                
+                documents = self.get_textbooks_list_selenium(
+                    subject_name=subject['name'],
+                    subject_url=subject['url']
+                )
+                
+                all_documents.extend(documents)
+                
+                subject_end = time.time()
+                print(f"[Done] {subject['name']}: {len(documents)} books ({subject_end - subject_start:.1f}s)")
+                print(f"[Total] {len(all_documents)} books")
+                
+                if idx < len(self.subjects) and SUBJECT_COOLDOWN_SEC > 0:
+                    if not FAST_MODE:
+                        print(f"[Cooldown] {SUBJECT_COOLDOWN_SEC}s...")
+                    time.sleep(SUBJECT_COOLDOWN_SEC)
+            
+            if all_documents:
+                print(f"\n{'='*70}")
+                print("SAVING TO MINIO...")
+                self.save_to_minio(all_documents, "otl", datetime.now().strftime("%Y-%m-%d"))
             
         except KeyboardInterrupt:
-            print("\n=== INTERRUPTED BY USER ===")
-            # Save current data to MinIO
-            if documents:
-                print(f"Saving emergency backup: {len(documents)} textbooks scraped")
-                self.save_to_minio(documents, "otl", datetime.now().strftime("%Y-%m-%d"), "emergency")
-            print("Data saved before exit.")
+            print("\n=== INTERRUPTED ===")
+            if all_documents:
+                self.save_to_minio(all_documents, "otl", datetime.now().strftime("%Y-%m-%d"))
             raise
             
         except Exception as e:
-            print(f"\n=== CRITICAL ERROR: {e} ===")
-            # Save current data to MinIO
-            if documents:
-                print(f"Saving emergency backup: {len(documents)} textbooks scraped")
-                self.save_to_minio(documents, "otl", datetime.now().strftime("%Y-%m-%d"), "error")
-            print("Data saved before error report.")
+            print(f"\n=== ERROR: {e} ===")
+            if all_documents:
+                self.save_to_minio(all_documents, "otl", datetime.now().strftime("%Y-%m-%d"))
             raise
         
-        # Statistics
         end_time = time.time()
-        print(f"\nSTATISTICS")
-        print("=" * 30)
-        print(f"Time: {end_time - start_time:.1f} seconds")
-        print(f"OTL: {len(documents)} textbooks")
-        print(f"Bronze layer scraping completed!")
+        print(f"\n{'='*70}")
+        print("FINAL STATISTICS")
+        print(f"{'='*70}")
+        print(f"Time: {end_time - start_time:.1f}s ({(end_time - start_time)/60:.1f}m)")
+        print(f"Subjects: {len(self.subjects)}")
+        print(f"Books: {len(all_documents)}")
+        if DOWNLOAD_PDFS:
+            print(f"PDFs Downloaded: {self.pdf_downloaded_count}")
+        print(f"{'='*70}")
+        
+        return {
+            'status': 'success',
+            'mode': 'sequential',
+            'subjects_scraped': len(self.subjects),
+            'total_books': len(all_documents),
+            'pdf_downloaded': self.pdf_downloaded_count,
+            'execution_time': end_time - start_time
+        }
 
 def main():
-    """Entry point for standalone execution"""
+    """Entry point"""
     scraper = OTLScraperStandalone()
-    scraper.run()
+    
+    if PARALLEL_MODE:
+        result = scraper.run_parallel()
+    else:
+        result = scraper.run_sequential()
+    
+    print(f"\n{json.dumps(result, indent=2)}")
 
 if __name__ == "__main__":
     main()
-

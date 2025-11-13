@@ -13,6 +13,9 @@ minio==7.1.17
 pyspark==3.5.4
 py4j==0.10.9.7
 
+# Search indexing
+elasticsearch==8.15.1
+
 # Validation & content processing
 jsonschema==4.19.1
 python-dateutil==2.8.2

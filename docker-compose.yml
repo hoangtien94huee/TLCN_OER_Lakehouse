@@ -100,6 +100,11 @@ services:
       # Optional: download and upload PDFs for OTL
       - OTL_DOWNLOAD_PDFS=0
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
+      # Elasticsearch sync configuration
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=oer_resources
+      - ELASTICSEARCH_BATCH_SIZE=500
+      - ELASTICSEARCH_RECREATE=0
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -205,6 +210,59 @@ services:
       retries: 3
       start_period: 60s
 
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: oer-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=30s"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: oer-kibana
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  search-web:
+    build:
+      context: ./search_app
+    container_name: oer-search-web
+    environment:
+      - ELASTICSEARCH_HOST=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=oer_resources
+      - MINIO_BROWSER_ENDPOINT=http://localhost:9000/browser
+      - MINIO_BUCKET=oer-lakehouse
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    ports:
+      - "8088:8080"
+    restart: unless-stopped
+
 volumes:
   scraped_data:
   database:
@@ -214,3 +272,4 @@ volumes:
   minio_data:
   spark_data:
   dremio_data:
+  es_data:

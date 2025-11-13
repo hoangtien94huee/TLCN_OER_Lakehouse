@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>OER Search Portal</title>
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+    />
+    <style>
+      body {
+        padding: 2rem;
+      }
+      .result-card {
+        margin-bottom: 1.5rem;
+      }
+      .highlight {
+        background-color: #1A1F28;
+        padding: 0.25rem;
+        border-radius: 0.25rem;
+      }
+      .pdf-section {
+        margin-top: 0.5rem;
+      }
+      .meta {
+        font-size: 0.9rem;
+        color: #666;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="container">
+      <h2>OER Search Portal</h2>
+      <form method="get">
+        <div class="grid">
+          <label>
+            Keyword
+            <input type="text" name="q" value="{{ query }}" placeholder="title, subject, PDF content..." />
+          </label>
+          <label>
+            Source
+            <input type="text" name="source_system" value="{{ source_system }}" placeholder="mit_ocw, openstax..." />
+          </label>
+          <label>
+            Language
+            <input type="text" name="language" value="{{ language }}" placeholder="en, vi..." />
+          </label>
+          <label>
+            Program ID
+            <input type="number" name="program_id" value="{{ program_id }}" />
+          </label>
+        </div>
+        <button type="submit">Search</button>
+      </form>
+
+      <p>{{ total }} result(s)</p>
+
+      {% for item in results %}
+      <article class="result-card">
+        <header>
+          <strong>
+            {% if item.url %}
+            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+              >{{ item.title or "Untitled" }}</a
+            >
+            {% else %}
+            {{ item.title or "Untitled" }}
+            {% endif %}
+          </strong>
+          <div class="meta">
+            Source: {{ item.source_system or "unknown" }} &nbsp;|&nbsp; Language:
+            {{ item.language or "unknown" }} &nbsp;|&nbsp; Score:
+            {{ "%.2f"|format(item.score or 0) }}
+          </div>
+        </header>
+        <p>{{ item.description }}</p>
+
+        {% if item.highlight %}
+        <div>
+          {% for field, snippets in item.highlight.items() %}
+          <div class="highlight">
+            <strong>{{ field }}:</strong>
+            {% for snippet in snippets %} {{ snippet|safe }} {% endfor %}
+          </div>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if item.pdf_assets %}
+        <div class="pdf-section">
+          <strong>PDFs:</strong>
+          <ul>
+            {% for title, link, path in item.pdf_assets %}
+            <li>
+              {{ title or path }}
+              {% if link %}
+              (<a href="{{ link }}" target="_blank" rel="noopener noreferrer"
+                >open</a
+              >)
+              {% else %}
+              <small>{{ path }}</small>
+              {% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+        {% endif %}
+
+        {% if item.matched_subjects %}
+        <div class="meta">
+          Subjects:
+          {% for subject in item.matched_subjects %}
+          <span>
+            {{ subject.subject_name_en or subject.subject_name }} (score:
+            {{ subject.similarity }})
+          </span>
+          {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if item.programs %}
+        <div class="meta">
+          Programs:
+          {% for program in item.programs %}
+          <span>{{ program.program_name }} ({{ program.faculty_name }})</span>
+          {% endfor %}
+        </div>
+        {% endif %}
+      </article>
+      {% endfor %}
+    </main>
+  </body>
+</html>

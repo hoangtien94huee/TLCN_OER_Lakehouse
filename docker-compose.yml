@@ -39,26 +39,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Jupyter Notebook for Data Exploration  
-  jupyter:
-    image: jupyter/pyspark-notebook:latest
-    container_name: oer-jupyter
-    ports:
-      - "8888:8888"
-    environment:
-      - JUPYTER_ENABLE_LAB=yes
-      # Connect to Spark cluster
-      - SPARK_MASTER=spark://spark-master:7077
-    volumes:
-      - ./airflow/notebooks:/home/jovyan/notebooks
-      - ./airflow/dags:/home/jovyan/workflows
-      - ./airflow/src:/home/jovyan/oer_project
-    depends_on:
-      - minio
-      - spark-master
-    restart: unless-stopped
-    command: "start-notebook.sh --NotebookApp.token='' --NotebookApp.password=''"
-
   # Airflow Scraper
   oer-scraper:
     build:
@@ -78,6 +58,7 @@ services:
       - ./data/logs:/opt/airflow/logs
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/src:/opt/airflow/src
+      - ./data/iceberg-jars:/opt/airflow/jars:ro  
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -88,6 +69,8 @@ services:
       - AIRFLOW__CORE__PARALLELISM=8
       - AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG=1
       - PYTHONPATH=/opt/airflow:/opt/airflow/dags
+      # Java configuration for PySpark
+      - JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
       # MinIO configuration for lakehouse storage
       - MINIO_ENABLE=1
       - MINIO_ENDPOINT=minio:9000
@@ -230,5 +213,4 @@ volumes:
   postgres_data:
   minio_data:
   spark_data:
-  notebooks:
   dremio_data:

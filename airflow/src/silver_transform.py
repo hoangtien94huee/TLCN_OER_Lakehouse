@@ -131,11 +131,8 @@ class SilverTransformer:
                 T.StructField("resource_uid", T.StringType(), False),
                 T.StructField("source_system", T.StringType(), True),
                 T.StructField("source_url", T.StringType(), True),
-                T.StructField("catalog_provider", T.StringType(), True),
                 T.StructField("title", T.StringType(), True),
                 T.StructField("description", T.StringType(), True),
-                T.StructField("keywords", T.ArrayType(T.StringType()), True),
-                T.StructField("subjects", T.ArrayType(T.StringType()), True),
                 T.StructField(
                     "matched_subjects",
                     T.ArrayType(
@@ -152,9 +149,7 @@ class SilverTransformer:
                     ),
                     True,
                 ),
-                T.StructField("canonical_subjects", T.ArrayType(T.StringType()), True),
                 T.StructField("program_ids", T.ArrayType(T.IntegerType()), True),
-                T.StructField("unmatched_subjects", T.ArrayType(T.StringType()), True),
                 T.StructField("creator_names", T.ArrayType(T.StringType()), True),
                 T.StructField("publisher_name", T.StringType(), True),
                 T.StructField("language", T.StringType(), True),
@@ -541,11 +536,6 @@ class SilverTransformer:
             description,
         )
         program_id_set: Set[int] = set(matched_program_ids_list)
-        canonical_subjects = [
-            str(item.get("subject_name"))
-            for item in matched_subjects
-            if item.get("subject_name")
-        ]
         language = self._ensure_language(record.get("language"))
         publisher_name = self._derive_publisher(record, source_system)
         license_name, license_url = self._derive_license(record)
@@ -566,8 +556,7 @@ class SilverTransformer:
         )
 
         # Build Dublin Core XML and save to S3/MinIO
-        # Use canonical subjects for Dublin Core metadata
-        dc_subjects = canonical_subjects
+        dc_subjects = []
         dc_xml = self._build_dublin_core_xml(
             identifier=resource_id,
             title=title,
@@ -587,15 +576,10 @@ class SilverTransformer:
             "resource_uid": self._hash_identifier(resource_id),
             "source_system": source_system,
             "source_url": source_url,
-            "catalog_provider": publisher_name,
             "title": title,
             "description": description,
-            "keywords": [],  # Removed: no longer extracting from metadata
-            "subjects": [],  # Removed: no longer extracting from metadata
             "matched_subjects": matched_subjects,
-            "canonical_subjects": canonical_subjects,
             "program_ids": sorted(program_id_set),
-            "unmatched_subjects": [],  # Removed: no longer tracking unmatched
             "creator_names": creators,
             "publisher_name": publisher_name,
             "language": language,
@@ -624,15 +608,10 @@ class SilverTransformer:
             "resource_id",
             "source_system",
             "source_url",
-            "catalog_provider",
             "title",
             "description",
-            "keywords",
-            "subjects",
             "matched_subjects",
-            "canonical_subjects",
             "program_ids",
-            "unmatched_subjects",
             "creator_names",
             "publisher_name",
             "language",
@@ -656,24 +635,43 @@ class SilverTransformer:
         deduped_df.unpersist(False)
 
     def _replace_table(self, df: DataFrame, table_name: str, partition_columns: Optional[List[str]] = None) -> None:
-        temp_view = f"temp_{uuid4().hex}"
+        """Write or merge data into Iceberg table using dynamic partition overwrite."""
         row_count = df.count()
-        df.createOrReplaceTempView(temp_view)
+        
+        # Check if table exists
+        try:
+            existing_df = self.spark.table(table_name)
+            table_exists = True
+            print(f"Table {table_name} exists, will overwrite partitions with {row_count} new records")
+        except Exception:
+            table_exists = False
+            print(f"Table {table_name} does not exist, will create with {row_count} records")
 
-        partition_clause = ""
-        if partition_columns:
-            partition_clause = f"PARTITIONED BY ({', '.join(partition_columns)})"
-
-        self.spark.sql(
-            f"""
-            CREATE OR REPLACE TABLE {table_name}
-            USING iceberg
-            {partition_clause}
-            AS SELECT * FROM {temp_view}
-            """
-        )
-        self.spark.catalog.dropTempView(temp_view)
-        print(f"Wrote {row_count} records to {table_name}")
+        if not table_exists:
+            # Create new table with partitioning
+            temp_view = f"temp_{uuid4().hex}"
+            df.createOrReplaceTempView(temp_view)
+            
+            partition_clause = ""
+            if partition_columns:
+                partition_clause = f"PARTITIONED BY ({', '.join(partition_columns)})"
+            
+            self.spark.sql(
+                f"""
+                CREATE TABLE {table_name}
+                USING iceberg
+                {partition_clause}
+                AS SELECT * FROM {temp_view}
+                """
+            )
+            self.spark.catalog.dropTempView(temp_view)
+            print(f" Created {table_name} with {row_count} records")
+        else:
+            # Use Iceberg's dynamic partition overwrite
+            # This will ONLY overwrite partitions that exist in the new data
+            # Other partitions remain untouched
+            df.writeTo(table_name).overwritePartitions()
+            print(f" Overwrote partitions in {table_name} with {row_count} records")
 
     def _write_reference_dimensions(self) -> None:
         if not self.spark:

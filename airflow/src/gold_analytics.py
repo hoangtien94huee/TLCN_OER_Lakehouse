@@ -164,13 +164,21 @@ class GoldAnalyticsBuilder:
         try:
             df = self.spark.table(table_name)
             if df.rdd.isEmpty():
-                print(f"ΓÜá∩╕Å  {description}: Table empty")
+                print(f"  {description}: Table empty")
                 return None
             count = df.count()
-            print(f"Γ£à {description}: Loaded {count:,} records")
+            print(f" {description}: Loaded {count:,} records")
+            
+            # Verify data distribution by source_system (for OER table)
+            if "oer_resources" in table_name:
+                print(f"   Breakdown by source:")
+                source_counts = df.groupBy("source_system").count().collect()
+                for row in source_counts:
+                    print(f"    • {row.source_system}: {row['count']:,} records")
+            
             return df
         except Exception as exc:
-            print(f"ΓÜá∩╕Å  {description}: Table not found ({table_name})")
+            print(f"  {description}: Table not found ({table_name})")
             return None
 
     def _build_dim_programs(self, programs_df: Optional[DataFrame], faculties_df: Optional[DataFrame]) -> DataFrame:
@@ -317,18 +325,16 @@ class GoldAnalyticsBuilder:
         """
         sources = oer_df.select(
             F.col("source_system"),
-            F.col("catalog_provider"),
         ).dropDuplicates()
 
         return sources.select(
             F.abs(
                 F.xxhash64(
                     F.coalesce(F.col("source_system"), F.lit("")),
-                    F.coalesce(F.col("catalog_provider"), F.lit("")),
                 )
             ).alias("source_key"),
             F.col("source_system").alias("source_code"),
-            F.col("catalog_provider").alias("source_name"),
+            F.col("source_system").alias("source_name"),
         )
 
     def _build_dim_languages(self, oer_df: DataFrame) -> DataFrame:
@@ -369,7 +375,7 @@ class GoldAnalyticsBuilder:
 
         # Build date dimension with attributes
         dim_date = dates_df.select(
-            F.col("date").alias("date_key"),
+            F.date_format("date", "yyyyMMdd").cast("int").alias("date_key"),  # 20251113
             F.col("date"),
             F.year("date").alias("year"),
             F.quarter("date").alias("quarter"),
@@ -396,16 +402,9 @@ class GoldAnalyticsBuilder:
             F.col("title"),
             F.col("description"),
             F.col("source_url"),
-            F.col("catalog_provider"),
             F.col("publisher_name"),
-            F.col("license_name"),
-            F.col("license_url"),
-            F.col("subjects"),
-            F.col("keywords"),
             F.col("creator_names"),
             F.col("matched_subjects"),
-            F.col("canonical_subjects"),
-            F.col("unmatched_subjects"),
             F.col("dc_xml_path"),
             F.col("bronze_source_path"),
         )
@@ -445,8 +444,7 @@ class GoldAnalyticsBuilder:
                     T.StructField("coverage_pct", T.DoubleType(), True),
                     T.StructField("total_oer_resources", T.IntegerType(), True),
                     T.StructField("avg_oer_per_subject", T.DoubleType(), True),
-                    T.StructField("snapshot_date", T.DateType(), True),
-                    T.StructField("snapshot_date_key", T.DateType(), True),
+                    T.StructField("snapshot_date_key", T.IntegerType(), True),
                 ])
             )
 
@@ -504,17 +502,13 @@ class GoldAnalyticsBuilder:
             dim_program_lookup,
             "program_id",
             "left"
-        ).withColumn(
-            "snapshot_date",
-            F.current_date()
         )
 
-        snapshot_lookup = dim_date.select(
-            F.col("date").alias("snapshot_date"),
-            F.col("date_key").alias("snapshot_date_key"),
-        ).dropDuplicates(["snapshot_date"])
-
-        fact = fact.join(snapshot_lookup, "snapshot_date", "left").select(
+        # Add snapshot_date_key as integer YYYYMMDD
+        fact = fact.withColumn(
+            "snapshot_date_key",
+            F.date_format(F.current_date(), "yyyyMMdd").cast("int")
+        ).select(
             "program_key",
             "program_id",
             "program_name",
@@ -524,7 +518,6 @@ class GoldAnalyticsBuilder:
             "coverage_pct",
             "total_oer_resources",
             "avg_oer_per_subject",
-            "snapshot_date",
             "snapshot_date_key",
         ).orderBy(F.desc("coverage_pct"))
 
@@ -568,15 +561,16 @@ class GoldAnalyticsBuilder:
             "left"
         )
 
-        # Join date dimensions for date keys
-        fact = fact.join(
-            dim_date.select(F.col("date").alias("pub_date"), F.col("date_key").alias("pub_date_key")),
-            F.to_date(F.col("oer.publication_date")) == F.col("pub_date"),
-            "left"
-        ).join(
-            dim_date.select(F.col("date").alias("ing_date"), F.col("date_key").alias("ing_date_key")),
-            F.to_date(F.col("oer.ingested_at")) == F.col("ing_date"),
-            "left"
+        # Join date dimensions for date keys (integer YYYYMMDD format)
+        fact = fact.withColumn(
+            "pub_date_key",
+            F.when(
+                F.col("oer.publication_date").isNotNull(),
+                F.date_format(F.to_date(F.col("oer.publication_date")), "yyyyMMdd").cast("int")
+            ).otherwise(None)
+        ).withColumn(
+            "ing_date_key",
+            F.date_format(F.to_date(F.col("oer.ingested_at")), "yyyyMMdd").cast("int")
         )
 
         # Select only keys and measures (NO descriptive attributes)
@@ -602,14 +596,19 @@ class GoldAnalyticsBuilder:
         return fact.orderBy(F.desc("data_quality_score"))
 
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
-        """Write DataFrame to Gold Iceberg table."""
+        """Write DataFrame to Gold Iceberg table - full refresh strategy."""
         if df is None or df.rdd.isEmpty():
             print(f" {description}: No data to write")
             return
 
         try:
             count = df.count()
+            
+            # Gold tables are FULL REFRESH (not incremental)
+            # Because we rebuild ALL dimensions and facts from current Silver state
+            print(f" {description}: Full refresh with {count:,} records")
             df.writeTo(table_name).using("iceberg").createOrReplace()
+            
             print(f" {description}: Wrote {count:,} records to {table_name}")
         except Exception as exc:
             print(f" {description}: Failed to write - {exc}")

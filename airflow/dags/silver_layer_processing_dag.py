@@ -7,7 +7,7 @@ to clean, standardized data in Silver layer using Apache Spark.
 
 Workflow:
 1. Wait for bronze data to be available
-2. Process each source system (MIT OCW, OpenStax, OTL)
+2. Process each source system independently (MIT OCW, OpenStax, OTL)
 3. Apply data quality checks and deduplication
 4. Save standardized data to Silver layer
 5. Generate processing reports
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
-from airflow.sensors.external_task import ExternalTaskSensor  # Re-enabled for production
+from airflow.sensors.external_task import ExternalTaskSensor
 from airflow.operators.dummy import DummyOperator
 import json
 import os
@@ -46,7 +46,7 @@ dag = DAG(
     'silver_layer_processing',
     default_args=default_args,
     description='Transform Bronze layer data to Silver layer using Spark',
-    schedule_interval=timedelta(days=30),  # Run monthly after scraping DAGs
+    schedule_interval=timedelta(days=30),
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -58,17 +58,13 @@ dag = DAG(
 def check_bronze_data_availability(**context):
     """Check if bronze data is available for processing"""
     try:
-        # Using MinIO directly instead of bronze storage manager
-        
         execution_date = context['execution_date'].strftime('%Y-%m-%d')
         print(f"[Bronze Check] Checking bronze data for {execution_date}")
         
-        # Direct fallback to MinIO check
         return check_bronze_data_fallback(**context)
         
     except Exception as e:
         print(f"[Bronze Check] Failed to check bronze data: {e}")
-        # Fallback to direct MinIO check
         return check_bronze_data_fallback(**context)
 
 def check_bronze_data_fallback(**context):
@@ -79,7 +75,6 @@ def check_bronze_data_fallback(**context):
     print(f"[Bronze Check Fallback] Using direct MinIO check for {execution_date}")
     
     try:
-        # MinIO client setup
         minio_client = Minio(
             endpoint=os.getenv('MINIO_ENDPOINT', 'minio:9000'),
             access_key=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
@@ -87,14 +82,12 @@ def check_bronze_data_fallback(**context):
             secure=os.getenv('MINIO_SECURE', '0').lower() in {'1', 'true', 'yes'}
         )
         
-        # Force use oer-lakehouse bucket for consistency  
         bronze_bucket = 'oer-lakehouse'
         sources = ['mit_ocw', 'openstax', 'otl']
         
         available_sources = []
         for source in sources:
             try:
-                # Check for files in bronze layer structure
                 objects = list(minio_client.list_objects(
                     bucket_name=bronze_bucket,
                     prefix=f"bronze/{source}/",
@@ -133,34 +126,40 @@ def check_bronze_data_fallback(**context):
             'error': str(e)
         }
 
+
+# === Processing Tasks - Each source independently ===
+
 def process_mit_ocw_task(**context):
-    """Process MIT OCW data to silver layer"""
+    """Process MIT OCW data to silver layer - INDEPENDENT"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[MIT OCW] Starting silver layer processing for {execution_date}")
     
     try:
-        # Use the unified silver transform for all sources
+        # ✅ Set to process ONLY MIT OCW
+        os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/mit_ocw/json/'
+        
+        # Run silver transform for MIT OCW only
         transformer = SilverTransformer()
         transformer.run()
         
-        # Create a basic result summary
         result = {
             'source_system': 'mit_ocw',
             'status': 'success',
             'execution_date': execution_date,
-            'quality_resources': 0,  # Would need to be calculated
+            'quality_resources': 0,
             'processing_duration_seconds': 0
         }
         
         print(f"[MIT OCW] Processing result: {json.dumps(result, indent=2)}")
-        
-        # Store result for downstream tasks
         context['task_instance'].xcom_push(key='processing_result', value=result)
         
         return result
         
     except Exception as e:
         print(f"[MIT OCW] Processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
         error_result = {
             'source_system': 'mit_ocw',
             'status': 'error',
@@ -170,13 +169,20 @@ def process_mit_ocw_task(**context):
         context['task_instance'].xcom_push(key='processing_result', value=error_result)
         raise
 
+
 def process_openstax_task(**context):
-    """Process OpenStax data to silver layer"""
+    """Process OpenStax data to silver layer - INDEPENDENT"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[OpenStax] Starting silver layer processing for {execution_date}")
     
     try:
-        # Silver transform processes all sources, so we just create a result placeholder
+        # ✅ Set to process ONLY OpenStax
+        os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/openstax/json/'
+        
+        # Run silver transform for OpenStax only
+        transformer = SilverTransformer()
+        transformer.run()
+        
         result = {
             'source_system': 'openstax',
             'status': 'success',
@@ -186,12 +192,15 @@ def process_openstax_task(**context):
         }
         
         print(f"[OpenStax] Processing result: {json.dumps(result, indent=2)}")
-        
         context['task_instance'].xcom_push(key='processing_result', value=result)
+        
         return result
         
     except Exception as e:
         print(f"[OpenStax] Processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
         error_result = {
             'source_system': 'openstax',
             'status': 'error',
@@ -201,13 +210,20 @@ def process_openstax_task(**context):
         context['task_instance'].xcom_push(key='processing_result', value=error_result)
         raise
 
+
 def process_otl_task(**context):
-    """Process OTL data to silver layer"""
+    """Process OTL data to silver layer - INDEPENDENT"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[OTL] Starting silver layer processing for {execution_date}")
     
     try:
-        # Silver transform processes all sources, so we just create a result placeholder
+        # Set to process ONLY OTL
+        os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/otl/json/'
+        
+        # Run silver transform for OTL only
+        transformer = SilverTransformer()
+        transformer.run()
+        
         result = {
             'source_system': 'otl',
             'status': 'success',
@@ -217,12 +233,15 @@ def process_otl_task(**context):
         }
         
         print(f"[OTL] Processing result: {json.dumps(result, indent=2)}")
-        
         context['task_instance'].xcom_push(key='processing_result', value=result)
+        
         return result
         
     except Exception as e:
         print(f"[OTL] Processing failed: {e}")
+        import traceback
+        traceback.print_exc()
+        
         error_result = {
             'source_system': 'otl',
             'status': 'error',
@@ -231,6 +250,7 @@ def process_otl_task(**context):
         }
         context['task_instance'].xcom_push(key='processing_result', value=error_result)
         raise
+
 
 def generate_processing_report(**context):
     """Generate comprehensive processing report"""
@@ -283,7 +303,6 @@ def generate_processing_report(**context):
     print(f"Total Quality Resources: {report['summary']['total_quality_resources']}")
     print(f"Total Processing Time: {report['summary']['total_processing_time']:.2f}s")
     
-    # Store detailed results
     for source, result in report['results'].items():
         if result.get('status') == 'success':
             print(f"{source}: {result.get('quality_resources', 0)} resources")
@@ -294,16 +313,16 @@ def generate_processing_report(**context):
     
     return report
 
+
 def cleanup_processing_artifacts(**context):
     """Clean up temporary processing artifacts"""
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     print(f"[Cleanup] Cleaning up processing artifacts for {execution_date}")
     
     # Add cleanup logic here if needed
-    # For example: removing temporary Spark files, clearing caches, etc.
-    
     print("[Cleanup] Processing artifacts cleanup completed")
     return True
+
 
 def validate_silver_data_quality(**context):
     """Validate the quality of generated silver layer data"""
@@ -311,7 +330,6 @@ def validate_silver_data_quality(**context):
     
     execution_date = context['execution_date'].strftime('%Y-%m-%d')
     
-    # MinIO client setup
     minio_client = Minio(
         endpoint=os.getenv('MINIO_ENDPOINT', 'minio:9000'),
         access_key=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
@@ -319,7 +337,6 @@ def validate_silver_data_quality(**context):
         secure=os.getenv('MINIO_SECURE', '0').lower() in {'1', 'true', 'yes'}
     )
     
-    # Force use oer-lakehouse bucket for consistency
     silver_bucket = 'oer-lakehouse'
     sources = ['mit_ocw', 'openstax', 'otl']
     
@@ -327,22 +344,20 @@ def validate_silver_data_quality(**context):
     
     for source in sources:
         try:
-            # Check for today's silver files
             objects = list(minio_client.list_objects(
                 bucket_name=silver_bucket,
-                prefix=f"silver/{source}/{execution_date}/",  # Updated path structure
+                prefix=f"silver/{source}/",
                 recursive=True
             ))
             
             silver_files = [obj for obj in objects if obj.object_name.endswith('.json')]
             
             if silver_files:
-                # Basic validation - check file sizes and count
                 total_size = sum(obj.size for obj in silver_files)
                 validation_results[source] = {
                     'files_count': len(silver_files),
                     'total_size_bytes': total_size,
-                    'status': 'validated' if total_size > 1000 else 'suspicious'  # Basic size check
+                    'status': 'validated' if total_size > 1000 else 'suspicious'
                 }
             else:
                 validation_results[source] = {
@@ -371,22 +386,21 @@ def validate_silver_data_quality(**context):
     
     return validation_results
 
+
 # === DAG Tasks Definition ===
 
-# Start of processing
 start_task = DummyOperator(
     task_id='start_silver_processing',
     dag=dag,
 )
 
-# Check bronze data availability  
 check_bronze_task = PythonOperator(
     task_id='check_bronze_data_availability',
     python_callable=check_bronze_data_availability,
     dag=dag,
 )
 
-# Processing tasks for each source
+# ✅ Each source processes independently
 process_mit_ocw_silver = PythonOperator(
     task_id='process_mit_ocw_silver',
     python_callable=process_mit_ocw_task,
@@ -405,35 +419,30 @@ process_otl_silver = PythonOperator(
     dag=dag,
 )
 
-# Quality validation
 validate_quality_task = PythonOperator(
     task_id='validate_silver_data_quality',
     python_callable=validate_silver_data_quality,
     dag=dag,
 )
 
-# Generate processing report
 generate_report_task = PythonOperator(
     task_id='generate_processing_report',
     python_callable=generate_processing_report,
     dag=dag,
 )
 
-# Cleanup
 cleanup_task = PythonOperator(
     task_id='cleanup_processing_artifacts',
     python_callable=cleanup_processing_artifacts,
     dag=dag,
 )
 
-# Health check
 health_check_task = BashOperator(
     task_id='silver_layer_health_check',
     bash_command='echo "Silver layer processing pipeline completed successfully at $(date)"',
     dag=dag,
 )
 
-# End of processing
 end_task = DummyOperator(
     task_id='end_silver_processing',
     dag=dag,
@@ -441,10 +450,11 @@ end_task = DummyOperator(
 
 # === DAG Dependencies ===
 
-# Process each source in parallel after bronze check
-start_task >> check_bronze_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
+# All 3 sources process in parallel after bronze check
+start_task >> check_bronze_task
+check_bronze_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
 
-# Quality validation after all processing
+# Quality validation after ALL processing completes
 [process_mit_ocw_silver, process_openstax_silver, process_otl_silver] >> validate_quality_task
 
 # Generate report and cleanup in parallel after validation
@@ -452,4 +462,3 @@ validate_quality_task >> [generate_report_task, cleanup_task]
 
 # Final health check and end
 [generate_report_task, cleanup_task] >> health_check_task >> end_task
-

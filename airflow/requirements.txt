@@ -23,7 +23,8 @@ nltk==3.8.1
 yt-dlp==2023.9.24
 youtube-transcript-api==0.6.1
 PyPDF2==3.0.1
-pdfplumber==0.10.4
+pdfplumber==0.11.4
 numpy==1.26.4
 # langchain==0.1.13
 # langchain-google-genai==1.0.10
+# pymarc

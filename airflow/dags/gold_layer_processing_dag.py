@@ -413,19 +413,6 @@ def generate_gold_layer_report(**context):
             'error': str(e)
         }
 
-def cleanup_gold_processing_artifacts(**context):
-    """Clean up temporary processing artifacts"""
-    execution_date = context['logical_date'].strftime('%Y-%m-%d')
-    logger = context['task_instance'].log
-    
-    logger.info(f"[Gold Cleanup] Cleaning up Gold layer processing artifacts for {execution_date}")
-    
-    # Add cleanup logic here if needed
-    # For example: removing temporary Spark files, clearing caches, etc.
-    
-    logger.info("[Gold Cleanup] Gold layer processing artifacts cleanup completed")
-    return True
-
 # === DAG Tasks Definition ===
 
 # Start of processing
@@ -469,20 +456,6 @@ generate_report_task = PythonOperator(
     dag=dag,
 )
 
-# Cleanup artifacts
-cleanup_task = PythonOperator(
-    task_id='cleanup_gold_processing_artifacts',
-    python_callable=cleanup_gold_processing_artifacts,
-    dag=dag,
-)
-
-# Health check
-health_check_task = BashOperator(
-    task_id='gold_layer_health_check',
-    bash_command='echo "Gold layer processing pipeline completed successfully at $(date)"',
-    dag=dag,
-)
-
 # End of processing
 end_task = DummyOperator(
     task_id='end_gold_processing',
@@ -490,9 +463,7 @@ end_task = DummyOperator(
 )
 
 # === DAG Dependencies ===
-
-# Direct workflow without external dependency
+# Simplified workflow: validate silver → refresh reference → create analytics → validate quality → generate report → done
 start_task >> validate_silver_task >> refresh_reference_task
 refresh_reference_task >> create_analytics_task >> validate_quality_task
-validate_quality_task >> generate_report_task >> cleanup_task
-cleanup_task >> health_check_task >> end_task
+validate_quality_task >> generate_report_task >> end_task

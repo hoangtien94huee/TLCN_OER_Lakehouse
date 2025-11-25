@@ -17,7 +17,7 @@ import json
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Set
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Set, Union
 import unicodedata
 import re
 import xml.etree.ElementTree as ET
@@ -77,7 +77,6 @@ class SilverTransformer:
         self.reference_faculty_records: List[Dict[str, Any]] = []
         self.reference_program_records: List[Dict[str, Any]] = []
         self.reference_program_subject_links_records: List[Dict[str, Any]] = []
-        self.reference_subject_aliases: Dict[int, List[str]] = {}
         self.reference_storage: str = "local"
         self.reference_path: Optional[Path] = None
         self.reference_bucket: Optional[str] = None
@@ -193,27 +192,6 @@ class SilverTransformer:
                 print(f"Loaded {len(self.reference_subjects_by_name)} reference subjects from {self._reference_location_desc('subjects.json')}")
             else:
                 print("Reference subjects not found; subject normalization will use heuristics")
-
-            aliases_data = self._load_reference_json("subject_aliases.json")
-            if isinstance(aliases_data, list):
-                alias_count = 0
-                for item in aliases_data:
-                    if not isinstance(item, dict):
-                        continue
-                    subject_id = item.get("subject_id")
-                    alias_text = item.get("alias") or item.get("text")
-                    if subject_id is None or not alias_text:
-                        continue
-                    try:
-                        sid = int(subject_id)
-                    except (TypeError, ValueError):
-                        continue
-                    self.reference_subject_aliases.setdefault(sid, []).append(str(alias_text))
-                    alias_count += 1
-                if alias_count:
-                    print(f"Loaded {alias_count} subject aliases from {self._reference_location_desc('subject_aliases.json')}")
-            elif aliases_data:
-                print("Warning: subject_aliases.json has unexpected format; ignoring")
 
             faculties_data = self._load_reference_json("faculties.json")
             if faculties_data:
@@ -406,23 +384,34 @@ class SilverTransformer:
             }
 
     def _create_spark_session(self) -> SparkSession:
+        # Use local JARs instead of downloading from Maven
+        jars_dir = "/opt/airflow/jars"
+        local_jars = ",".join([
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",
+            f"{jars_dir}/hadoop-aws-3.3.4.jar",
+            f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
+        ])
+        
+        # Print JAR paths for debugging
+        print(f"[Spark] Using local JARs: {local_jars}")
+        
         session = (
             SparkSession.builder.appName("OER-Silver-Dublin-Core")
-            .master(os.getenv("SPARK_MASTER", "local[*]"))
+            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Limit to 2 cores to reduce memory pressure
+            .config("spark.jars", local_jars)  # Load JARs into classpath
+            .config("spark.driver.extraClassPath", local_jars)  # Add to driver classpath
+            .config("spark.executor.extraClassPath", local_jars)  # Add to executor classpath
             .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
             .config("spark.sql.catalog.%s" % self.catalog_name, "org.apache.iceberg.spark.SparkCatalog")
             .config("spark.sql.catalog.%s.type" % self.catalog_name, "hadoop")
             .config("spark.sql.catalog.%s.warehouse" % self.catalog_name, f"s3a://{self.bucket}/silver/")
-            .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog")
-            .config("spark.sql.catalog.lakehouse.type", "hadoop")
-            .config("spark.sql.catalog.lakehouse.warehouse", f"s3a://{self.bucket}/warehouse/")
             .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
             .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "200"))
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8"))  # Reduced for local mode
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
             .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))
@@ -634,15 +623,31 @@ class SilverTransformer:
 
         deduped_df.unpersist(False)
 
-    def _replace_table(self, df: DataFrame, table_name: str, partition_columns: Optional[List[str]] = None) -> None:
-        """Write or merge data into Iceberg table using dynamic partition overwrite."""
+    def _replace_table(
+        self, 
+        df: DataFrame, 
+        table_name: str, 
+        partition_columns: Optional[List[str]] = None,
+        merge_key: Optional[Union[str, List[str]]] = "resource_uid"
+    ) -> None:
+        """Write or merge data into Iceberg table using MERGE for incremental updates.
+        
+        Args:
+            df: DataFrame to write
+            table_name: Target Iceberg table name
+            partition_columns: Optional partitioning columns
+            merge_key: Column name(s) to use for MERGE ON condition. 
+                      Can be single string or list of strings for composite keys.
+                      Default: "resource_uid"
+        """
         row_count = df.count()
         
         # Check if table exists
         try:
             existing_df = self.spark.table(table_name)
             table_exists = True
-            print(f"Table {table_name} exists, will overwrite partitions with {row_count} new records")
+            existing_count = existing_df.count()
+            print(f"Table {table_name} exists with {existing_count} records, will merge {row_count} new records")
         except Exception:
             table_exists = False
             print(f"Table {table_name} does not exist, will create with {row_count} records")
@@ -667,11 +672,44 @@ class SilverTransformer:
             self.spark.catalog.dropTempView(temp_view)
             print(f" Created {table_name} with {row_count} records")
         else:
-            # Use Iceberg's dynamic partition overwrite
-            # This will ONLY overwrite partitions that exist in the new data
-            # Other partitions remain untouched
-            df.writeTo(table_name).overwritePartitions()
-            print(f" Overwrote partitions in {table_name} with {row_count} records")
+            # Use MERGE for incremental updates (upsert based on merge_key)
+            # This preserves existing records and only updates/inserts changed ones
+            temp_view = f"temp_{uuid4().hex}"
+            df.createOrReplaceTempView(temp_view)
+            
+            # Build ON condition for single or composite keys
+            if isinstance(merge_key, str):
+                on_condition = f"target.{merge_key} = source.{merge_key}"
+            else:  # List of keys for composite primary key
+                on_conditions = [f"target.{key} = source.{key}" for key in merge_key]
+                on_condition = " AND ".join(on_conditions)
+            
+            # Merge logic: UPDATE existing records, INSERT new ones
+            merge_sql = f"""
+                MERGE INTO {table_name} AS target
+                USING {temp_view} AS source
+                ON {on_condition}
+                WHEN MATCHED THEN
+                    UPDATE SET *
+                WHEN NOT MATCHED THEN
+                    INSERT *
+            """
+            
+            try:
+                self.spark.sql(merge_sql)
+                self.spark.catalog.dropTempView(temp_view)
+                
+                # Count records after merge
+                final_count = self.spark.table(table_name).count()
+                new_records = final_count - existing_count
+                print(f" Merged into {table_name}: {new_records} new records (total: {final_count})")
+            except Exception as e:
+                print(f"  MERGE failed, falling back to append mode: {e}")
+                self.spark.catalog.dropTempView(temp_view)
+                
+                # Fallback: Use append mode with deduplication
+                df.writeTo(table_name).append()
+                print(f" Appended {row_count} records to {table_name} (fallback mode)")
 
     def _write_reference_dimensions(self) -> None:
         if not self.spark:
@@ -707,14 +745,32 @@ class SilverTransformer:
         programs_df = create_df(self.reference_program_records)
         program_subject_links_df = create_df(self.reference_program_subject_links_records)
 
+        # Reference tables: use OVERWRITE mode (master data, not incremental)
+        # Deduplication ensures data quality from source files
         if subjects_df is not None:
-            self._replace_table(subjects_df, self.reference_subjects_table)
+            subjects_df = subjects_df.dropDuplicates(["subject_id"])
+            row_count = subjects_df.count()
+            print(f"Overwriting reference_subjects with {row_count} records")
+            subjects_df.writeTo(self.reference_subjects_table).createOrReplace()
+            
         if faculties_df is not None:
-            self._replace_table(faculties_df, self.reference_faculties_table)
+            faculties_df = faculties_df.dropDuplicates(["faculty_id"])
+            row_count = faculties_df.count()
+            print(f"Overwriting reference_faculties with {row_count} records")
+            faculties_df.writeTo(self.reference_faculties_table).createOrReplace()
+            
         if programs_df is not None:
-            self._replace_table(programs_df, self.reference_programs_table)
+            programs_df = programs_df.dropDuplicates(["program_id"])
+            row_count = programs_df.count()
+            print(f"Overwriting reference_programs with {row_count} records")
+            programs_df.writeTo(self.reference_programs_table).createOrReplace()
+            
         if program_subject_links_df is not None:
-            self._replace_table(program_subject_links_df, self.reference_program_subject_links_table)
+            program_subject_links_df = program_subject_links_df.dropDuplicates(["program_id", "subject_id"])
+            row_count = program_subject_links_df.count()
+            print(f"Overwriting reference_program_subject_links with {row_count} records")
+            program_subject_links_df.writeTo(self.reference_program_subject_links_table).createOrReplace()
+
 
     def _detect_source_system(self, record: Dict[str, Any]) -> str:
         candidates = [

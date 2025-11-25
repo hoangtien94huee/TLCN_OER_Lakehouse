@@ -16,15 +16,15 @@ RUN apt-get update && apt-get install -y \
     xvfb \
     postgresql-client \
     libpq-dev \
-    openjdk-17-jre-headless \
+    openjdk-17-jdk-headless \
     && rm -rf /var/lib/apt/lists/*
 
-# Set JAVA_HOME for Spark client connectivity
+# Set JAVA_HOME for Spark (use JDK, not JRE)
 ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-# Verify Java installation
-RUN java -version && echo "Java installed successfully"
+# Verify Java installation (should show javac for JDK)
+RUN java -version && javac -version && echo "Java JDK installed successfully"
 
 RUN apt-get update && apt-get install -y wget unzip fonts-liberation libappindicator3-1 \
     libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcups2 \
@@ -74,6 +74,9 @@ RUN pip install --no-cache-dir --no-deps -r /opt/airflow/requirements.txt ||    
 # Copy source code and dags
 COPY src/ /opt/airflow/src/
 COPY dags/ /opt/airflow/dags/
+# Copy init scripts (MinIO)
+RUN mkdir -p /opt/airflow/scripts
+COPY src/create_schema.py /opt/airflow/scripts/create_schema.py
 
 # Copy entrypoint script
 COPY entrypoint.sh /opt/airflow/entrypoint.sh

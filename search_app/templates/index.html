@@ -1,133 +1,190 @@
-<!DOCTYPE html>
-<html lang="en">
+﻿<!DOCTYPE html>
+<html lang="vi">
   <head>
     <meta charset="UTF-8" />
-    <title>OER Search Portal</title>
+    <title>OER Search</title>
     <link
       rel="stylesheet"
       href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
     />
     <style>
+      :root {
+        --primary: #60a5fa;
+        --primary-hover: #93c5fd;
+        --surface: #0f172a;
+        --panel: #111827;
+        --border: #1f2937;
+        --muted: #9ca3af;
+        color-scheme: dark;
+      }
       body {
         padding: 2rem;
+        background: var(--surface);
+        color: #e5e7eb;
+      }
+      h2 {
+        text-align: center;
+        margin-bottom: 1rem;
+      }
+      .layout {
+        display: grid;
+        grid-template-columns: 360px 1fr;
+        gap: 1.5rem;
+      }
+      .sidebar {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 0.75rem;
+        max-height: 80vh;
+        overflow-y: auto;
       }
       .result-card {
         margin-bottom: 1.5rem;
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        padding: 1rem;
       }
       .highlight {
-        background-color: #1A1F28;
+        background-color: #312e0f;
         padding: 0.25rem;
         border-radius: 0.25rem;
       }
-      .pdf-section {
-        margin-top: 0.5rem;
-      }
       .meta {
         font-size: 0.9rem;
-        color: #666;
+        color: var(--muted);
+      }
+      .facet-item {
+        cursor: pointer;
+        color: var(--primary);
+      }
+      .facet-item:hover {
+        color: var(--primary-hover);
+      }
+      details summary {
+        cursor: pointer;
+      }
+      .form-card {
+        background: #0f172a;
+        border: 1px solid #000000;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 1rem;
       }
     </style>
   </head>
   <body>
     <main class="container">
-      <h2>OER Search Portal</h2>
-      <form method="get">
-        <div class="grid">
-          <label>
-            Keyword
-            <input type="text" name="q" value="{{ query }}" placeholder="title, subject, PDF content..." />
-          </label>
-          <label>
-            Source
-            <input type="text" name="source_system" value="{{ source_system }}" placeholder="mit_ocw, openstax..." />
-          </label>
-          <label>
-            Language
-            <input type="text" name="language" value="{{ language }}" placeholder="en, vi..." />
-          </label>
-          <label>
-            Program ID
-            <input type="number" name="program_id" value="{{ program_id }}" />
-          </label>
-        </div>
-        <button type="submit">Search</button>
-      </form>
+      <h2>Search OER / Elasticsearch</h2>
 
-      <p>{{ total }} result(s)</p>
-
-      {% for item in results %}
-      <article class="result-card">
-        <header>
-          <strong>
-            {% if item.url %}
-            <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
-              >{{ item.title or "Untitled" }}</a
-            >
-            {% else %}
-            {{ item.title or "Untitled" }}
-            {% endif %}
-          </strong>
-          <div class="meta">
-            Source: {{ item.source_system or "unknown" }} &nbsp;|&nbsp; Language:
-            {{ item.language or "unknown" }} &nbsp;|&nbsp; Score:
-            {{ "%.2f"|format(item.score or 0) }}
-          </div>
-        </header>
-        <p>{{ item.description }}</p>
-
-        {% if item.highlight %}
-        <div>
-          {% for field, snippets in item.highlight.items() %}
-          <div class="highlight">
-            <strong>{{ field }}:</strong>
-            {% for snippet in snippets %} {{ snippet|safe }} {% endfor %}
-          </div>
-          {% endfor %}
-        </div>
-        {% endif %}
-
-        {% if item.pdf_assets %}
-        <div class="pdf-section">
-          <strong>PDFs:</strong>
-          <ul>
-            {% for title, link, path in item.pdf_assets %}
-            <li>
-              {{ title or path }}
-              {% if link %}
-              (<a href="{{ link }}" target="_blank" rel="noopener noreferrer"
-                >open</a
-              >)
-              {% else %}
-              <small>{{ path }}</small>
-              {% endif %}
-            </li>
+      <div class="layout">
+        <aside class="sidebar">
+          <h5> Faculties / Programs / Subjects </h5>
+          {% if reference_tree %}
+            {% for faculty in reference_tree %}
+              <details>
+                <summary>{{ faculty.faculty_name }}</summary>
+                <ul style="list-style:none; padding-left:1rem;">
+                  {% for program in faculty.programs %}
+                    <li>
+                      <details>
+                        <summary class="facet-item">
+                          {{ program.program_name }} ({{ program.program_code }})
+                        </summary>
+                        {% if program.subjects %}
+                        <ul style="list-style:none; padding-left:1rem;">
+                          {% for subj in program.subjects %}
+                            <li class="facet-item"
+                              onclick="setSubject('{{ program.program_id }}','{{ subj.subject_id }}','{{ subj.subject_name_en or subj.subject_name }}')">
+                              {{ subj.subject_name }}{% if subj.subject_name_en %} / {{ subj.subject_name_en }}{% endif %}
+                            </li>
+                          {% endfor %}
+                        </ul>
+                        {% endif %}
+                      </details>
+                    </li>
+                  {% endfor %}
+                </ul>
+              </details>
             {% endfor %}
-          </ul>
-        </div>
-        {% endif %}
+          {% else %}
+            <small>Không tìm thấy dữ liệu reference (faculties/programs/subjects).</small>
+          {% endif %}
+        </aside>
 
-        {% if item.matched_subjects %}
-        <div class="meta">
-          Subjects:
-          {% for subject in item.matched_subjects %}
-          <span>
-            {{ subject.subject_name_en or subject.subject_name }} (score:
-            {{ subject.similarity }})
-          </span>
-          {% endfor %}
-        </div>
-        {% endif %}
+        <section>
+          <div class="form-card">
+            <form method="get">
+              <div class="grid">
+                <label>
+                Keyword
+                  <input type="text" id="keyword_input" name="q" value="{{ query }}" placeholder="enter keyword..." />
+                </label>
+              </div>
+              <button type="submit">Search</button>
+              
+            </form>
+          </div>
 
-        {% if item.programs %}
-        <div class="meta">
-          Programs:
-          {% for program in item.programs %}
-          <span>{{ program.program_name }} ({{ program.faculty_name }})</span>
+          <p>{{ total }} results</p>
+
+          {% for item in results %}
+          <article class="result-card">
+            <header>
+              <strong>
+                {% if item.url %}
+                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
+                  >{{ item.title or "Untitled" }}</a
+                >
+                {% else %}
+                {{ item.title or "Untitled" }}
+                {% endif %}
+              </strong>
+              <div class="meta">
+                Source: {{ item.source_system or "unknown" }}
+                {% if not item.is_textbook %}&nbsp;|&nbsp; Language: {{ item.language or "unknown" }}{% endif %}
+                &nbsp;|&nbsp; Score: {{ "%.2f"|format(item.score or 0) }}
+                {% if item.is_textbook %}
+                <br/>Publisher: {{ item.publisher or "N/A" }} {% if item.publish_year %} | Year: {{ item.publish_year }}{% endif %}
+                {% endif %}
+              </div>
+            </header>
+            {% if item.snippet %}
+            <div class="highlight">{{ item.snippet|safe }}</div>
+            {% endif %}
+
+            {% if not item.is_textbook and item.pdf_assets %}
+            <div class="pdf-section">
+              <strong>PDFs:</strong>
+              <ul>
+                {% for title, link, path in item.pdf_assets %}
+                    <li>
+                      {{ title or path }}
+                      {% if link %}
+                      (<a href="{{ link }}" target="_blank" rel="noopener noreferrer">mở/tải</a>)
+                      {% else %}
+                      <small>Không có link tải</small>
+                      {% endif %}
+                    </li>
+                {% endfor %}
+              </ul>
+            </div>
+            {% endif %}
+
+          </article>
           {% endfor %}
-        </div>
-        {% endif %}
-      </article>
-      {% endfor %}
+        </section>
+      </div>
     </main>
+
+    <script>
+      function setSubject(programId, subjectId, subjectName) {
+        const kw = document.getElementById("keyword_input");
+        if (kw && subjectName) {
+          kw.value = subjectName;
+        }
+      }
+    </script>
   </body>
 </html>

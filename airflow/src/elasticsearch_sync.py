@@ -18,32 +18,19 @@ from decimal import Decimal
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-try:
-    from elasticsearch import Elasticsearch, helpers
-except ImportError:  # pragma: no cover - handled at runtime
-    Elasticsearch = None  # type: ignore
-    helpers = None  # type: ignore
+from elasticsearch import Elasticsearch, helpers
 
-try:
-    from minio import Minio
-except ImportError:  # pragma: no cover - handled at runtime
-    Minio = None  # type: ignore
+from minio import Minio
+import pdfplumber
+import PyPDF2
 
-try:
-    import pdfplumber
-except ImportError:  # pragma: no cover
-    pdfplumber = None
-
-try:
-    import PyPDF2
-except ImportError:  # pragma: no cover
-    PyPDF2 = None
 
 try:
     from pyspark.sql import DataFrame, SparkSession
     from pyspark.sql import functions as F
+    from pyspark.sql import types as T
 except ImportError:  # pragma: no cover - handled at runtime
-    SparkSession = DataFrame = F = None  # type: ignore
+    SparkSession = DataFrame = F = T = None  # type: ignore
 
 SPARK_AVAILABLE = SparkSession is not None
 ELASTICSEARCH_AVAILABLE = Elasticsearch is not None
@@ -54,6 +41,7 @@ class OERElasticsearchIndexer:
     """Sync Gold layer OER resources into an Elasticsearch index."""
 
     def __init__(self) -> None:
+        # Kiểm tra các thư viện cần thiết
         if not SPARK_AVAILABLE:
             raise RuntimeError("PySpark is required to export Gold data to Elasticsearch")
         if not ELASTICSEARCH_AVAILABLE:
@@ -62,13 +50,14 @@ class OERElasticsearchIndexer:
                 "Install it via airflow/requirements.txt."
             )
 
+        # Cấu hình kết nối MinIO và Iceberg catalogs
         self.bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
         self.silver_catalog = os.getenv("ICEBERG_SILVER_CATALOG", "silver")
         self.silver_database = os.getenv("SILVER_DATABASE", "default")
         self.gold_catalog = os.getenv("ICEBERG_GOLD_CATALOG", "gold")
         self.gold_database = os.getenv("GOLD_DATABASE", "analytics")
 
-        # Gold tables
+        # Định nghĩa các bảng Gold layer cần đồng bộ
         self.dim_programs_table = f"{self.gold_catalog}.{self.gold_database}.dim_programs"
         self.dim_sources_table = f"{self.gold_catalog}.{self.gold_database}.dim_sources"
         self.dim_languages_table = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
@@ -76,19 +65,20 @@ class OERElasticsearchIndexer:
         self.dim_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
         self.fact_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
 
-        # Elasticsearch configuration
+        # Cấu hình Elasticsearch
         self.es_host = os.getenv("ELASTICSEARCH_HOST", "http://elasticsearch:9200")
         self.es_user = os.getenv("ELASTICSEARCH_USER")
         self.es_password = os.getenv("ELASTICSEARCH_PASSWORD")
         self.index_name = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
-        self.batch_size = int(os.getenv("ELASTICSEARCH_BATCH_SIZE", "500"))
-        self.request_timeout = int(os.getenv("ELASTICSEARCH_TIMEOUT", "120"))
+        self.batch_size = int(os.getenv("ELASTICSEARCH_BATCH_SIZE", "500"))  # Số documents/batch
+        self.request_timeout = int(os.getenv("ELASTICSEARCH_TIMEOUT", "120"))  # Timeout 2 phút
         self.recreate_index = os.getenv("ELASTICSEARCH_RECREATE", "0").lower() in {
             "1",
             "true",
             "yes",
         }
 
+        # Kết nối đến Elasticsearch với authentication
         http_auth = None
         if self.es_user and self.es_password:
             http_auth = (self.es_user, self.es_password)
@@ -99,28 +89,56 @@ class OERElasticsearchIndexer:
             verify_certs=self.es_host.startswith("https"),
         )
 
+        # Cấu hình PDF indexing (có index nội dung PDF hay không)
         self.index_pdf_content = os.getenv("ELASTICSEARCH_INDEX_PDF_CONTENT", "1").lower() in {
             "1",
             "true",
             "yes",
         }
-        self.max_pdf_texts = int(os.getenv("ELASTICSEARCH_MAX_PDF_PER_RESOURCE", "3"))
+        self.max_pdf_texts = int(os.getenv("ELASTICSEARCH_MAX_PDF_PER_RESOURCE", "3"))  # Max 3 PDFs
+        self.max_pdf_chars = int(os.getenv("ELASTICSEARCH_MAX_PDF_CHARS", "8000"))  # Limit text per PDF
+        self.max_pdf_total_chars = int(os.getenv("ELASTICSEARCH_MAX_PDF_TOTAL_CHARS", "20000"))  # Limit per resource
+        self.search_pdf_chars = int(os.getenv("ELASTICSEARCH_SEARCH_PDF_CHARS", "4000"))  # Part of PDF pushed into search_text
+        self.max_pdf_pages = int(os.getenv("ELASTICSEARCH_PDF_MAX_PAGES", "50"))  # Max pages per PDF to parse
+        self.max_pdf_page_chars = int(os.getenv("ELASTICSEARCH_PDF_PAGE_CHARS", "2000"))  # Max chars per page chunk
+        
+        # Kết nối MinIO để lấy PDF content (nếu cần)
         self.minio_client = self._create_minio_client() if self.index_pdf_content else None
-        self._bronze_record_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}
-        self._pdf_listing_cache: Dict[str, List[str]] = {}
-        self._pdf_text_cache: Dict[str, str] = {}
+        
+        # Khởi tạo cache để tối ưu hiệu suất
+        self._bronze_record_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # Cache Bronze JSON
+        self._pdf_listing_cache: Dict[str, List[str]] = {}  # Cache danh sách PDFs
+        self._pdf_text_cache: Dict[str, str] = {}  # Cache nội dung PDF đã extract
 
+        # Khởi tạo Spark session để đọc Gold layer (Iceberg tables)
         self.spark = self._create_spark_session()
 
-    # ------------------------------------------------------------------ Spark --
+    # Spark
     def _create_spark_session(self) -> SparkSession:
+        """Tạo Spark session để đọc dữ liệu từ Gold layer (Iceberg tables)"""
+        # Sử dụng local JARs thay vì download từ Maven (tránh network issues)
+        jars_dir = "/opt/airflow/jars"
+        local_jars = ",".join([
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",  # Iceberg support
+            f"{jars_dir}/hadoop-aws-3.3.4.jar",  # S3A filesystem
+            f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"  # AWS SDK
+        ])
+        
+        print(f"[Spark] Using local JARs: {local_jars}")
+        
+        # Tạo Spark session với các cấu hình tối ưu
         session = (
             SparkSession.builder.appName("OER-Gold-Elasticsearch")
-            .master(os.getenv("SPARK_MASTER", "local[*]"))
+            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Chạy local với 2 cores
+            .config("spark.jars", local_jars)  # Load JARs vào classpath
+            .config("spark.driver.extraClassPath", local_jars)  # Classpath cho driver
+            .config("spark.executor.extraClassPath", local_jars)  # Classpath cho executor
+            # Cấu hình Iceberg extensions
             .config(
                 "spark.sql.extensions",
                 "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
             )
+            # Cấu hình Silver catalog (Iceberg)
             .config(
                 f"spark.sql.catalog.{self.silver_catalog}",
                 "org.apache.iceberg.spark.SparkCatalog",
@@ -130,6 +148,7 @@ class OERElasticsearchIndexer:
                 f"spark.sql.catalog.{self.silver_catalog}.warehouse",
                 f"s3a://{self.bucket}/silver/",
             )
+            # Cấu hình Gold catalog (Iceberg) - Đây là catalog chính để đọc dữ liệu
             .config(
                 f"spark.sql.catalog.{self.gold_catalog}",
                 "org.apache.iceberg.spark.SparkCatalog",
@@ -139,34 +158,39 @@ class OERElasticsearchIndexer:
                 f"spark.sql.catalog.{self.gold_catalog}.warehouse",
                 f"s3a://{self.bucket}/gold/",
             )
+            # Cấu hình S3A filesystem để kết nối MinIO
             .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
-            .config("spark.hadoop.fs.s3a.path.style.access", "true")
-            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+            .config("spark.hadoop.fs.s3a.path.style.access", "true")  # MinIO style
+            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")  # HTTP (không HTTPS)
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-            .config("spark.sql.adaptive.enabled", "true")
-            .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "2g"))
-            .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "2g"))
-            .config("spark.driver.maxResultSize", os.getenv("SPARK_DRIVER_MAXRESULTSIZE", "1g"))
+            # Cấu hình performance tuning
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8"))  # Giảm partitions cho local mode
+            .config("spark.sql.adaptive.enabled", "true")  # Adaptive Query Execution
+            .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))  # RAM cho driver
+            .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))  # RAM cho executor
+            .config("spark.driver.maxResultSize", os.getenv("SPARK_DRIVER_MAXRESULTSIZE", "2g"))  # Max result size
             .getOrCreate()
         )
         session.sparkContext.setLogLevel("WARN")
         return session
 
-    # -------------------------------------------------------------- MinIO Utils --
+    # MinIO Utils
     def _create_minio_client(self) -> Optional[Minio]:
+        """Tạo MinIO client để lấy PDF content từ Bronze layer"""
         if not MINIO_AVAILABLE:
             print("[Warning] MinIO library not available; PDF indexing disabled")
             self.index_pdf_content = False
             return None
 
         try:
+            # Cấu hình kết nối MinIO
             endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
-            endpoint = endpoint.replace("https://", "").replace("http://", "")
+            endpoint = endpoint.replace("https://", "").replace("http://", "")  # Loại bỏ protocol
             access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
             secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-            secure = os.getenv("MINIO_SECURE", "0").lower() in {"1", "true", "yes"}
+            secure = os.getenv("MINIO_SECURE", "0").lower() in {"1", "true", "yes"}  # HTTP/HTTPS
             client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
             return client
         except Exception as exc:
@@ -184,6 +208,8 @@ class OERElasticsearchIndexer:
         return bucket, key
 
     def _load_bronze_records(self, bronze_path: str) -> Dict[str, Dict[str, Any]]:
+        """Load Bronze JSON file và tạo mapping từ resource_id -> record"""
+        # Kiểm tra cache trước (tránh đọc lại file nhiều lần)
         if bronze_path in self._bronze_record_cache:
             return self._bronze_record_cache[bronze_path]
 
@@ -192,11 +218,13 @@ class OERElasticsearchIndexer:
             self._bronze_record_cache[bronze_path] = mapping
             return mapping
 
+        # Parse S3 URI (ví dụ: s3a://bucket/bronze/mit_ocw/data.json)
         bucket, object_name = self._parse_s3_uri(bronze_path)
         if not bucket or not object_name:
             self._bronze_record_cache[bronze_path] = mapping
             return mapping
 
+        # Download Bronze JSON file từ MinIO
         response = None
         try:
             response = self.minio_client.get_object(bucket, object_name)
@@ -234,6 +262,7 @@ class OERElasticsearchIndexer:
         return mapping
 
     def _get_bronze_record(self, bronze_path: Optional[str], resource_id: Optional[str]) -> Optional[Dict[str, Any]]:
+        """Lấy Bronze record để extract metadata (course_id, url) cho việc tìm PDF path"""
         if not bronze_path or not resource_id:
             return None
         records = self._load_bronze_records(bronze_path)
@@ -241,38 +270,6 @@ class OERElasticsearchIndexer:
             return None
         rec = records.get(resource_id) or records.get(str(resource_id).strip())
         return rec
-
-    def _bundle_from_record(self, record: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if not record:
-            return None
-        pdfs = record.get("pdfs")
-        if not isinstance(pdfs, list) or not pdfs:
-            return None
-
-        texts: List[str] = []
-        titles: List[str] = []
-        files: List[str] = []
-        for pdf in pdfs[: self.max_pdf_texts]:
-            if not isinstance(pdf, dict):
-                continue
-            text_value = pdf.get("text_content")
-            if isinstance(text_value, str):
-                cleaned = text_value.strip()
-                if cleaned:
-                    texts.append(cleaned)
-            title = pdf.get("title")
-            if title:
-                titles.append(str(title))
-            file_path = pdf.get("minio_path") or pdf.get("url")
-            if file_path:
-                files.append(str(file_path))
-        if not texts:
-            return None
-        return {
-            "pdf_text": "\n\n".join(texts),
-            "pdf_titles": titles,
-            "pdf_files": files,
-        }
 
     def _bundle_from_minio(
         self,
@@ -283,9 +280,10 @@ class OERElasticsearchIndexer:
         if not source_system or not self.minio_client:
             return None
 
+        system = str(source_system).lower()
         pdf_entries: List[Tuple[str, str, str]] = []
 
-        if source_system == "mit_ocw":
+        if system in {"mit_ocw", "mit ocw"}:
             course_id = None
             if record:
                 course_id = record.get("course_id") or record.get("course_number")
@@ -296,7 +294,7 @@ class OERElasticsearchIndexer:
                 return None
             prefix = f"bronze/mit_ocw/pdfs/{course_id}/"
             pdf_entries = self._collect_pdf_entries(prefix)
-        elif source_system == "otl":
+        elif system in {"otl", "open textbook library"}:
             normalized_id = resource_id.strip()
             prefixes = [
                 f"bronze/otl/otl-pdfs/{normalized_id}_",
@@ -313,17 +311,37 @@ class OERElasticsearchIndexer:
         if not pdf_entries:
             return None
 
-        texts = [entry[2] for entry in pdf_entries]
-        titles = [entry[0] for entry in pdf_entries]
-        files = [entry[1] for entry in pdf_entries]
+        aggregated_parts: List[str] = []
+        pdf_chunks: List[Dict[str, Any]] = []
+        total_chars = 0
+        titles = []
+        files = []
+
+        for file_title, file_uri, first_text, pages in pdf_entries:
+            titles.append(file_title)
+            files.append(file_uri)
+            for page_num, page_text in pages:
+                if total_chars < self.max_pdf_total_chars:
+                     remaining = self.max_pdf_total_chars - total_chars
+                     take_text = page_text[:remaining]
+                     aggregated_parts.append(take_text)
+                     total_chars += len(take_text)
+                
+                if page_text:
+                    pdf_chunks.append({
+                        "text": page_text,
+                        "page": page_num,
+                        "file": file_title
+                    })
 
         return {
-            "pdf_text": "\n\n".join(texts),
+            "pdf_text": "\n\n".join(aggregated_parts),
             "pdf_titles": titles,
             "pdf_files": files,
+            "pdf_chunks": pdf_chunks,
         }
 
-    def _collect_pdf_entries(self, prefix: str) -> List[Tuple[str, str, str]]:
+    def _collect_pdf_entries(self, prefix: str) -> List[Tuple[str, str, str, List[Tuple[int, str]]]]:
         if prefix in self._pdf_listing_cache:
             objects = self._pdf_listing_cache[prefix]
         else:
@@ -335,22 +353,28 @@ class OERElasticsearchIndexer:
                 print(f"[Warning] Unable to list PDFs for prefix {prefix}: {exc}")
             self._pdf_listing_cache[prefix] = objects
 
-        entries: List[Tuple[str, str, str]] = []
+        entries: List[Tuple[str, str, str, List[Tuple[int, str]]]] = []
         for object_name in objects:
-            text = self._get_pdf_text(object_name)
-            if not text:
+            pages = self._get_pdf_pages(object_name)
+            if not pages:
                 continue
             file_title = PurePosixPath(object_name).name
             file_uri = f"s3a://{self.bucket}/{object_name}"
-            entries.append((file_title, file_uri, text))
+            # Keep first page text as summary (for backward compatibility in titles list)
+            first_text = pages[0][1] if pages else ""
+            entries.append((file_title, file_uri, first_text, pages))
             if len(entries) >= self.max_pdf_texts:
                 break
         return entries
 
-    def _get_pdf_text(self, object_name: str) -> Optional[str]:
+    def _get_pdf_pages(self, object_name: str) -> List[Tuple[int, str]]:
+        """Extract per-page text (chunked) with caching."""
         if object_name in self._pdf_text_cache:
             cached = self._pdf_text_cache[object_name]
-            return cached or None
+            if isinstance(cached, list):
+                return cached
+            if cached:
+                return [(1, cached)]
 
         response = None
         data: Optional[bytes] = None
@@ -370,45 +394,62 @@ class OERElasticsearchIndexer:
                 except Exception:
                     pass
 
-        text = self._extract_text_from_pdf_bytes(data)
-        self._pdf_text_cache[object_name] = text or ""
-        return text
+        pages = self._extract_pages_from_pdf_bytes(data)
+        self._pdf_text_cache[object_name] = pages
+        return pages
 
-    def _extract_text_from_pdf_bytes(self, data: Optional[bytes]) -> Optional[str]:
-        if not data:
+    def _clean_text(self, text: Optional[str], max_chars: int) -> Optional[str]:
+        """Normalize whitespace and trim long PDF text before indexing."""
+        if not text:
             return None
+        compact = " ".join(str(text).split())
+        if not compact:
+            return None
+        if len(compact) > max_chars:
+            return compact[:max_chars]
+        return compact
 
-        snippets: List[str] = []
+    def _extract_pages_from_pdf_bytes(self, data: Optional[bytes]) -> List[Tuple[int, str]]:
+        """Extract text per page with limits (max pages, max chars per page)."""
+        if not data:
+            return []
+
+        pages: List[Tuple[int, str]] = []
+
+        # Try pdfplumber first
         if pdfplumber:
             try:
                 with pdfplumber.open(BytesIO(data)) as pdf:
-                    for page in pdf.pages[:3]:
+                    for idx, page in enumerate(pdf.pages[: self.max_pdf_pages], start=1):
                         page_text = (page.extract_text() or "").strip()
-                        if page_text:
-                            snippets.append(page_text)
+                        clean = self._clean_text(page_text, self.max_pdf_page_chars)
+                        if clean:
+                            pages.append((idx, clean))
             except Exception:
-                pass
+                pages = []
 
-        if not snippets and PyPDF2:
+        # Fallback PyPDF2 if pdfplumber failed
+        if not pages and PyPDF2:
             try:
                 reader = PyPDF2.PdfReader(BytesIO(data))
-                for page in reader.pages[:3]:
+                for idx, page in enumerate(reader.pages[: self.max_pdf_pages], start=1):
                     try:
                         page_text = (page.extract_text() or "").strip()
-                        if page_text:
-                            snippets.append(page_text)
                     except Exception:
                         continue
+                    clean = self._clean_text(page_text, self.max_pdf_page_chars)
+                    if clean:
+                        pages.append((idx, clean))
             except Exception:
-                pass
+                pages = []
 
-        if not snippets:
-            return None
-
-        combined = "\n".join(snippets)
-        return combined[:4000]
+        return pages
 
     def _augment_with_pdf_content(self, document: Dict[str, Any]) -> None:
+        """Thêm nội dung PDF vào document để index vào Elasticsearch.
+
+        Workflow: Extract PDF text trực tiếp từ MinIO.
+        """
         if not self.index_pdf_content or not self.minio_client:
             return
 
@@ -418,13 +459,11 @@ class OERElasticsearchIndexer:
         resource_id = str(resource_id)
 
         bronze_path = document.get("bronze_source_path")
-        if not isinstance(bronze_path, str):
-            return
+        record = None
+        if isinstance(bronze_path, str):
+            record = self._get_bronze_record(bronze_path, resource_id)
 
-        record = self._get_bronze_record(bronze_path, resource_id)
-        bundle = self._bundle_from_record(record)
-        if not bundle:
-            bundle = self._bundle_from_minio(document.get("source_system"), record, resource_id)
+        bundle = self._bundle_from_minio(document.get("source_system"), record, resource_id)
         if not bundle:
             return
 
@@ -432,13 +471,17 @@ class OERElasticsearchIndexer:
         if pdf_text:
             document["pdf_text"] = pdf_text
             current = document.get("search_text")
-            document["search_text"] = " ".join(filter(None, [current, pdf_text]))
+            search_pdf_part = pdf_text[: self.search_pdf_chars]
+            document["search_text"] = " ".join(filter(None, [current, search_pdf_part]))
 
         if bundle.get("pdf_titles"):
             document["pdf_titles"] = bundle["pdf_titles"]
 
         if bundle.get("pdf_files"):
             document["pdf_files"] = bundle["pdf_files"]
+
+        if bundle.get("pdf_chunks"):
+            document["pdf_chunks"] = bundle["pdf_chunks"]
 
     def _load_table(self, table_name: str, description: str) -> Optional[DataFrame]:
         try:
@@ -452,7 +495,7 @@ class OERElasticsearchIndexer:
             print(f"  {description}: Unable to read {table_name} ({exc})")
             return None
 
-    # --------------------------------------------------------- Document build --
+    # Document build
     def _prepare_fact_enrichment(
         self,
         fact_df: Optional[DataFrame],
@@ -460,21 +503,20 @@ class OERElasticsearchIndexer:
         dim_languages: Optional[DataFrame],
         dim_date: Optional[DataFrame],
     ) -> Optional[DataFrame]:
+        """Join fact table với các dimension tables để làm giàu dữ liệu"""
         if fact_df is None:
             return None
 
+        # Chọn các columns cần thiết từ fact table
         fact = fact_df.select(
             "resource_key",
             "source_key",
             "language_key",
             "publication_date_key",
             "ingested_date_key",
-            "program_ids",
-            "matched_subjects_count",
-            "matched_programs_count",
-            "data_quality_score",
         )
 
+        # Join với dim_sources để có source_code, source_name (VD: mit_ocw, openstax)
         if dim_sources is not None:
             fact = fact.join(
                 dim_sources.select("source_key", "source_code", "source_name"),
@@ -482,6 +524,7 @@ class OERElasticsearchIndexer:
                 "left",
             )
 
+        # Join với dim_languages để có language_code (VD: en, vi)
         if dim_languages is not None:
             fact = fact.join(
                 dim_languages.select("language_key", "language_code"),
@@ -512,58 +555,17 @@ class OERElasticsearchIndexer:
 
         return fact
 
-    def _prepare_program_details(
-        self, fact_df: Optional[DataFrame], dim_programs: Optional[DataFrame]
-    ) -> Optional[DataFrame]:
-        if fact_df is None or dim_programs is None:
-            return None
-
-        exploded = fact_df.select(
-            "resource_key",
-            F.explode_outer("program_ids").alias("program_id"),
-        ).where(F.col("program_id").isNotNull())
-
-        if exploded.rdd.isEmpty():
-            return None
-
-        details = (
-            exploded.join(
-                dim_programs.select(
-                    "program_id",
-                    "program_name",
-                    "program_code",
-                    "faculty_name",
-                ),
-                "program_id",
-                "left",
-            )
-            .groupBy("resource_key")
-            .agg(
-                F.collect_list(
-                    F.struct(
-                        "program_id",
-                        "program_name",
-                        "program_code",
-                        "faculty_name",
-                    )
-                ).alias("programs")
-            )
-        )
-        return details
-
     def _build_index_dataframe(
         self,
         dim_resources: DataFrame,
         fact_enrichment: Optional[DataFrame],
-        program_details: Optional[DataFrame],
     ) -> DataFrame:
+        """Xây dựng DataFrame cuối cùng để index vào Elasticsearch"""
         docs = dim_resources.alias("dim")
 
+        # Join với fact enrichment (source, language, dates, metrics)
         if fact_enrichment is not None:
             docs = docs.join(fact_enrichment.alias("fact"), "resource_key", "left")
-
-        if program_details is not None:
-            docs = docs.join(program_details.alias("programs_lookup"), "resource_key", "left")
 
         column_aliases = [
             ("resource_key", "resource_key"),
@@ -571,21 +573,9 @@ class OERElasticsearchIndexer:
             ("title", "title"),
             ("description", "description"),
             ("source_url", "source_url"),
-            ("publisher_name", "publisher_name"),
-            ("creator_names", "creator_names"),
-            ("matched_subjects", "matched_subjects"),
-            ("dc_xml_path", "dc_xml_path"),
-            ("bronze_source_path", "bronze_source_path"),
             ("source_code", "source_system"),
-            ("source_name", "source_name"),
             ("language_code", "language"),
             ("publication_date", "publication_date"),
-            ("ingested_date", "ingested_date"),
-            ("program_ids", "program_ids"),
-            ("matched_subjects_count", "matched_subjects_count"),
-            ("matched_programs_count", "matched_programs_count"),
-            ("data_quality_score", "data_quality_score"),
-            ("programs", "programs"),
         ]
 
         select_exprs = [F.col(col).alias(alias) for col, alias in column_aliases if col in docs.columns]
@@ -604,22 +594,26 @@ class OERElasticsearchIndexer:
         else:
             docs = docs.withColumn(creator_text_col, F.lit(""))
 
+        # Build search_text: Tổng hợp TẤT CẢ text có thể search
+        # Elasticsearch sẽ index field này để full-text search
+        # Search_text: chỉ giữ phần tiêu đề + mô tả (PDF sẽ nối thêm ở bước augment)
         docs = docs.withColumn(
             "search_text",
             F.concat_ws(
                 " ",
                 F.col("title"),
                 F.col("description"),
-                F.col(creator_text_col),
-                F.col("publisher_name"),
             ),
         ).drop(creator_text_col)
 
         return docs
 
-    # --------------------------------------------------------------- Indexing --
+    # Indexing
     def _ensure_index(self) -> None:
+        """Tạo Elasticsearch index với mapping (nếu chưa tồn tại)"""
         exists = self.es.indices.exists(index=self.index_name)
+        
+        # Xóa index cũ nếu RECREATE=1 (để rebuild từ đầu)
         if exists and self.recreate_index:
             print(f"Deleting existing index '{self.index_name}' (ELASTICSEARCH_RECREATE=1)")
             self.es.indices.delete(index=self.index_name)
@@ -629,90 +623,71 @@ class OERElasticsearchIndexer:
             print(f"Creating Elasticsearch index '{self.index_name}'")
             body = {
                 "settings": {
-                    "index": {"number_of_shards": 1, "number_of_replicas": 0},
+                    "index": {
+                        "number_of_shards": 1,  # 1 shard cho single node
+                        "number_of_replicas": 0  # Không cần replica (dev mode)
+                    },
                     "analysis": {
                         "analyzer": {
-                            "folding": {
-                                "tokenizer": "standard",
-                                "filter": ["lowercase", "asciifolding"],
+                            "autocomplete": {
+                                "tokenizer": "autocomplete",
+                                "filter": ["lowercase"]
+                            },
+                            "autocomplete_search": {
+                                "tokenizer": "lowercase"
+                            }
+                        },
+                        "tokenizer": {
+                            "autocomplete": {
+                                "type": "edge_ngram",
+                                "min_gram": 2,
+                                "max_gram": 10,
+                                "token_chars": ["letter", "digit"]
                             }
                         }
                     },
                 },
                 "mappings": {
                     "properties": {
+                        # Text fields - Full-text search với analyzer
                         "title": {
                             "type": "text",
-                            "analyzer": "folding",
-                            "fields": {"keyword": {"type": "keyword", "ignore_above": 256}},
+                            "analyzer": "english",
+                            "fields": {
+                                "keyword": {"type": "keyword", "ignore_above": 256},
+                                "autocomplete": {"type": "text", "analyzer": "autocomplete", "search_analyzer": "autocomplete_search"}
+                            },
                         },
-                        "description": {"type": "text", "analyzer": "folding"},
-                        "search_text": {"type": "text", "analyzer": "folding"},
-                        "publisher_name": {"type": "keyword"},
-                        "creator_names": {"type": "keyword"},
-                        "source_system": {"type": "keyword"},
-                        "source_name": {"type": "keyword"},
-                        "language": {"type": "keyword"},
-                        "program_ids": {"type": "integer"},
-                        "matched_subjects_count": {"type": "integer"},
-                        "matched_programs_count": {"type": "integer"},
-                        "data_quality_score": {"type": "float"},
-                        "publication_date": {"type": "date"},
-                        "ingested_date": {"type": "date"},
-                        "pdf_text": {"type": "text", "analyzer": "folding"},
+                        "description": {"type": "text", "analyzer": "english"},
+                        "search_text": {"type": "text", "analyzer": "english"},  # Field chính để search
+                        
+                        # Keyword fields - Filtering (exact match, aggregation)
+                        "source_system": {"type": "keyword"},  # mit_ocw, openstax, otl, textbook
+                        "language": {"type": "keyword"},  # en, vi
+                        "publication_date": {"type": "date"},  # Hỗ trợ recency boosting
+                        
+                        # PDF content fields
+                        "pdf_text": {"type": "text", "analyzer": "english"},  # Nội dung PDF
                         "pdf_titles": {"type": "keyword"},
                         "pdf_files": {"type": "keyword"},
-                        "matched_subjects": {
+                        
+                        # Nested PDF chunks for page-level search
+                        "pdf_chunks": {
                             "type": "nested",
                             "properties": {
-                                "subject_id": {"type": "integer"},
-                                "subject_name": {"type": "keyword"},
-                                "subject_name_en": {"type": "keyword"},
-                                "subject_code": {"type": "keyword"},
-                                "similarity": {"type": "float"},
-                                "matched_text": {"type": "text", "analyzer": "folding"},
-                            },
-                        },
-                        "programs": {
-                            "type": "nested",
-                            "properties": {
-                                "program_id": {"type": "integer"},
-                                "program_name": {"type": "keyword"},
-                                "program_code": {"type": "keyword"},
-                                "faculty_name": {"type": "keyword"},
-                            },
-                        },
+                                "text": {"type": "text", "analyzer": "english"},
+                                "page": {"type": "integer"},
+                                "file": {"type": "keyword"}
+                            }
+                        }
                     }
-                },
+                }
             }
             self.es.indices.create(index=self.index_name, **body)
 
-    def _sanitize_value(self, value: Any) -> Any:
-        if isinstance(value, (datetime, date)):
-            return value.isoformat()
-        if isinstance(value, Decimal):
-            return float(value)
-        if isinstance(value, list):
-            return [self._sanitize_value(v) for v in value]
-        if isinstance(value, dict):
-            return {k: self._sanitize_value(v) for k, v in value.items()}
-        return value
-
-    def _yield_actions(self, df: DataFrame) -> Iterator[Dict[str, Any]]:
-        for row in df.toLocalIterator():
-            payload = row.asDict(recursive=True)
-            self._augment_with_pdf_content(payload)
-            payload.pop("bronze_source_path", None)
-            doc_id = str(payload.pop("resource_key"))
-            source = {k: self._sanitize_value(v) for k, v in payload.items()}
-            yield {
-                "_op_type": "index",
-                "_index": self.index_name,
-                "_id": doc_id,
-                "_source": source,
-            }
-
     def _bulk_index(self, df: DataFrame) -> None:
+        """Bulk index documents vào Elasticsearch (batch processing)"""
+        # Cache DataFrame để không tính lại nhiều lần
         cached = df.persist()
         total = cached.count()
         if total == 0:
@@ -721,42 +696,61 @@ class OERElasticsearchIndexer:
             return
 
         print(f"Indexing {total:,} documents into '{self.index_name}' (batch={self.batch_size})")
+        
+        # Bulk index với batching (500 docs/request)
         success, errors = helpers.bulk(
             self.es,
-            self._yield_actions(cached),
-            chunk_size=self.batch_size,
-            request_timeout=self.request_timeout,
+            self._yield_actions(cached),  # Generator yield từng document
+            chunk_size=self.batch_size,  # 500 docs/batch
+            request_timeout=self.request_timeout,  # 120s timeout
         )
-        cached.unpersist()
+        
+        cached.unpersist()  # Giải phóng cache
+        
         if errors:
             print(f"[Warning] Elasticsearch bulk errors: {errors}")
         print(f"[Success] Indexed {success:,} documents into {self.index_name}")
 
-    # ------------------------------------------------------------------- Run --
+    def _yield_actions(self, df: DataFrame) -> Iterator[Dict[str, Any]]:
+        """Yield Elasticsearch bulk actions from a Spark DataFrame."""
+        for row in df.toLocalIterator():
+            doc = row.asDict(recursive=True)
+            doc = {k: v for k, v in doc.items() if v is not None}
+            self._augment_with_pdf_content(doc)
+            doc_id = doc.get("resource_key") or doc.get("resource_id")
+            yield {"_index": self.index_name, "_id": doc_id, "_source": doc}
+
     def run(self) -> None:
+        """Main function: Đồng bộ dữ liệu từ Gold layer sang Elasticsearch"""
         print("=" * 80)
         print("Starting Gold -> Elasticsearch sync")
         print("=" * 80)
 
+        # Bước 1: Load Gold tables (dimension và fact)
         dim_resources = self._load_table(self.dim_oer_resources_table, "dim_oer_resources")
         if dim_resources is None:
             print("[Error] dim_oer_resources missing; aborting sync")
             return
 
         fact_resources = self._load_table(self.fact_oer_resources_table, "fact_oer_resources")
-        dim_programs = self._load_table(self.dim_programs_table, "dim_programs")
         dim_sources = self._load_table(self.dim_sources_table, "dim_sources")
         dim_languages = self._load_table(self.dim_languages_table, "dim_languages")
         dim_date = self._load_table(self.dim_date_table, "dim_date")
 
+        # Bước 2: Join và enrich dữ liệu
         fact_enrichment = self._prepare_fact_enrichment(
             fact_resources, dim_sources, dim_languages, dim_date
         )
-        program_details = self._prepare_program_details(fact_resources, dim_programs)
 
-        docs = self._build_index_dataframe(dim_resources, fact_enrichment, program_details)
+        # Bước 3: Build search documents với search_text
+        docs = self._build_index_dataframe(dim_resources, fact_enrichment)
+        
+        # Bước 4: Tạo Elasticsearch index (nếu chưa có)
         self._ensure_index()
+        
+        # Bước 5: Bulk index documents vào Elasticsearch
         self._bulk_index(docs)
+        
         print("Gold -> Elasticsearch sync complete")
 
 
@@ -767,3 +761,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

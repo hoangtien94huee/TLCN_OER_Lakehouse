@@ -45,7 +45,7 @@ except ImportError:
 # Configuration constants
 BASE_URL = "https://open.umn.edu"
 
-# ✅ FAST MODE Configuration
+# FAST MODE Configuration
 FAST_MODE = os.getenv('OTL_FAST_MODE', 'true').lower() in ['1', 'true', 'yes']
 PARALLEL_MODE = os.getenv('OTL_PARALLEL', 'true').lower() in ['1', 'true', 'yes']
 MAX_WORKERS = int(os.getenv('OTL_MAX_WORKERS', '4'))
@@ -67,15 +67,7 @@ else:
     SCROLL_WAIT_SEC = 2.0
     PAGE_LOAD_WAIT_SEC = 1.0
 
-RETRY_BACKOFF_BASE_SEC = float(os.getenv('OTL_RETRY_BACKOFF_BASE_SEC', '2.0'))
-RETRY_BACKOFF_MAX_SEC = float(os.getenv('OTL_RETRY_BACKOFF_MAX_SEC', '10.0'))
-WAIT_UNTIL_CLEAR = (os.getenv('OTL_WAIT_UNTIL_CLEAR', 'false').lower() in ['1','true','yes'])
-WAIT_MAX_MINUTES = int(os.getenv('OTL_WAIT_MAX_MINUTES', '15'))
-FORCE_RANDOM_UA = (os.getenv('OTL_FORCE_RANDOM_UA', 'true').lower() in ['1','true','yes'])
-CUSTOM_UA = os.getenv('OTL_USER_AGENT', '').strip()
-PROXY_SERVER = os.getenv('OTL_PROXY', '').strip()
-BOOK_MAX_ATTEMPTS = int(os.getenv('OTL_BOOK_MAX_ATTEMPTS', '2' if FAST_MODE else '4'))
-RETRY_PDF_ON_MISS = (os.getenv('OTL_RETRY_PDF_ON_MISS', 'false' if FAST_MODE else 'true').lower() in ['1','true','yes'])
+BOOK_MAX_ATTEMPTS = 2 if FAST_MODE else 3
 
 # PDF Download Configuration
 DOWNLOAD_PDFS = not SKIP_PDF_DOWNLOAD
@@ -87,77 +79,18 @@ def _sleep(base_sec: float = DEFAULT_DELAY_BASE_SEC, jitter_sec: float = DEFAULT
     delay = max(0.0, base_sec) + max(0.0, jitter_sec) * random.random()
     time.sleep(delay)
 
-def _backoff_sleep(attempt_index: int) -> None:
-    """Exponential backoff sleep"""
-    delay = RETRY_BACKOFF_BASE_SEC * (2 ** max(0, attempt_index - 1))
-    time.sleep(min(delay, RETRY_BACKOFF_MAX_SEC))
-
-def _with_cache_bust(url: str) -> str:
-    """Add cache-busting timestamp to URL"""
-    if not url:
-        return url
-    ts = str(int(time.time() * 1000))
-    return f"{url}&ts={ts}" if ('?' in url) else f"{url}?ts={ts}"
-
 def _pick_user_agent() -> str:
-    """Pick random user agent"""
-    if CUSTOM_UA:
-        return CUSTOM_UA
-    ua_pool = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.127 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.127 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
-    ]
-    return random.choice(ua_pool)
+    """Return modern Chrome user agent"""
+    return 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.127 Safari/537.36'
 
 def _md5_id(url: str, title: str) -> str:
     """Generate MD5 hash ID"""
     return hashlib.md5(f"{url}_{title}".encode("utf-8")).hexdigest()
 
-def _ensure_not_retry_later(driver) -> BeautifulSoup:
-    """Ensure current page is not a 'Retry later' placeholder"""
-    soup = BeautifulSoup(driver.page_source, 'html.parser')
-    text = soup.get_text()
-    if 'Retry later' not in text:
-        return soup
-    
-    if WAIT_UNTIL_CLEAR:
-        print("[OTL] [Wait] 'Retry later' detected — waiting until it clears...")
-        start_ts = time.time()
-        attempt = 1
-        while True: 
-            if time.time() - start_ts > WAIT_MAX_MINUTES * 60:
-                print("[OTL] [Wait] Max wait time reached; proceeding.")
-                return BeautifulSoup(driver.page_source, 'html.parser')
-            _backoff_sleep(attempt)
-            attempt += 1
-            try:
-                driver.refresh()
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            except Exception:
-                pass
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            if 'Retry later' not in soup.get_text():
-                print("[OTL] [Wait] Cleared; continue.")
-                return soup
-    else:
-        print("[OTL] [Leaf] Hit 'Retry later', applying backoff...")
-        for attempt in range(1, 4):
-            _backoff_sleep(attempt)
-            try:
-                driver.refresh()
-                WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            except Exception:
-                pass
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
-            if 'Retry later' not in soup.get_text():
-                break
-        return soup
-
-def _download_pdf(pdf_url: str, book_id: str, title: str, minio_client=None, bucket: str = 'oer-lakehouse') -> bool:
-    """Download PDF file and upload to MinIO"""
+def _download_pdf(pdf_url: str, book_id: str, title: str, minio_client=None, bucket: str = 'oer-lakehouse') -> str:
+    """Download PDF file and upload to MinIO. Returns MinIO path or empty string."""
     if SKIP_PDF_DOWNLOAD:
-        return False
+        return ""
         
     try:
         safe_title = "".join(c for c in title if c.isalnum() or c in (' ', '-', '_')).strip()
@@ -197,7 +130,7 @@ def _download_pdf(pdf_url: str, book_id: str, title: str, minio_client=None, buc
                     if attempt < max_attempts - 1:
                         time.sleep(1)
                         continue
-                    return False
+                    return ""
                 
                 if FAST_MODE:
                     print(f"[PDF] ✓ {filename[:30]}... ({file_size:.1f}MB)")
@@ -205,15 +138,17 @@ def _download_pdf(pdf_url: str, book_id: str, title: str, minio_client=None, buc
                     print(f"[OTL] [PDF] ✓ Downloaded: {filename} ({file_size:.2f} MB)")
                 
                 if minio_client:
-                    minio_path = f"bronze/otl-pdfs/{filename}"
+                    minio_path = f"bronze/otl/otl-pdfs/{filename}"
                     try:
                         minio_client.fput_object(bucket, minio_path, filepath, content_type='application/pdf')
                         if not FAST_MODE:
                             print(f"[OTL] [PDF] ✓ Uploaded to MinIO: {minio_path}")
+                        return f"s3a://{bucket}/{minio_path}"
                     except S3Error as e:
                         print(f"[PDF] MinIO upload failed: {e}")
+                        return ""
                 
-                return True
+                return ""
                 
             except requests.exceptions.RequestException as e:
                 if attempt < max_attempts - 1:
@@ -234,7 +169,7 @@ class OTLScraperStandalone:
         self.base_url = BASE_URL + "/opentextbooks"
         self.source = "otl"
         self.delay = DEFAULT_DELAY_BASE_SEC
-        self.max_books = int(os.getenv('MAX_DOCUMENTS', 999999))  # No limit by default
+        self.max_books = int(os.getenv('MAX_DOCUMENTS', '100'))  # Total limit across all subjects
         self.use_selenium = SELENIUM_AVAILABLE
         
         self.bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
@@ -246,6 +181,13 @@ class OTLScraperStandalone:
         self.pdf_downloaded_count = 0
         self.pdf_failed_count = 0
         
+        # Load existing book IDs to avoid duplicates
+        self.existing_book_ids = self._load_existing_book_ids()
+        self.total_scraped = 0  # Track total books scraped in this run
+        
+        if self.existing_book_ids:
+            print(f"[OTL] Loaded {len(self.existing_book_ids)} existing books; duplicates will be skipped.")
+        
         # Get subjects dynamically
         self.subjects = self._get_subjects()
         
@@ -253,7 +195,7 @@ class OTLScraperStandalone:
         parallel_str = f"PARALLEL ({MAX_WORKERS} workers)" if PARALLEL_MODE else "SEQUENTIAL"
         
         print(f"OTL Scraper initialized - {mode_str} MODE - {parallel_str}")
-        print(f"Max books per subject: {self.max_books if self.max_books < 999999 else 'UNLIMITED'}")
+        print(f"Max books TOTAL: {self.max_books if self.max_books < 999999 else 'UNLIMITED'}")
         print(f"Selenium: {self.use_selenium}")
         print(f"Download PDFs: {DOWNLOAD_PDFS}")
         print(f"Subjects to scrape: {len(self.subjects)}")
@@ -378,18 +320,63 @@ class OTLScraperStandalone:
             endpoint = os.getenv('MINIO_ENDPOINT', 'localhost:9000')
             access_key = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
             secret_key = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
-            secure = os.getenv('MINIO_SECURE', '0') == '1'
+            secure = os.getenv('MINIO_SECURE', '0').lower() in ['1', 'true', 'yes']
             
             client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
             
             if not client.bucket_exists(self.bucket):
                 client.make_bucket(self.bucket)
-                print(f"Created bucket: {self.bucket}")
+                print(f"[MinIO] Created bucket: {self.bucket}")
             
             return client
         except Exception as e:
-            print(f"MinIO setup failed: {e}")
+            print(f"[MinIO] Setup failed: {e}")
             return None
+    
+    def _load_existing_book_ids(self) -> set:
+        """Load existing book IDs from previous scrapes to avoid duplicates"""
+        existing_ids = set()
+        
+        # Note: OTL saves to MinIO directly, not local files
+        # We'll check MinIO for existing JSON files
+        if not self.minio_client:
+            return existing_ids
+        
+        try:
+            # List all OTL JSON files in bronze layer
+            objects = self.minio_client.list_objects(
+                self.bucket,
+                prefix='bronze/otl/json/',
+                recursive=True
+            )
+            
+            for obj in objects:
+                if obj.object_name.endswith('.json'):
+                    try:
+                        # Download and parse JSON
+                        response = self.minio_client.get_object(self.bucket, obj.object_name)
+                        content = response.read().decode('utf-8')
+                        response.close()
+                        response.release_conn()
+                        
+                        # Parse JSON Array format (OTL uses array, not lines)
+                        records = json.loads(content)
+                        
+                        if isinstance(records, list):
+                            for record in records:
+                                if isinstance(record, dict):
+                                    book_id = record.get('id')
+                                    if book_id:
+                                        existing_ids.add(book_id)
+                    
+                    except Exception as e:
+                        print(f"[OTL] Warning: Could not read {obj.object_name}: {e}")
+                        continue
+        
+        except Exception as e:
+            print(f"[OTL] Warning: Error scanning existing files: {e}")
+        
+        return existing_ids
     
     def _init_driver(self, headless: bool = True):
         """Initialize Selenium Chrome driver"""
@@ -408,19 +395,14 @@ class OTLScraperStandalone:
             options.add_experimental_option('excludeSwitches', ['enable-automation'])
             options.add_experimental_option('useAutomationExtension', False)
             
-            # ✅ FAST MODE: Disable more features
+            # FAST MODE: Disable more features
             if FAST_MODE:
                 options.add_argument("--disable-extensions")
                 options.add_argument("--disable-gpu")
                 options.add_argument("--disable-software-rasterizer")
-                options.add_argument("--disable-dev-shm-usage")
 
-            ua = _pick_user_agent() if FORCE_RANDOM_UA or CUSTOM_UA else None
-            if ua:
-                options.add_argument(f"--user-agent={ua}")
-
-            if PROXY_SERVER:
-                options.add_argument(f"--proxy-server={PROXY_SERVER}")
+            # Set user agent
+            options.add_argument(f"--user-agent={_pick_user_agent()}")
             
             try:
                 prefs = {
@@ -543,7 +525,7 @@ class OTLScraperStandalone:
                 pdf_url = urljoin(BASE_URL, a.get('href', ''))
                 break
 
-        # ✅ EXACT FORMAT MATCH - Simple object
+        # EXACT FORMAT MATCH - Simple object
         doc = {
             "id": _md5_id(book_url, title or book_url),
             "title": title,
@@ -580,7 +562,7 @@ class OTLScraperStandalone:
             WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
             time.sleep(1 if FAST_MODE else 3)
             
-            # ✅ FAST SCROLLING
+            # FAST SCROLLING
             if FAST_MODE:
                 print(f"[{subject_name}] Fast scrolling...")
             else:
@@ -596,7 +578,7 @@ class OTLScraperStandalone:
             while True:
                 scroll_attempt += 1
                 
-                # ✅ AGGRESSIVE SCROLL in fast mode
+                # AGGRESSIVE SCROLL in fast mode
                 if FAST_MODE:
                     for _ in range(3):
                         driver.execute_script("window.scrollBy(0, 2000);")
@@ -628,7 +610,7 @@ class OTLScraperStandalone:
                 
                 last_height = new_height
             
-            # ✅ COLLECT ALL BOOK URLs
+            # COLLECT ALL BOOK URLs
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             urls = []
             
@@ -655,12 +637,24 @@ class OTLScraperStandalone:
             urls = list(dict.fromkeys(urls))
             
             print(f"[{subject_name}] ✓ {len(urls)} books found")
-            
-            if len(urls) > self.max_books:
-                urls = urls[:self.max_books]
 
-            # ✅ VISIT EACH BOOK
+            # VISIT EACH BOOK
+            skipped_count = 0
             for idx, url in enumerate(urls, 1):
+                # Check if we've reached the TOTAL limit across all subjects
+                if self.total_scraped >= self.max_books:
+                    print(f"[{subject_name}] Reached max books limit ({self.max_books}), stopping")
+                    break
+                
+                # Generate book ID to check if already scraped
+                book_id = hashlib.md5(f"otl_{url}".encode('utf-8')).hexdigest()
+                
+                if book_id in self.existing_book_ids:
+                    skipped_count += 1
+                    if not FAST_MODE:
+                        print(f"[{subject_name}] [{idx}/{len(urls)}] Skipping already scraped: {url}")
+                    continue
+                
                 if FAST_MODE:
                     if idx % 10 == 0 or idx == 1 or idx == len(urls):
                         print(f"[{subject_name}] [{idx}/{len(urls)}]")
@@ -679,22 +673,27 @@ class OTLScraperStandalone:
                     
                     # Download PDF
                     if doc and DOWNLOAD_PDFS and doc.get('url_pdf'):
-                        pdf_success = _download_pdf(
+                        pdf_path = _download_pdf(
                             doc['url_pdf'],
                             doc['id'],
                             doc.get('title', 'unknown'),
                             self.minio_client,
                             self.bucket
                         )
-                        doc['pdf_downloaded'] = pdf_success
+                        doc['pdf_downloaded'] = bool(pdf_path)
+                        doc['pdf_path'] = pdf_path if pdf_path else None
                         
-                        if pdf_success:
+                        if pdf_path:
                             self.pdf_downloaded_count += 1
                         else:
                             self.pdf_failed_count += 1
                     
                     if doc:
                         results.append(doc)
+                        self.total_scraped += 1  # Track total across all subjects
+                        # Add to existing set to prevent duplicates in this run
+                        self.existing_book_ids.add(doc.get('id', book_id))
+                        
                         if not FAST_MODE:
                             print(f"[OTL] ✓ {doc.get('title', 'N/A')}")
                         
@@ -703,7 +702,9 @@ class OTLScraperStandalone:
                         print(f"[OTL] ✗ Failed: {e}")
                     continue
 
-            print(f"[{subject_name}] ✓ Complete: {len(results)} books")
+            if skipped_count > 0:
+                print(f"[{subject_name}] Skipped {skipped_count} books already scraped")
+            print(f"[{subject_name}] ✓ Complete: {len(results)} new books (total scraped: {self.total_scraped})")
             return results
             
         except Exception as e:
@@ -725,47 +726,49 @@ class OTLScraperStandalone:
         )
     
     def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "otl", logical_date: str = None):
-        """Save to MinIO bronze layer - EXACT FORMAT MATCH"""
-        if not self.minio_client or not documents:
-            print("MinIO not available or no documents")
+        """Save data to local file and upload to MinIO (matching MIT OCW pattern)"""
+        if not documents:
+            print("No documents to save")
             return ""
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        # ✅ Match exact filename format: otl_bronze_merged_YYYYMMDD_HHMMSS.json
+        # Match exact filename format: otl_bronze_merged_YYYYMMDD_HHMMSS.json
         filename = f"{source}_bronze_merged_{timestamp}.json"
-        object_name = f"bronze/{source}/json/{filename}"
         
-        os.makedirs('/tmp', exist_ok=True)
-        tmp_path = os.path.join('/tmp', filename)
+        # Save to local file first (same as MIT OCW)
+        local_dir = f"/opt/airflow/scraped_data/{source}"
+        os.makedirs(local_dir, exist_ok=True)
+        output_file = os.path.join(local_dir, filename)
         
         try:
-            # ✅ SAVE AS PURE JSON ARRAY - NO WRAPPER METADATA
+            # SAVE AS PURE JSON ARRAY - NO WRAPPER METADATA
             # Format: [ {...}, {...}, {...} ]
-            with open(tmp_path, 'w', encoding='utf-8') as f:
+            with open(output_file, 'w', encoding='utf-8') as f:
                 json.dump(documents, f, ensure_ascii=False, indent=2)
             
-            self.minio_client.fput_object(
-                self.bucket, 
-                object_name, 
-                tmp_path, 
-                content_type='application/json'
-            )
-            os.remove(tmp_path)
+            print(f"\n[Local] Saved: {output_file}")
+            print(f"[Local] Books: {len(documents)}")
             
-            print(f"\n[MinIO] Saved: s3://{self.bucket}/{object_name}")
-            print(f"[MinIO] Books: {len(documents)}")
-            if DOWNLOAD_PDFS:
-                print(f"[MinIO] PDFs Downloaded: {self.pdf_downloaded_count}")
-                print(f"[MinIO] PDFs Failed: {self.pdf_failed_count}")
-            
-            return object_name
+            # Upload to MinIO if available
+            if self.minio_client:
+                object_name = f"bronze/{source}/json/{filename}"
+                self.minio_client.fput_object(
+                    self.bucket, 
+                    object_name, 
+                    output_file, 
+                    content_type='application/json'
+                )
+                print(f"[MinIO] Uploaded: s3://{self.bucket}/{object_name}")
+                if DOWNLOAD_PDFS:
+                    print(f"[MinIO] PDFs Downloaded: {self.pdf_downloaded_count}")
+                    print(f"[MinIO] PDFs Failed: {self.pdf_failed_count}")
+                return object_name
+            else:
+                print("[MinIO] Not available, using local file only")
+                return output_file
             
         except Exception as e:
-            print(f"[MinIO] Error: {e}")
-            try:
-                os.remove(tmp_path)
-            except:
-                pass
+            print(f"[Save Error] {e}")
             return ""
     
     def run_parallel(self):
@@ -831,6 +834,13 @@ class OTLScraperStandalone:
             'pdf_downloaded': self.pdf_downloaded_count,
             'execution_time': end_time - start_time
         }
+    
+    def run(self):
+        """Main execution wrapper - automatically chooses parallel or sequential mode"""
+        if PARALLEL_MODE:
+            return self.run_parallel()
+        else:
+            return self.run_sequential()
     
     def run_sequential(self):
         """Main execution - SEQUENTIAL MODE"""

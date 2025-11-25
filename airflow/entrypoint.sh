@@ -9,7 +9,11 @@ echo "PostgreSQL is up - continuing"
 
 # Initialize MinIO buckets and lakehouse structure
 echo "Initializing MinIO lakehouse structure..."
-python3 /opt/airflow/scripts/create_schema.py || echo "MinIO init completed"
+if [ -f /opt/airflow/scripts/create_schema.py ]; then
+    python3 /opt/airflow/scripts/create_schema.py || echo "MinIO init completed"
+else
+    echo "create_schema.py not found, skipping MinIO init"
+fi
 
 # Initialize Airflow database
 echo "Initializing Airflow database..."

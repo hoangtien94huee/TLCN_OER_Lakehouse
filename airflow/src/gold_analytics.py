@@ -67,9 +67,22 @@ class GoldAnalyticsBuilder:
         print(f"Gold Analytics Builder initialized: {self.gold_catalog}.{self.gold_database}")
 
     def _create_spark_session(self) -> SparkSession:
+        # Use local JARs instead of downloading from Maven
+        jars_dir = "/opt/airflow/jars"
+        local_jars = ",".join([
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",
+            f"{jars_dir}/hadoop-aws-3.3.4.jar",
+            f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
+        ])
+        
+        print(f"[Spark] Using local JARs: {local_jars}")
+        
         session = (
             SparkSession.builder.appName("OER-Gold-Analytics")
-            .master(os.getenv("SPARK_MASTER", "local[*]"))
+            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Limit to 2 cores to reduce memory pressure
+            .config("spark.jars", local_jars)  # Load JARs into classpath
+            .config("spark.driver.extraClassPath", local_jars)  # Add to driver classpath
+            .config("spark.executor.extraClassPath", local_jars)  # Add to executor classpath
             .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
             .config(f"spark.sql.catalog.{self.silver_catalog}", "org.apache.iceberg.spark.SparkCatalog")
             .config(f"spark.sql.catalog.{self.silver_catalog}.type", "hadoop")
@@ -83,6 +96,7 @@ class GoldAnalyticsBuilder:
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
             .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8"))  # Reduced for local mode
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
             .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))

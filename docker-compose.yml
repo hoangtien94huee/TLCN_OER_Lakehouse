@@ -59,6 +59,7 @@ services:
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/src:/opt/airflow/src
       - ./data/iceberg-jars:/opt/airflow/jars:ro  
+      - ./data/reference:/opt/airflow/reference:ro
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -90,8 +91,8 @@ services:
       - SPARK_DEPLOY_MODE=client
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
-      - PYSPARK_SUBMIT_ARGS=--packages org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565 pyspark-shell
+      # Use local JARs instead of downloading from Maven
+      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.4.3.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
       # Spark Memory Configuration (reduce to fit cluster)
       - SPARK_DRIVER_MEMORY=1g
       - SPARK_EXECUTOR_MEMORY=1g
@@ -201,7 +202,6 @@ services:
       - DREMIO_FLIGHT_ENCRYPTION_ENABLED=false
     volumes:
       - dremio_data:/opt/dremio/data
-      - ./config/dremio:/opt/dremio/conf
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9047"]
@@ -256,11 +256,21 @@ services:
       - ELASTICSEARCH_INDEX=oer_resources
       - MINIO_BROWSER_ENDPOINT=http://localhost:9000/browser
       - MINIO_BUCKET=oer-lakehouse
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_PUBLIC_ENDPOINT=http://localhost:9000
+      - MINIO_SIGNING_ENDPOINT=http://minio:9000
+      - MINIO_ACCESS_KEY=minioadmin
+      - MINIO_SECRET_KEY=minioadmin
+      - MINIO_SECURE=0
+    extra_hosts:
+      - "localhost:host-gateway"
     depends_on:
       elasticsearch:
         condition: service_healthy
     ports:
       - "8088:8080"
+    volumes:
+      - ./data/reference:/app/reference:ro
     restart: unless-stopped
 
 volumes:

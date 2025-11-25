@@ -51,12 +51,6 @@ class SchemaCreatorStandalone:
                 SparkSession.builder.appName("OER-Schema-Creator")
                 .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))
                 .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
-                .config("spark.sql.catalog.lakehouse", "org.apache.iceberg.spark.SparkCatalog")
-                .config("spark.sql.catalog.lakehouse.type", "hadoop")
-                .config(
-                    "spark.sql.catalog.lakehouse.warehouse",
-                    f"s3a://{os.getenv('MINIO_BUCKET', 'oer-lakehouse')}/warehouse/",
-                )
                 .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
                 .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
                 .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
@@ -164,11 +158,7 @@ class SchemaCreatorStandalone:
                 "silver/oer_language_normalized/",
                 "gold/",
                 "gold/analytics/",
-                "gold/ml_features/",
-                "warehouse/",
-                "warehouse/lakehouse/",
-                "warehouse/lakehouse/default/",
-                "warehouse/lakehouse/gold/"
+                "gold/ml_features/"
             ]
             
             for directory in directories:

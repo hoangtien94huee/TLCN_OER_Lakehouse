@@ -13,6 +13,7 @@ import time
 import hashlib
 import requests
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict, Any
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -43,7 +44,7 @@ except ImportError:
 class OpenStaxScraperStandalone:
     """Standalone OpenStax scraper for bronze layer"""
     
-    def __init__(self, delay: float = 2.0, use_selenium: bool = True):
+    def __init__(self, delay: float = 2.0, use_selenium: bool = True, max_documents: int = None):
         # Session cho requests thông thường
         self.session = requests.Session()
         self.session.headers.update({
@@ -59,12 +60,13 @@ class OpenStaxScraperStandalone:
         self.documents = []
         self.scraped_urls = set()
         self.delay = delay
+        self.max_documents = max_documents
         
-        # Tạo thư mục output
-        self.output_dir = "/tmp/scraped_data"
+        # Tạo thư mục output local (backup)
+        self.output_dir = "/opt/airflow/scraped_data/openstax"
         os.makedirs(self.output_dir, exist_ok=True)
         
-        # MinIO setup
+        # MinIO setup - MUST BE BEFORE _load_existing_book_ids()
         self.minio_client = None
         self.minio_bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
         self.bucket = self.minio_bucket  # Alias để tương thích
@@ -79,15 +81,20 @@ class OpenStaxScraperStandalone:
                 )
                 if not self.minio_client.bucket_exists(self.minio_bucket):
                     self.minio_client.make_bucket(self.minio_bucket)
-                print(" MinIO client initialized successfully")
+                print("✓ MinIO client initialized successfully")
             except Exception as e:
-                print(f" Error initializing MinIO client: {e}")
+                print(f"⚠ Error initializing MinIO client: {e}")
                 self.minio_enable = False
         elif self.minio_enable and not MINIO_AVAILABLE:
-            print(" MinIO library not available, disabling MinIO features")
+            print("⚠ MinIO library not available, disabling MinIO features")
             self.minio_enable = False
         
-        print(f" OpenStax Scraper initialized - Selenium: {self.use_selenium}, MinIO: {self.minio_enable}")
+        # Load existing book IDs to avoid duplicates (requires minio_client)
+        self.existing_book_ids = self._load_existing_book_ids()
+        if self.existing_book_ids:
+            print(f"[OpenStax] Loaded {len(self.existing_book_ids)} existing books; duplicates will be skipped.")
+        
+        print(f" OpenStax Scraper initialized - Selenium: {self.use_selenium}, MinIO: {self.minio_enable}, Max docs: {self.max_documents or 'UNLIMITED'}")
     
     def setup_selenium(self):
         """Thiết lập Selenium WebDriver"""
@@ -228,8 +235,60 @@ class OpenStaxScraperStandalone:
     
     def create_doc_hash(self, url: str, title: str) -> str:
         """Tạo hash unique cho document"""
-        unique_string = f"{url}_{title}"
+        unique_string = f"openstax_{url}"  # Use source prefix for consistency
         return hashlib.md5(unique_string.encode('utf-8')).hexdigest()
+    
+    def _load_existing_book_ids(self) -> set:
+        """Load existing book IDs from MinIO bronze layer"""
+        existing_ids = set()
+        
+        if not self.minio_client:
+            return existing_ids
+        
+        try:
+            # List all JSON files in bronze/openstax/json/ prefix
+            objects = self.minio_client.list_objects(
+                self.minio_bucket,
+                prefix='bronze/openstax/json/',
+                recursive=True
+            )
+            
+            for obj in objects:
+                if not obj.object_name.endswith('.json'):
+                    continue
+                
+                try:
+                    # Download and parse JSON file
+                    response = self.minio_client.get_object(self.minio_bucket, obj.object_name)
+                    content = response.read().decode('utf-8').strip()
+                    response.close()
+                    response.release_conn()
+                    
+                    if not content:
+                        continue
+                    
+                    # Parse JSON Array format (not JSON Lines)
+                    records = json.loads(content)
+                    if not isinstance(records, list):
+                        records = [records]
+                    
+                    # Extract book IDs
+                    for record in records:
+                        if isinstance(record, dict):
+                            book_id = record.get('id')
+                            if not book_id and record.get('url'):
+                                book_id = self.create_doc_hash(record['url'], record.get('title', ''))
+                            if book_id:
+                                existing_ids.add(book_id)
+                
+                except Exception as e:
+                    print(f"[OpenStax] Warning: Could not read {obj.object_name}: {e}")
+                    continue
+        
+        except Exception as e:
+            print(f"[OpenStax] Warning: Error scanning MinIO bronze files: {e}")
+        
+        return existing_ids
     
     def parse_author_info(self, author_text: str, selector_type: str = '') -> List[str]:
         """Parse thông tin tác giả từ text, xử lý đặc biệt cho loc-senior-author"""
@@ -304,40 +363,45 @@ class OpenStaxScraperStandalone:
         base_url = "https://openstax.org"
         book_urls = set()  # Sử dụng set để tránh duplicate
         
-        # Phase 1: Cào trang chủ subjects để tìm tất cả categories
-        print("Phase 1: Tìm tất cả subject categories...")
+        # Strategy: Cào trang /subjects để lấy danh sách subject categories
+        # Sau đó cào mỗi subject để lấy sách (OpenStax là SPA nên view-all không work)
+        print("Phase 1: Lấy danh sách subject categories...")
         subjects_page = f"{base_url}/subjects"
         soup = self.get_page(subjects_page)
         
-        subject_urls = [subjects_page]  # Bắt đầu với trang subjects chính
-        
+        subject_urls = []
         if soup:
-            # Tìm tất cả link subjects
+            # Tìm các link subjects (bỏ qua hash fragments và view-all)
             subject_links = soup.find_all('a', href=True)
             for link in subject_links:
                 href = link.get('href')
                 if href and '/subjects/' in href and href != '/subjects':
-                    # Bỏ qua URLs có hash fragments (anchor links)
-                    if '#' in href:
+                    # Bỏ qua hash fragments và view-all (SPA không work)
+                    if '#' in href or 'view-all' in href:
                         continue
                     
                     full_url = urljoin(base_url, href)
-                    # Đảm bảo không có hash fragments trong full URL
                     clean_url = full_url.split('#')[0]
                     
                     if clean_url not in subject_urls:
                         subject_urls.append(clean_url)
-                        print(f"Tìm thấy subject: {href}")
+                        print(f"  ✓ Subject: {href}")
         
-        # Phase 2: Cào từng subject page để tìm sách (bỏ qua hash URLs)
+        # Nếu không tìm thấy subjects, dùng hardcoded list
+        if not subject_urls:
+            print("⚠ Không tìm thấy subjects, dùng danh sách mặc định...")
+            subject_urls = [
+                f"{base_url}/subjects/math",
+                f"{base_url}/subjects/science",
+                f"{base_url}/subjects/social-sciences",
+                f"{base_url}/subjects/humanities",
+                f"{base_url}/subjects/business",
+            ]
+        
+        # Phase 2: Cào từng subject page
         print(f"Phase 2: Cào {len(subject_urls)} subject pages...")
         for i, subject_url in enumerate(subject_urls, 1):
-            # Bỏ qua URLs có hash fragments
-            if '#' in subject_url:
-                print(f"Bỏ qua hash URL {i}/{len(subject_urls)}: {subject_url}")
-                continue
-                
-            print(f"Đang cào subject {i}/{len(subject_urls)}: {subject_url}")
+            print(f"  [{i}/{len(subject_urls)}] {subject_url}")
             soup = self.get_page(subject_url)
             if not soup:
                 continue
@@ -367,23 +431,25 @@ class OpenStaxScraperStandalone:
                     # Chỉ lấy links đến books và có text là tên sách thực sự
                     if '/books/' in href or '/details/books/' in href:
                         # Kiểm tra xem có phải là tên sách thực sự không
-                        # Tên sách thường có độ dài hợp lý và không chứa các từ khóa action
                         if (len(link_text) > 10 and len(link_text) < 100 and 
                             not any(action in link_text_lower for action in ['click', 'here', 'more', 'view', 'get', 'access'])):
                             
                             full_url = urljoin(base_url, href)
-                            # Lưu cả URL và tên sách để kiểm tra
                             old_size = len(book_urls)
                             book_urls.add(full_url)
                             
-                            # Chỉ in ra nếu thực sự thêm URL mới
                             if len(book_urls) > old_size:
-                                print(f"  Tìm thấy sách: {link_text}")
+                                print(f"    → {link_text[:50]}")
             
-            time.sleep(1)  # Delay giữa các subject pages
+            # Small delay between subjects
+            if i < len(subject_urls):
+                time.sleep(0.5)
+            # Small delay between subjects
+            if i < len(subject_urls):
+                time.sleep(0.5)
         
-        # Phase 3: Lọc và làm sạch URLs
-        print("Phase 3: Làm sạch danh sách URLs...")
+        # Phase 3: Làm sạch danh sách URLs
+        print(f"Phase 3: Làm sạch {len(book_urls)} book URLs...")
         clean_book_urls = []
         for url in book_urls:
             # Loại bỏ parameters không cần thiết
@@ -395,14 +461,29 @@ class OpenStaxScraperStandalone:
         
         print(f"Tìm thấy {len(clean_book_urls)} sách unique từ Selenium")
         
+        # Apply max_documents limit
+        if self.max_documents and len(clean_book_urls) > self.max_documents:
+            print(f"Limiting to {self.max_documents} books (found {len(clean_book_urls)})")
+            clean_book_urls = clean_book_urls[:self.max_documents]
+        
         # Phase 4: Cào chi tiết từng sách
         print("Phase 4: Cào chi tiết từng sách...")
+        skipped_books = 0
         for i, book_url in enumerate(clean_book_urls, 1):
             try:
-                print(f"Đang cào sách {i}/{len(clean_book_urls)}: {book_url}")
+                # Check if already scraped
+                book_hash = self.create_doc_hash(book_url, "")
+                if book_hash in self.existing_book_ids:
+                    skipped_books += 1
+                    print(f"[{i}/{len(clean_book_urls)}] Skipping already scraped book: {book_url}")
+                    continue
+                
+                print(f"[{i}/{len(clean_book_urls)}] Đang cào sách: {book_url}")
                 doc = self.scrape_openstax_book(book_url)
                 if doc:
                     documents.append(doc)
+                    # Add to existing set to prevent duplicates in this run
+                    self.existing_book_ids.add(doc.get('id', book_hash))
                 time.sleep(self.delay)
                 
             except KeyboardInterrupt:
@@ -416,6 +497,10 @@ class OpenStaxScraperStandalone:
             except Exception as e:
                 print(f"Lỗi khi cào sách {book_url}: {e}")
                 continue
+        
+        if skipped_books > 0:
+            print(f"\n[OpenStax] Skipped {skipped_books} books already scraped")
+        print(f"[OpenStax] Successfully scraped {len(documents)} new books")
         
         return documents
     
@@ -629,43 +714,38 @@ class OpenStaxScraperStandalone:
             return None
     
     def save_to_minio(self, documents: List[Dict[str, Any]], source: str = "openstax", logical_date: str = None, file_type: str = "books"):
-        """Lưu dữ liệu vào MinIO với đường dẫn có tổ chức theo chuẩn bronze layer"""
-        if not self.minio_enable or not self.minio_client or not documents:
-            print("MinIO không được bật hoặc không có dữ liệu để lưu")
+        """Save data to local file and upload to MinIO (matching MIT OCW pattern)"""
+        if not documents:
+            print("No documents to save")
             return ""
         
-        # Tạo filename theo chuẩn bronze layer giống MIT OCW
+        # Create filename matching bronze layer standard
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{source}_bronze_{timestamp}.json"
-        object_name = f"bronze/{source}/json/{filename}"
         
-        # Tạo temporary file
-        os.makedirs('/tmp', exist_ok=True) if os.name != 'nt' else os.makedirs('temp', exist_ok=True)
-        tmp_dir = '/tmp' if os.name != 'nt' else 'temp'
-        tmp_path = os.path.join(tmp_dir, filename)
+        # Save to local file first (same as MIT OCW)
+        output_file = Path(self.output_dir) / filename
+        output_file.parent.mkdir(exist_ok=True, parents=True)
         
-        try:
-            # Ghi dữ liệu vào temp file theo format JSON array (giống MIT OCW)
-            with open(tmp_path, 'w', encoding='utf-8') as f:
-                json.dump(documents, f, ensure_ascii=False, indent=2)
-            
-            # Upload lên MinIO với organized path
-            self.minio_client.fput_object(self.minio_bucket, object_name, tmp_path)
-            os.remove(tmp_path)
-            
-            print(f"[MinIO] OpenStax saved: s3://{self.minio_bucket}/{object_name}")
-            print(f"[MinIO] Total {len(documents)} books saved")
-            
-            return object_name
-            
-        except Exception as e:
-            print(f"[MinIO] Lỗi khi lưu: {e}")
-            # Vẫn cố gắng xóa temp file
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(documents, f, ensure_ascii=False, indent=2)
+        
+        print(f"[Local] Saved: {output_file}")
+        print(f"[Local] Total {len(documents)} books")
+        
+        # Upload to MinIO if available
+        if self.minio_enable and self.minio_client:
             try:
-                os.remove(tmp_path)
-            except:
-                pass
-        return ""
+                object_name = f"bronze/{source}/json/{filename}"
+                self.minio_client.fput_object(self.minio_bucket, object_name, str(output_file))
+                print(f"[MinIO] Uploaded: s3://{self.minio_bucket}/{object_name}")
+                return object_name
+            except Exception as e:
+                print(f"[MinIO] Upload failed: {e}")
+                return str(output_file)
+        else:
+            print("[MinIO] Not available, using local file only")
+            return str(output_file)
     
     def cleanup(self):
         """Dọn dẹp resources"""

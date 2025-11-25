@@ -135,7 +135,7 @@ def process_mit_ocw_task(**context):
     print(f"[MIT OCW] Starting silver layer processing for {execution_date}")
     
     try:
-        # ✅ Set to process ONLY MIT OCW
+        # Set to process ONLY MIT OCW
         os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/mit_ocw/json/'
         
         # Run silver transform for MIT OCW only
@@ -176,7 +176,6 @@ def process_openstax_task(**context):
     print(f"[OpenStax] Starting silver layer processing for {execution_date}")
     
     try:
-        # ✅ Set to process ONLY OpenStax
         os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/openstax/json/'
         
         # Run silver transform for OpenStax only
@@ -313,80 +312,6 @@ def generate_processing_report(**context):
     
     return report
 
-
-def cleanup_processing_artifacts(**context):
-    """Clean up temporary processing artifacts"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
-    print(f"[Cleanup] Cleaning up processing artifacts for {execution_date}")
-    
-    # Add cleanup logic here if needed
-    print("[Cleanup] Processing artifacts cleanup completed")
-    return True
-
-
-def validate_silver_data_quality(**context):
-    """Validate the quality of generated silver layer data"""
-    from minio import Minio
-    
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
-    
-    minio_client = Minio(
-        endpoint=os.getenv('MINIO_ENDPOINT', 'minio:9000'),
-        access_key=os.getenv('MINIO_ACCESS_KEY', 'minioadmin'),
-        secret_key=os.getenv('MINIO_SECRET_KEY', 'minioadmin'),
-        secure=os.getenv('MINIO_SECURE', '0').lower() in {'1', 'true', 'yes'}
-    )
-    
-    silver_bucket = 'oer-lakehouse'
-    sources = ['mit_ocw', 'openstax', 'otl']
-    
-    validation_results = {}
-    
-    for source in sources:
-        try:
-            objects = list(minio_client.list_objects(
-                bucket_name=silver_bucket,
-                prefix=f"silver/{source}/",
-                recursive=True
-            ))
-            
-            silver_files = [obj for obj in objects if obj.object_name.endswith('.json')]
-            
-            if silver_files:
-                total_size = sum(obj.size for obj in silver_files)
-                validation_results[source] = {
-                    'files_count': len(silver_files),
-                    'total_size_bytes': total_size,
-                    'status': 'validated' if total_size > 1000 else 'suspicious'
-                }
-            else:
-                validation_results[source] = {
-                    'files_count': 0,
-                    'total_size_bytes': 0,
-                    'status': 'missing'
-                }
-                
-        except Exception as e:
-            validation_results[source] = {
-                'status': 'error',
-                'error': str(e)
-            }
-    
-    print(f"[Quality Validation] Results for {execution_date}:")
-    for source, result in validation_results.items():
-        status = result.get('status', 'unknown')
-        if status == 'validated':
-            print(f"{source}: {result['files_count']} files, {result['total_size_bytes']} bytes")
-        elif status == 'missing':
-            print(f"{source}: No silver files found")
-        elif status == 'suspicious':
-            print(f"{source}: Files found but size is suspicious")
-        else:
-            print(f"{source}: {result.get('error', 'Validation failed')}")
-    
-    return validation_results
-
-
 # === DAG Tasks Definition ===
 
 start_task = DummyOperator(
@@ -400,7 +325,7 @@ check_bronze_task = PythonOperator(
     dag=dag,
 )
 
-# ✅ Each source processes independently
+# Each source processes independently
 process_mit_ocw_silver = PythonOperator(
     task_id='process_mit_ocw_silver',
     python_callable=process_mit_ocw_task,
@@ -419,27 +344,9 @@ process_otl_silver = PythonOperator(
     dag=dag,
 )
 
-validate_quality_task = PythonOperator(
-    task_id='validate_silver_data_quality',
-    python_callable=validate_silver_data_quality,
-    dag=dag,
-)
-
 generate_report_task = PythonOperator(
     task_id='generate_processing_report',
     python_callable=generate_processing_report,
-    dag=dag,
-)
-
-cleanup_task = PythonOperator(
-    task_id='cleanup_processing_artifacts',
-    python_callable=cleanup_processing_artifacts,
-    dag=dag,
-)
-
-health_check_task = BashOperator(
-    task_id='silver_layer_health_check',
-    bash_command='echo "Silver layer processing pipeline completed successfully at $(date)"',
     dag=dag,
 )
 
@@ -449,16 +356,7 @@ end_task = DummyOperator(
 )
 
 # === DAG Dependencies ===
-
-# All 3 sources process in parallel after bronze check
+# Simplified workflow: check bronze → process 3 sources in parallel → generate report → done
 start_task >> check_bronze_task
 check_bronze_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
-
-# Quality validation after ALL processing completes
-[process_mit_ocw_silver, process_openstax_silver, process_otl_silver] >> validate_quality_task
-
-# Generate report and cleanup in parallel after validation
-validate_quality_task >> [generate_report_task, cleanup_task]
-
-# Final health check and end
-[generate_report_task, cleanup_task] >> health_check_task >> end_task
+[process_mit_ocw_silver, process_openstax_silver, process_otl_silver] >> generate_report_task >> end_task

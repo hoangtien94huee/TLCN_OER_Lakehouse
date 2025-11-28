@@ -24,6 +24,7 @@ airflow.db
 spark_data/
 reference/
 scraped/
+data/
 
 *.sql
 # Docker

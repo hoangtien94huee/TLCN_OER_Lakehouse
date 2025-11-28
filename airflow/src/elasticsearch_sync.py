@@ -95,11 +95,9 @@ class OERElasticsearchIndexer:
             "true",
             "yes",
         }
-        self.max_pdf_texts = int(os.getenv("ELASTICSEARCH_MAX_PDF_PER_RESOURCE", "3"))  # Max 3 PDFs
-        self.max_pdf_chars = int(os.getenv("ELASTICSEARCH_MAX_PDF_CHARS", "8000"))  # Limit text per PDF
-        self.max_pdf_total_chars = int(os.getenv("ELASTICSEARCH_MAX_PDF_TOTAL_CHARS", "20000"))  # Limit per resource
-        self.search_pdf_chars = int(os.getenv("ELASTICSEARCH_SEARCH_PDF_CHARS", "4000"))  # Part of PDF pushed into search_text
-        self.max_pdf_pages = int(os.getenv("ELASTICSEARCH_PDF_MAX_PAGES", "50"))  # Max pages per PDF to parse
+        # PDF Processing Limits (for nested structure)
+        self.max_pdf_texts = int(os.getenv("ELASTICSEARCH_MAX_PDF_PER_RESOURCE", "3"))  # Max 3 PDFs per resource
+        self.max_pdf_pages = int(os.getenv("ELASTICSEARCH_PDF_MAX_PAGES", "50"))  # Max pages to parse per PDF
         self.max_pdf_page_chars = int(os.getenv("ELASTICSEARCH_PDF_PAGE_CHARS", "2000"))  # Max chars per page chunk
         
         # Kết nối MinIO để lấy PDF content (nếu cần)
@@ -311,34 +309,32 @@ class OERElasticsearchIndexer:
         if not pdf_entries:
             return None
 
-        aggregated_parts: List[str] = []
+        # Build nested pdf_chunks structure
         pdf_chunks: List[Dict[str, Any]] = []
-        total_chars = 0
         titles = []
         files = []
 
         for file_title, file_uri, first_text, pages in pdf_entries:
             titles.append(file_title)
             files.append(file_uri)
+            
+            # Add each page as a separate chunk (for nested search)
             for page_num, page_text in pages:
-                if total_chars < self.max_pdf_total_chars:
-                     remaining = self.max_pdf_total_chars - total_chars
-                     take_text = page_text[:remaining]
-                     aggregated_parts.append(take_text)
-                     total_chars += len(take_text)
-                
-                if page_text:
+                if page_text:  # Only add non-empty pages
                     pdf_chunks.append({
-                        "text": page_text,
+                        "text": page_text[:self.max_pdf_page_chars],  # Truncate to limit
                         "page": page_num,
                         "file": file_title
                     })
 
+        # Create summary pdf_text for backward compatibility (optional)
+        pdf_text_summary = " ".join([chunk["text"][:500] for chunk in pdf_chunks[:5]])  # First 5 pages, 500 chars each
+
         return {
-            "pdf_text": "\n\n".join(aggregated_parts),
+            "pdf_text": pdf_text_summary,  # Compact summary for legacy field
             "pdf_titles": titles,
             "pdf_files": files,
-            "pdf_chunks": pdf_chunks,
+            "pdf_chunks": pdf_chunks,  # Main nested structure for page-level search
         }
 
     def _collect_pdf_entries(self, prefix: str) -> List[Tuple[str, str, str, List[Tuple[int, str]]]]:
@@ -398,23 +394,112 @@ class OERElasticsearchIndexer:
         self._pdf_text_cache[object_name] = pages
         return pages
 
+    def _detect_repeating_pattern(self, lines_list: List[List[str]], position: str = 'first', threshold: float = 0.7) -> Optional[str]:
+        """Detect repeating patterns in first/last lines across pages.
+        
+        Args:
+            lines_list: List of line arrays for each page
+            position: 'first' for header, 'last' for footer
+            threshold: Minimum ratio of pages that must have the pattern
+        
+        Returns:
+            The repeating pattern if found, else None
+        """
+        if len(lines_list) < 3:  # Need at least 3 pages to detect pattern
+            return None
+        
+        from collections import Counter
+        
+        # Extract target lines based on position
+        target_lines = []
+        for lines in lines_list:
+            if not lines:
+                continue
+            if position == 'first' and len(lines) > 0:
+                target_lines.append(lines[0].strip())
+            elif position == 'last' and len(lines) > 0:
+                target_lines.append(lines[-1].strip())
+        
+        if not target_lines:
+            return None
+        
+        # Find most common line
+        counter = Counter(target_lines)
+        most_common, count = counter.most_common(1)[0]
+        
+        # Check if it's repeating enough
+        ratio = count / len(target_lines)
+        if ratio >= threshold and len(most_common.strip()) > 0:
+            # Exclude very short strings (likely not real headers)
+            if len(most_common.strip()) < 5:
+                return None
+            return most_common
+        
+        return None
+
+    def _remove_header_footer(self, pages_text: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
+        """Remove repeating header/footer patterns from pages.
+        
+        Args:
+            pages_text: List of (page_num, text) tuples
+        
+        Returns:
+            Cleaned list of (page_num, text) tuples
+        """
+        if len(pages_text) < 3:
+            return pages_text
+        
+        # Split each page into lines
+        pages_lines = [text.split('\n') for _, text in pages_text]
+        
+        # Detect header pattern (first line)
+        header_pattern = self._detect_repeating_pattern(pages_lines, position='first', threshold=0.7)
+        
+        # Detect footer pattern (last line)
+        footer_pattern = self._detect_repeating_pattern(pages_lines, position='last', threshold=0.7)
+        
+        # Remove patterns from pages
+        cleaned_pages = []
+        for page_num, text in pages_text:
+            lines = text.split('\n')
+            
+            # Remove header (first line if matches pattern)
+            if header_pattern and len(lines) > 0 and lines[0].strip() == header_pattern:
+                lines = lines[1:]
+            
+            # Remove footer (last line if matches pattern)
+            if footer_pattern and len(lines) > 0 and lines[-1].strip() == footer_pattern:
+                lines = lines[:-1]
+            
+            # Rejoin
+            cleaned_text = '\n'.join(lines).strip()
+            if cleaned_text:  # Only keep non-empty pages
+                cleaned_pages.append((page_num, cleaned_text))
+        
+        return cleaned_pages
+
     def _clean_text(self, text: Optional[str], max_chars: int) -> Optional[str]:
-        """Normalize whitespace and trim long PDF text before indexing."""
+        """Normalize whitespace and trim long PDF text."""
         if not text:
             return None
+        
+        # Normalize whitespace
         compact = " ".join(str(text).split())
         if not compact:
             return None
+        
+        # Truncate if too long
         if len(compact) > max_chars:
             return compact[:max_chars]
+        
         return compact
 
     def _extract_pages_from_pdf_bytes(self, data: Optional[bytes]) -> List[Tuple[int, str]]:
-        """Extract text per page with limits (max pages, max chars per page)."""
+        """Extract text per page with limits, remove headers/footers, clean text."""
         if not data:
             return []
 
-        pages: List[Tuple[int, str]] = []
+        raw_pages: List[Tuple[int, str]] = []
 
         # Try pdfplumber first
         if pdfplumber:
@@ -422,28 +507,39 @@ class OERElasticsearchIndexer:
                 with pdfplumber.open(BytesIO(data)) as pdf:
                     for idx, page in enumerate(pdf.pages[: self.max_pdf_pages], start=1):
                         page_text = (page.extract_text() or "").strip()
-                        clean = self._clean_text(page_text, self.max_pdf_page_chars)
-                        if clean:
-                            pages.append((idx, clean))
+                        if page_text:
+                            raw_pages.append((idx, page_text))
             except Exception:
-                pages = []
+                raw_pages = []
 
         # Fallback PyPDF2 if pdfplumber failed
-        if not pages and PyPDF2:
+        if not raw_pages and PyPDF2:
             try:
                 reader = PyPDF2.PdfReader(BytesIO(data))
                 for idx, page in enumerate(reader.pages[: self.max_pdf_pages], start=1):
                     try:
                         page_text = (page.extract_text() or "").strip()
+                        if page_text:
+                            raw_pages.append((idx, page_text))
                     except Exception:
                         continue
-                    clean = self._clean_text(page_text, self.max_pdf_page_chars)
-                    if clean:
-                        pages.append((idx, clean))
             except Exception:
-                pages = []
+                raw_pages = []
 
-        return pages
+        if not raw_pages:
+            return []
+
+        # Step 1: Remove header/footer patterns across all pages
+        cleaned_pages = self._remove_header_footer(raw_pages)
+
+        # Step 2: Clean each page individually (page numbers, whitespace, truncate)
+        final_pages = []
+        for page_num, page_text in cleaned_pages:
+            clean = self._clean_text(page_text, self.max_pdf_page_chars)
+            if clean:
+                final_pages.append((page_num, clean))
+
+        return final_pages
 
     def _augment_with_pdf_content(self, document: Dict[str, Any]) -> None:
         """Thêm nội dung PDF vào document để index vào Elasticsearch.
@@ -580,6 +676,12 @@ class OERElasticsearchIndexer:
 
         select_exprs = [F.col(col).alias(alias) for col, alias in column_aliases if col in docs.columns]
 
+        # Extract subject names if available
+        if "matched_subjects" in docs.columns:
+            # Assuming matched_subjects is an array of structs with subject_name
+            # We extract just the names as an array of strings
+            select_exprs.append(F.col("matched_subjects.subject_name").alias("subjects"))
+
         docs = docs.select(*select_exprs)
 
         creator_text_col = "creator_names_text"
@@ -597,13 +699,14 @@ class OERElasticsearchIndexer:
         # Build search_text: Tổng hợp TẤT CẢ text có thể search
         # Elasticsearch sẽ index field này để full-text search
         # Search_text: chỉ giữ phần tiêu đề + mô tả (PDF sẽ nối thêm ở bước augment)
+        # Also include subjects in search_text for better recall
+        search_text_cols = [F.col("title"), F.col("description")]
+        if "subjects" in docs.columns:
+             search_text_cols.append(F.array_join(F.col("subjects"), " "))
+
         docs = docs.withColumn(
             "search_text",
-            F.concat_ws(
-                " ",
-                F.col("title"),
-                F.col("description"),
-            ),
+            F.concat_ws(" ", *search_text_cols),
         ).drop(creator_text_col)
 
         return docs
@@ -660,6 +763,13 @@ class OERElasticsearchIndexer:
                         },
                         "description": {"type": "text", "analyzer": "english"},
                         "search_text": {"type": "text", "analyzer": "english"},  # Field chính để search
+                        "subjects": {
+                            "type": "text", 
+                            "analyzer": "english",
+                            "fields": {
+                                "keyword": {"type": "keyword", "ignore_above": 256}
+                            }
+                        },
                         
                         # Keyword fields - Filtering (exact match, aggregation)
                         "source_system": {"type": "keyword"},  # mit_ocw, openstax, otl, textbook

@@ -1,6 +1,6 @@
 # OER Data Lakehouse & Intelligent Search Platform
 
-## 📖 Giới thiệu Dự án
+## Giới thiệu Dự án
 
 **OER Data Lakehouse & Intelligent Search Platform** là một giải pháp công nghệ toàn diện nhằm giải quyết bài toán phân mảnh và khó tiếp cận của Tài nguyên Giáo dục Mở (Open Educational Resources - OER). Trong bối cảnh tài liệu học thuật nằm rải rác trên nhiều nền tảng khác nhau (MIT OCW, OpenStax, OTL...), việc tìm kiếm và tổng hợp kiến thức trở nên khó khăn đối với giảng viên và sinh viên.
 
@@ -8,7 +8,7 @@ Dự án này xây dựng một **Data Lakehouse** tập trung, có khả năng 
 
 ---
 
-## 🚀 Tính năng & Điểm nổi bật
+## Tính năng & Điểm nổi bật
 
 ### 1. Kiến trúc Data Lakehouse Hiện đại (Scalable Architecture)
 Hệ thống được xây dựng dựa trên kiến trúc **Medallion (Bronze/Silver/Gold)** chuẩn mực trong công nghiệp dữ liệu:
@@ -34,46 +34,14 @@ Toàn bộ quy trình xử lý dữ liệu được tự động hóa hoàn toà
 
 ---
 
-## 🏗️ Kiến trúc Hệ thống Chi tiết
+## Kiến trúc Hệ thống Chi tiết
 
 Sơ đồ luồng dữ liệu (Data Flow) của hệ thống:
 
-```mermaid
-graph LR
-    subgraph "Data Sources"
-        MIT[MIT OpenCourseWare]
-        OpenStax[OpenStax]
-        OTL[Open Textbook Library]
-    end
+![Sơ đồ luồng dữ liệu](image/structure.png)
 
-    subgraph "Data Lakehouse (MinIO & Iceberg)"
-        Bronze[(Bronze Layer\nRaw JSON/PDF)]
-        Silver[(Silver Layer\nCleaned Tables)]
-        Gold[(Gold Layer\nStar Schema)]
-    end
 
-    subgraph "Processing & Orchestration"
-        Airflow[Apache Airflow\n(Orchestrator)]
-        Spark[Apache Spark\n(Processing Engine)]
-    end
-
-    subgraph "Serving Layer"
-        ES[(Elasticsearch\nSearch Engine)]
-        API[FastAPI Backend]
-        UI[Web Interface]
-    end
-
-    MIT & OpenStax & OTL -->|Scraping DAGs| Bronze
-    Bronze -->|Spark ETL| Silver
-    Silver -->|Spark ETL| Gold
-    Gold -->|Sync Job| ES
-    ES <-->|Query & Rank| API
-    API <-->|Interact| UI
-```
-
----
-
-## 🛠️ Công nghệ & Công cụ (Tech Stack)
+## Công nghệ & Công cụ (Tech Stack)
 
 Dự án sử dụng bộ công nghệ hiện đại (Modern Data Stack):
 
@@ -90,7 +58,7 @@ Dự án sử dụng bộ công nghệ hiện đại (Modern Data Stack):
 
 ---
 
-## 📂 Cấu trúc Thư mục Dự án
+## Cấu trúc Thư mục Dự án
 
 ```
 TLCN_OER_Lakehouse/
@@ -116,7 +84,7 @@ TLCN_OER_Lakehouse/
 
 ---
 
-## ⚡ Hướng dẫn Cài đặt & Triển khai
+## Hướng dẫn Cài đặt & Triển khai
 
 ### Yêu cầu hệ thống
 *   **Hệ điều hành**: Linux (Ubuntu/CentOS) hoặc Windows (WSL2), macOS.

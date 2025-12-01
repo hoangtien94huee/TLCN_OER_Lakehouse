@@ -174,11 +174,6 @@ class GoldAnalyticsBuilder:
             return None
 
     def _build_dim_programs(self, programs_df: Optional[DataFrame], faculties_df: Optional[DataFrame]) -> DataFrame:
-        """
-        Dimension: Programs (Curriculum/Study Programs)
-        
-        Business use: Group coverage by program
-        """
         schema = T.StructType(
             [
                 T.StructField("program_key", T.LongType(), False),

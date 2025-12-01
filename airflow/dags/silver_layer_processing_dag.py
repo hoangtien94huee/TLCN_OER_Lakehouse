@@ -448,9 +448,6 @@ end_task = DummyOperator(
     dag=dag,
 )
 
-# === DAG Dependencies ===
-
-# ✅ All 3 sources process in parallel after bronze check
 start_task >> check_bronze_task
 check_bronze_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
 

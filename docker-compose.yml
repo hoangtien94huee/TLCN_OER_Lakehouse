@@ -144,7 +144,7 @@ services:
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
       - PYTHONPATH=/opt/airflow:/opt/airflow/dags
-      # Iceberg Hadoop Catalog support (NO REST needed!)
+      # Iceberg Hadoop Catalog support 
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dcom.amazonaws.sdk.disableEc2Metadata=true
     ports:
       - "8081:8080" # Spark Master Web UI

@@ -122,7 +122,7 @@ TLCN_OER_Lakehouse/
 
 ---
 
-## 🔍 Phân tích Kỹ thuật Chuyên sâu
+## Phân tích Kỹ thuật Chuyên sâu
 
 ### 1. Thuật toán Xử lý PDF (Smart PDF Processing)
 Để giải quyết vấn đề "rác" dữ liệu trong PDF (header/footer lặp lại), hệ thống áp dụng thuật toán:

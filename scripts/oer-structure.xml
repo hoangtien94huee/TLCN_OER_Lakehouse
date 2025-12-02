@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<import_structure>
+  <community>
+    <name>OER Repository</name>
+    <description>Open Educational Resources from MIT OCW, OpenStax, OER Commons, and other sources</description>
+    
+    <collection>
+      <name>Open Educational Resources</name>
+      <description>Collection of OER materials including lecture notes, textbooks, assignments, and supplementary materials.</description>
+    </collection>
+  </community>
+</import_structure>

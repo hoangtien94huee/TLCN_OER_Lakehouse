@@ -50,8 +50,18 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      spark-master:
+        condition: service_healthy
     ports:
       - "8080:8080"
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'      # Giới hạn 4 CPU cores (25% của 16 cores)
+          memory: 2048M    # Giới hạn 2GB RAM
+        reservations:
+          cpus: '1.0'
+          memory: 512M
     volumes:
       - ./data/scraped:/opt/airflow/scraped_data
       - ./data:/opt/airflow/database
@@ -60,6 +70,7 @@ services:
       - ./airflow/src:/opt/airflow/src
       - ./data/iceberg-jars:/opt/airflow/jars:ro  
       - ./data/reference:/opt/airflow/reference:ro
+      - saf_import:/opt/airflow/saf_export
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -86,16 +97,16 @@ services:
       - MAX_PDF_SIZE_MB=20
       - IMPORTANT_CATEGORIES=lecture_notes,textbook,handout,reading
       - SKIP_CATEGORIES=exam,assignment,quiz
-      # Spark cluster configuration
+      # Spark cluster configuration - connect to Spark cluster
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_DEPLOY_MODE=client
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       # Use local JARs instead of downloading from Maven
-      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.4.3.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
-      # Spark Memory Configuration (reduce to fit cluster)
-      - SPARK_DRIVER_MEMORY=1g
-      - SPARK_EXECUTOR_MEMORY=1g
+      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.9.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
+      # Spark Memory Configuration (increased for OTL large dataset)
+      - SPARK_DRIVER_MEMORY=1536m
+      - SPARK_EXECUTOR_MEMORY=768m
       - SPARK_DRIVER_MAXRESULTSIZE=512m
       - SPARK_SHUFFLE_PARTITIONS=4
       # Optional: download and upload PDFs for OTL
@@ -106,6 +117,11 @@ services:
       - ELASTICSEARCH_INDEX=oer_resources
       - ELASTICSEARCH_BATCH_SIZE=500
       - ELASTICSEARCH_RECREATE=0
+      # DSpace integration configuration
+      - DSPACE_API_ENDPOINT=http://dspace:8080/server/api
+      - DSPACE_USER=admin@dspace.org
+      - DSPACE_PASSWORD=dspace
+      - DSPACE_COLLECTION_UUID=1e9be5e4-6056-4f43-bad0-0288669ce6ad
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -114,10 +130,18 @@ services:
       retries: 3
       start_period: 60s
 
-  # Spark Master
+  # Spark Master - Cluster mode
   spark-master:
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-master
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'      # Giới hạn 2 CPU cores
+          memory: 1536M    # Giới hạn 1.5GB RAM
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     environment:
       - SPARK_MODE=master
       - PYSPARK_PYTHON=python3
@@ -125,7 +149,7 @@ services:
       - SPARK_DRIVER_MEMORY=1g
       - SPARK_EXECUTOR_MEMORY=1g
       - SPARK_DRIVER_MAXRESULTSIZE=512m
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
@@ -144,10 +168,11 @@ services:
       - ./airflow/dags:/opt/airflow/dags
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080" ]
+      test: [ "CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'" ]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # Spark Worker
   spark-worker:
@@ -158,9 +183,9 @@ services:
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=1g
+      - SPARK_WORKER_MEMORY=2g
       - SPARK_WORKER_CORES=2
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
@@ -179,8 +204,10 @@ services:
     restart: unless-stopped
 
   # Dremio for BI access (Power BI, SQL clients)
-    # Dremio for BI access (Power BI, SQL clients)
+  # NOTE: Disabled by default to save memory. Start manually when needed: docker-compose up -d dremio
   dremio:
+    profiles:
+      - analytics  # Only start when 'analytics' profile is active
     image: dremio/dremio-oss:26.0.5
     container_name: oer-dremio
     depends_on:
@@ -216,12 +243,16 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
     ports:
       - "9200:9200"
       - "9300:9300"
     volumes:
       - es_data:/usr/share/elasticsearch/data
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=30s"]
       interval: 30s
@@ -229,24 +260,7 @@ services:
       retries: 5
     restart: unless-stopped
 
-  kibana:
-    image: docker.elastic.co/kibana/kibana:8.15.3
-    container_name: oer-kibana
-    depends_on:
-      elasticsearch:
-        condition: service_healthy
-    environment:
-      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
-    ports:
-      - "5601:5601"
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5601/api/status"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-    restart: unless-stopped
-
+  # Simple OER Search & Recommendations UI
   search-web:
     build:
       context: ./search_app
@@ -254,14 +268,12 @@ services:
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=oer_resources
-      - MINIO_BROWSER_ENDPOINT=http://localhost:9000/browser
-      - MINIO_BUCKET=oer-lakehouse
+      - USER_DATA_PATH=/app/data/user_final.csv
       - MINIO_ENDPOINT=minio:9000
       - MINIO_PUBLIC_ENDPOINT=http://localhost:9000
-      - MINIO_SIGNING_ENDPOINT=http://minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
-      - MINIO_SECURE=0
+      - MINIO_BUCKET=oer-lakehouse
     extra_hosts:
       - "localhost:host-gateway"
     depends_on:
@@ -270,8 +282,115 @@ services:
     ports:
       - "8088:8080"
     volumes:
-      - ./data/reference:/app/reference:ro
+      - ./data:/app/data:ro
     restart: unless-stopped
+
+  # --- DSpace Services (Official Setup) ---
+
+  # DSpace Solr
+  dspacesolr:
+    container_name: dspacesolr
+    image: dspace/dspace-solr:dspace-9_x
+    environment:
+      - SOLR_JAVA_MEM=-Xms512m -Xmx768m
+    ports:
+      - "8983:8983"
+    volumes:
+      - dspace_solr_data:/var/solr/data
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    user: root
+    entrypoint:
+      - /bin/bash
+      - '-c'
+      - |
+        # Fix permissions for Solr data directory
+        chown -R solr:solr /var/solr/data
+        # Switch to solr user and start Solr with search core
+        exec gosu solr bash -c "
+          # Start Solr in background with search core
+          docker-entrypoint.sh solr-precreate search /opt/solr/server/solr/configsets/search &
+          SOLR_PID=\$!
+          # Wait for Solr to be ready
+          until wget -O /dev/null http://localhost:8983/solr/admin/cores?action=STATUS 2>/dev/null; do
+            echo 'Waiting for Solr...'
+            sleep 2
+          done
+          # Create statistics core if it doesn't exist
+          if ! wget -O - http://localhost:8983/solr/admin/cores?action=STATUS 2>/dev/null | grep -q '\"statistics\"'; then
+            echo 'Creating statistics core...'
+            solr create_core -c statistics -d statistics
+          fi
+          echo 'Solr cores ready'
+          # Keep container running
+          wait \$SOLR_PID
+        "
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-O", "/dev/null", "http://localhost:8983/solr/admin/cores?action=STATUS"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
+
+  # DSpace Backend (REST API)
+  dspace:
+    container_name: dspace
+    image: dspace/dspace:dspace-9_x
+    deploy:
+      resources:
+        limits:
+          memory: 1536M
+    environment:
+      # DSpace configuration via environment variables
+      dspace__P__dir: /dspace
+      dspace__P__server__P__url: http://localhost:8180/server
+      dspace__P__ui__P__url: http://localhost:4000
+      dspace__P__name: 'OER Repository - DSpace'
+      # Database connection - using shared postgres
+      db__P__url: 'jdbc:postgresql://postgres:5432/dspace'
+      db__P__username: dspace
+      db__P__password: dspace
+      # Solr connection
+      solr__P__server: http://dspacesolr:8983/solr
+      # Trust requests from Docker network
+      proxies__P__trusted__P__ipranges: '172.0.0'
+      LOGGING_CONFIG: /dspace/config/log4j2-container.xml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      dspacesolr:
+        condition: service_healthy
+    ports:
+      - "8180:8080"  # Changed from 8080 to avoid conflict with Airflow
+      - "8009:8000"  # Debug port
+    volumes:
+      - dspace_assetstore:/dspace/assetstore
+      - saf_import:/dspace/saf_import
+    stdin_open: true
+    tty: true
+    entrypoint:
+      - /bin/bash
+      - '-c'
+      - |
+        # Wait for database
+        while (!</dev/tcp/postgres/5432) > /dev/null 2>&1; do sleep 1; done;
+        # Run database migration
+        /dspace/bin/dspace database migrate
+        # Create admin user (only if doesn't exist)
+        /dspace/bin/dspace create-administrator -e admin@dspace.org -f Admin -l User -p dspace -c en || true
+        # Start DSpace
+        java -jar /dspace/webapps/server-boot.jar --dspace.dir=/dspace
+    restart: unless-stopped
+
+  # DSpace Frontend (Angular) - REMOVED
+  # Run Angular locally for better performance:
+  #   cd dspace-angular
+  #   npm install
+  #   npm run start:dev
+  # Access at http://localhost:4000
 
 volumes:
   scraped_data:
@@ -283,3 +402,6 @@ volumes:
   spark_data:
   dremio_data:
   es_data:
+  dspace_assetstore:
+  dspace_solr_data:
+  saf_import:

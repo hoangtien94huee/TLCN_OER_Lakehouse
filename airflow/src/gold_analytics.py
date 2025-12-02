@@ -59,6 +59,7 @@ class GoldAnalyticsBuilder:
         self.dim_languages_table = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
         self.dim_date_table = f"{self.gold_catalog}.{self.gold_database}.dim_date"
         self.dim_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
+        self.bridge_oer_subjects_table = f"{self.gold_catalog}.{self.gold_database}.bridge_oer_subjects"
         self.fact_program_coverage_table = f"{self.gold_catalog}.{self.gold_database}.fact_program_coverage"
         self.fact_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
 
@@ -70,7 +71,7 @@ class GoldAnalyticsBuilder:
         # Use local JARs instead of downloading from Maven
         jars_dir = "/opt/airflow/jars"
         local_jars = ",".join([
-            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
             f"{jars_dir}/hadoop-aws-3.3.4.jar",
             f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
         ])
@@ -79,7 +80,7 @@ class GoldAnalyticsBuilder:
         
         session = (
             SparkSession.builder.appName("OER-Gold-Analytics")
-            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Limit to 2 cores to reduce memory pressure
+            .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))  # Use Spark cluster
             .config("spark.jars", local_jars)  # Load JARs into classpath
             .config("spark.driver.extraClassPath", local_jars)  # Add to driver classpath
             .config("spark.executor.extraClassPath", local_jars)  # Add to executor classpath
@@ -154,6 +155,9 @@ class GoldAnalyticsBuilder:
         fact_oer_resources = self._build_fact_oer_resources(
             oer_df, dim_sources, dim_languages, dim_date
         )
+        
+        # Build bridge tables (many-to-many relationships)
+        bridge_oer_subjects = self._build_bridge_oer_subjects(oer_df, dim_subjects)
 
         # Write tables
         print("\n" + "=" * 80)
@@ -166,6 +170,7 @@ class GoldAnalyticsBuilder:
         self._write_table(dim_languages, self.dim_languages_table, "dim_languages")
         self._write_table(dim_date, self.dim_date_table, "dim_date")
         self._write_table(dim_oer_resources, self.dim_oer_resources_table, "dim_oer_resources")
+        self._write_table(bridge_oer_subjects, self.bridge_oer_subjects_table, "bridge_oer_subjects")
         self._write_table(fact_program_coverage, self.fact_program_coverage_table, "fact_program_coverage")
         self._write_table(fact_oer_resources, self.fact_oer_resources_table, "fact_oer_resources")
 
@@ -416,10 +421,17 @@ class GoldAnalyticsBuilder:
             F.col("title"),
             F.col("description"),
             F.col("source_url"),
-            F.col("publisher_name"),
+            # Fix Unknown publisher - derive from source_system
+            F.when(
+                (F.col("publisher_name").isNull()) | (F.col("publisher_name") == "Unknown"),
+                F.when(F.col("source_system") == "mit_ocw", "MIT OpenCourseWare")
+                 .when(F.col("source_system") == "openstax", "OpenStax")
+                 .when(F.col("source_system") == "open+textbook+library", "Open Textbook Library")
+                 .when(F.col("source_system") == "otl", "Open Textbook Library")
+                 .otherwise(F.col("source_system"))
+            ).otherwise(F.col("publisher_name")).alias("publisher_name"),
             F.col("creator_names"),
             F.col("matched_subjects"),
-            F.col("dc_xml_path"),
             F.col("bronze_source_path"),
         )
         
@@ -609,8 +621,52 @@ class GoldAnalyticsBuilder:
 
         return fact.orderBy(F.desc("data_quality_score"))
 
+    def _build_bridge_oer_subjects(
+        self,
+        oer_df: DataFrame,
+        dim_subjects: DataFrame,
+    ) -> DataFrame:
+        """
+        Bridge Table: OER Resources ↔ Subjects (Many-to-Many)
+        
+        Purpose: Link OER resources to their matched subjects
+        Allows queries like:
+        - "Get all subjects for OER X"
+        - "Get all OER for subject Y"
+        - "Export OER with their full subject list"
+        
+        Grain: One row per (OER, Subject) pair
+        """
+        # Explode matched_subjects array to get one row per match
+        bridge = oer_df.select(
+            F.col("resource_uid").alias("resource_key"),
+            F.explode_outer("matched_subjects").alias("matched_subject")
+        ).select(
+            F.col("resource_key"),
+            F.col("matched_subject.subject_id").alias("subject_id"),
+            F.col("matched_subject.subject_code").alias("subject_code"),
+            F.col("matched_subject.similarity").alias("similarity_score"),
+            F.col("matched_subject.matched_text").alias("matched_text"),
+        ).where(F.col("subject_id").isNotNull())
+        
+        # Join with dim_subjects to get subject_key
+        bridge = bridge.join(
+            dim_subjects.select("subject_key", "subject_id").dropDuplicates(["subject_id"]),
+            "subject_id",
+            "left"
+        ).select(
+            F.col("resource_key"),
+            F.col("subject_key"),
+            F.col("subject_id"),
+            F.col("subject_code"),
+            F.col("similarity_score"),
+            F.col("matched_text"),
+        )
+        
+        return bridge.orderBy("resource_key", F.desc("similarity_score"))
+
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
-        """Write DataFrame to Gold Iceberg table - full refresh strategy."""
+        """Write DataFrame to Gold Iceberg table - full refresh strategy with cleanup."""
         if df is None or df.rdd.isEmpty():
             print(f" {description}: No data to write")
             return
@@ -621,11 +677,60 @@ class GoldAnalyticsBuilder:
             # Gold tables are FULL REFRESH (not incremental)
             # Because we rebuild ALL dimensions and facts from current Silver state
             print(f" {description}: Full refresh with {count:,} records")
+            
+            # Write fresh data (createOrReplace creates new snapshot)
             df.writeTo(table_name).using("iceberg").createOrReplace()
             
             print(f" {description}: Wrote {count:,} records to {table_name}")
+            
+            # Cleanup old snapshots and orphan files using Iceberg maintenance
+            self._cleanup_iceberg_table(table_name, description)
+            
         except Exception as exc:
             print(f" {description}: Failed to write - {exc}")
+
+    def _cleanup_iceberg_table(self, table_name: str, description: str) -> None:
+        """
+        Iceberg table maintenance: expire old snapshots and remove orphan files.
+        
+        This ensures:
+        1. Only latest snapshot is kept (no duplicate data from previous runs)
+        2. Orphan parquet files are removed (storage cleanup)
+        """
+        try:
+            # Expire all snapshots older than now (keep only the latest)
+            # retain_last=1 keeps only the most recent snapshot
+            print(f" {description}: Running Iceberg maintenance...")
+            
+            # Method 1: Expire snapshots older than current timestamp
+            self.spark.sql(f"""
+                CALL iceberg.system.expire_snapshots(
+                    table => '{table_name}',
+                    older_than => TIMESTAMP '{self._get_current_timestamp()}',
+                    retain_last => 1
+                )
+            """)
+            print(f" {description}: Expired old snapshots (kept last 1)")
+            
+            # Method 2: Remove orphan files (parquet files not in any snapshot)
+            self.spark.sql(f"""
+                CALL iceberg.system.remove_orphan_files(
+                    table => '{table_name}',
+                    older_than => TIMESTAMP '{self._get_current_timestamp()}'
+                )
+            """)
+            print(f" {description}: Removed orphan files")
+            
+        except Exception as cleanup_exc:
+            # Cleanup is optional - don't fail the write if cleanup fails
+            print(f" {description}: Iceberg cleanup note - {cleanup_exc}")
+
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in format suitable for Iceberg procedures."""
+        from datetime import datetime, timedelta
+        # Add 1 minute buffer to ensure we're after the write
+        ts = datetime.now() + timedelta(minutes=1)
+        return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main() -> None:

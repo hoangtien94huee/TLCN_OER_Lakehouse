@@ -356,7 +356,6 @@ end_task = DummyOperator(
 )
 
 # === DAG Dependencies ===
-# Simplified workflow: check bronze → process 3 sources in parallel → generate report → done
 start_task >> check_bronze_task
-check_bronze_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
-[process_mit_ocw_silver, process_openstax_silver, process_otl_silver] >> generate_report_task >> end_task
+check_bronze_task >> process_mit_ocw_silver >> process_openstax_silver >> process_otl_silver
+process_otl_silver >> generate_report_task >> end_task

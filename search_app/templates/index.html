@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OER Search</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0 30px;
+        }
+        
+        .header h1 {
+            color: #1a73e8;
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .search-box input {
+            flex: 1;
+            padding: 14px 20px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .search-box input:focus {
+            border-color: #1a73e8;
+        }
+        
+        .search-box button {
+            padding: 14px 28px;
+            font-size: 16px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .search-box button:hover {
+            background: #1557b0;
+        }
+        
+        .results-info {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        .result-item {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .result-item h3 {
+            margin-bottom: 8px;
+        }
+        
+        .result-item h3 a {
+            color: #1a0dab;
+            text-decoration: none;
+        }
+        
+        .result-item h3 a:hover {
+            text-decoration: underline;
+        }
+        
+        .result-item .url {
+            color: #006621;
+            font-size: 13px;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        
+        .result-item .description {
+            color: #545454;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        
+        .result-item .meta {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .result-item .subjects {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        
+        .result-item .subject-tag {
+            background: #e8f0fe;
+            color: #1a73e8;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        mark {
+            background: #fff3cd;
+            padding: 0 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 OER Search</h1>
+            <p>Tìm kiếm tài nguyên giáo dục mở</p>
+            <a href="/recommend" style="color: #34a853; text-decoration: none; font-size: 14px;">
+                💡 Xem gợi ý tài liệu theo lịch sử mượn sách →
+            </a>
+        </div>
+        
+        <form class="search-box" method="GET" action="/">
+            <input type="text" name="q" value="{{ query }}" 
+                   placeholder="Nhập từ khóa tìm kiếm..." autofocus>
+            <button type="submit">Tìm kiếm</button>
+        </form>
+        
+        {% if query %}
+            <div class="results-info">
+                Tìm thấy <strong>{{ total }}</strong> kết quả cho "{{ query }}"
+            </div>
+            
+            {% if results %}
+                {% for item in results %}
+                <div class="result-item">
+                    <h3>
+                        <a href="{{ item.url }}" target="_blank">
+                            {% if item.highlight.title %}
+                                {{ item.highlight.title[0] | safe }}
+                            {% else %}
+                                {{ item.title }}
+                            {% endif %}
+                        </a>
+                    </h3>
+                    <div class="url">{{ item.url }}</div>
+                    <div class="description">
+                        {% if item.highlight.description %}
+                            {{ item.highlight.description[0] | safe }}
+                        {% else %}
+                            {{ item.description[:300] }}{% if item.description|length > 300 %}...{% endif %}
+                        {% endif %}
+                    </div>
+                    <div class="meta">
+                        {% if item.source %}
+                            <span>📚 {{ item.source }}</span>
+                        {% endif %}
+                        <span>⭐ {{ "%.1f"|format(item.score) }}</span>
+                    </div>
+                    {% if item.pdf_links %}
+                    <div class="pdf-links" style="margin-top: 10px;">
+                        📄 PDF:
+                        {% for pdf in item.pdf_links[:3] %}
+                            <a href="{{ pdf.url }}" target="_blank" 
+                               style="display: inline-block; margin: 4px; padding: 4px 12px; 
+                                      background: #e8f5e9; color: #2e7d32; border-radius: 4px; 
+                                      text-decoration: none; font-size: 12px;">
+                                {{ pdf.name[:40] }}{% if pdf.name|length > 40 %}...{% endif %}
+                            </a>
+                        {% endfor %}
+                        {% if item.pdf_links|length > 3 %}
+                            <span style="font-size: 12px; color: #666;">+{{ item.pdf_links|length - 3 }} more</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if item.subjects %}
+                    <div class="subjects">
+                        {% for subj in item.subjects[:5] %}
+                            {% if subj %}
+                            <span class="subject-tag">{{ subj }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-results">
+                    <p>Không tìm thấy kết quả phù hợp.</p>
+                    <p>Thử tìm kiếm với từ khóa khác.</p>
+                </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</body>
+</html>

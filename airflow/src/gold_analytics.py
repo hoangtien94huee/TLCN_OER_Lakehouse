@@ -59,6 +59,7 @@ class GoldAnalyticsBuilder:
         self.dim_languages_table = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
         self.dim_date_table = f"{self.gold_catalog}.{self.gold_database}.dim_date"
         self.dim_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
+        self.bridge_oer_subjects_table = f"{self.gold_catalog}.{self.gold_database}.bridge_oer_subjects"
         self.fact_program_coverage_table = f"{self.gold_catalog}.{self.gold_database}.fact_program_coverage"
         self.fact_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
 
@@ -67,9 +68,22 @@ class GoldAnalyticsBuilder:
         print(f"Gold Analytics Builder initialized: {self.gold_catalog}.{self.gold_database}")
 
     def _create_spark_session(self) -> SparkSession:
+        # Use local JARs instead of downloading from Maven
+        jars_dir = "/opt/airflow/jars"
+        local_jars = ",".join([
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
+            f"{jars_dir}/hadoop-aws-3.3.4.jar",
+            f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
+        ])
+        
+        print(f"[Spark] Using local JARs: {local_jars}")
+        
         session = (
             SparkSession.builder.appName("OER-Gold-Analytics")
-            .master(os.getenv("SPARK_MASTER", "local[*]"))
+            .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))  # Use Spark cluster
+            .config("spark.jars", local_jars)  # Load JARs into classpath
+            .config("spark.driver.extraClassPath", local_jars)  # Add to driver classpath
+            .config("spark.executor.extraClassPath", local_jars)  # Add to executor classpath
             .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
             .config(f"spark.sql.catalog.{self.silver_catalog}", "org.apache.iceberg.spark.SparkCatalog")
             .config(f"spark.sql.catalog.{self.silver_catalog}.type", "hadoop")
@@ -83,6 +97,7 @@ class GoldAnalyticsBuilder:
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
             .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8"))  # Reduced for local mode
             .config("spark.sql.adaptive.enabled", "true")
             .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
             .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))
@@ -140,6 +155,9 @@ class GoldAnalyticsBuilder:
         fact_oer_resources = self._build_fact_oer_resources(
             oer_df, dim_sources, dim_languages, dim_date
         )
+        
+        # Build bridge tables (many-to-many relationships)
+        bridge_oer_subjects = self._build_bridge_oer_subjects(oer_df, dim_subjects)
 
         # Write tables
         print("\n" + "=" * 80)
@@ -152,6 +170,7 @@ class GoldAnalyticsBuilder:
         self._write_table(dim_languages, self.dim_languages_table, "dim_languages")
         self._write_table(dim_date, self.dim_date_table, "dim_date")
         self._write_table(dim_oer_resources, self.dim_oer_resources_table, "dim_oer_resources")
+        self._write_table(bridge_oer_subjects, self.bridge_oer_subjects_table, "bridge_oer_subjects")
         self._write_table(fact_program_coverage, self.fact_program_coverage_table, "fact_program_coverage")
         self._write_table(fact_oer_resources, self.fact_oer_resources_table, "fact_oer_resources")
 
@@ -164,13 +183,21 @@ class GoldAnalyticsBuilder:
         try:
             df = self.spark.table(table_name)
             if df.rdd.isEmpty():
-                print(f"ΓÜá∩╕Å  {description}: Table empty")
+                print(f"  {description}: Table empty")
                 return None
             count = df.count()
-            print(f"Γ£à {description}: Loaded {count:,} records")
+            print(f" {description}: Loaded {count:,} records")
+            
+            # Verify data distribution by source_system (for OER table)
+            if "oer_resources" in table_name:
+                print(f"   Breakdown by source:")
+                source_counts = df.groupBy("source_system").count().collect()
+                for row in source_counts:
+                    print(f"    • {row.source_system}: {row['count']:,} records")
+            
             return df
         except Exception as exc:
-            print(f"ΓÜá∩╕Å  {description}: Table not found ({table_name})")
+            print(f"  {description}: Table not found ({table_name})")
             return None
 
     def _build_dim_programs(self, programs_df: Optional[DataFrame], faculties_df: Optional[DataFrame]) -> DataFrame:
@@ -312,18 +339,16 @@ class GoldAnalyticsBuilder:
         """
         sources = oer_df.select(
             F.col("source_system"),
-            F.col("catalog_provider"),
         ).dropDuplicates()
 
         return sources.select(
             F.abs(
                 F.xxhash64(
                     F.coalesce(F.col("source_system"), F.lit("")),
-                    F.coalesce(F.col("catalog_provider"), F.lit("")),
                 )
             ).alias("source_key"),
             F.col("source_system").alias("source_code"),
-            F.col("catalog_provider").alias("source_name"),
+            F.col("source_system").alias("source_name"),
         )
 
     def _build_dim_languages(self, oer_df: DataFrame) -> DataFrame:
@@ -364,7 +389,7 @@ class GoldAnalyticsBuilder:
 
         # Build date dimension with attributes
         dim_date = dates_df.select(
-            F.col("date").alias("date_key"),
+            F.date_format("date", "yyyyMMdd").cast("int").alias("date_key"),  # 20251113
             F.col("date"),
             F.year("date").alias("year"),
             F.quarter("date").alias("quarter"),
@@ -391,17 +416,17 @@ class GoldAnalyticsBuilder:
             F.col("title"),
             F.col("description"),
             F.col("source_url"),
-            F.col("catalog_provider"),
-            F.col("publisher_name"),
-            F.col("license_name"),
-            F.col("license_url"),
-            F.col("subjects"),
-            F.col("keywords"),
+            # Fix Unknown publisher - derive from source_system
+            F.when(
+                (F.col("publisher_name").isNull()) | (F.col("publisher_name") == "Unknown"),
+                F.when(F.col("source_system") == "mit_ocw", "MIT OpenCourseWare")
+                 .when(F.col("source_system") == "openstax", "OpenStax")
+                 .when(F.col("source_system") == "open+textbook+library", "Open Textbook Library")
+                 .when(F.col("source_system") == "otl", "Open Textbook Library")
+                 .otherwise(F.col("source_system"))
+            ).otherwise(F.col("publisher_name")).alias("publisher_name"),
             F.col("creator_names"),
             F.col("matched_subjects"),
-            F.col("canonical_subjects"),
-            F.col("unmatched_subjects"),
-            F.col("dc_xml_path"),
             F.col("bronze_source_path"),
         )
         
@@ -440,8 +465,7 @@ class GoldAnalyticsBuilder:
                     T.StructField("coverage_pct", T.DoubleType(), True),
                     T.StructField("total_oer_resources", T.IntegerType(), True),
                     T.StructField("avg_oer_per_subject", T.DoubleType(), True),
-                    T.StructField("snapshot_date", T.DateType(), True),
-                    T.StructField("snapshot_date_key", T.DateType(), True),
+                    T.StructField("snapshot_date_key", T.IntegerType(), True),
                 ])
             )
 
@@ -499,17 +523,13 @@ class GoldAnalyticsBuilder:
             dim_program_lookup,
             "program_id",
             "left"
-        ).withColumn(
-            "snapshot_date",
-            F.current_date()
         )
 
-        snapshot_lookup = dim_date.select(
-            F.col("date").alias("snapshot_date"),
-            F.col("date_key").alias("snapshot_date_key"),
-        ).dropDuplicates(["snapshot_date"])
-
-        fact = fact.join(snapshot_lookup, "snapshot_date", "left").select(
+        # Add snapshot_date_key as integer YYYYMMDD
+        fact = fact.withColumn(
+            "snapshot_date_key",
+            F.date_format(F.current_date(), "yyyyMMdd").cast("int")
+        ).select(
             "program_key",
             "program_id",
             "program_name",
@@ -519,7 +539,6 @@ class GoldAnalyticsBuilder:
             "coverage_pct",
             "total_oer_resources",
             "avg_oer_per_subject",
-            "snapshot_date",
             "snapshot_date_key",
         ).orderBy(F.desc("coverage_pct"))
 
@@ -563,15 +582,16 @@ class GoldAnalyticsBuilder:
             "left"
         )
 
-        # Join date dimensions for date keys
-        fact = fact.join(
-            dim_date.select(F.col("date").alias("pub_date"), F.col("date_key").alias("pub_date_key")),
-            F.to_date(F.col("oer.publication_date")) == F.col("pub_date"),
-            "left"
-        ).join(
-            dim_date.select(F.col("date").alias("ing_date"), F.col("date_key").alias("ing_date_key")),
-            F.to_date(F.col("oer.ingested_at")) == F.col("ing_date"),
-            "left"
+        # Join date dimensions for date keys (integer YYYYMMDD format)
+        fact = fact.withColumn(
+            "pub_date_key",
+            F.when(
+                F.col("oer.publication_date").isNotNull(),
+                F.date_format(F.to_date(F.col("oer.publication_date")), "yyyyMMdd").cast("int")
+            ).otherwise(None)
+        ).withColumn(
+            "ing_date_key",
+            F.date_format(F.to_date(F.col("oer.ingested_at")), "yyyyMMdd").cast("int")
         )
 
         # Select only keys and measures (NO descriptive attributes)
@@ -588,35 +608,124 @@ class GoldAnalyticsBuilder:
             # Array of foreign keys
             F.col("oer.program_ids"),
             
-            # Measures (numeric facts)
-            F.size(F.col("oer.subjects")).alias("subjects_count"),
-            F.size(F.col("oer.keywords")).alias("keywords_count"),
-            F.size(F.col("oer.creator_names")).alias("creator_count"),
+            # Measures (numeric facts) - Only meaningful aggregatable metrics
             F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
             F.size(F.col("oer.program_ids")).alias("matched_programs_count"),
             F.col("oer.data_quality_score"),
-            
-            # Timestamps (for time-series analysis)
-            F.col("oer.publication_date"),
-            F.col("oer.last_updated_at"),
-            F.col("oer.scraped_at"),
-            F.col("oer.ingested_at"),
         )
 
         return fact.orderBy(F.desc("data_quality_score"))
 
+    def _build_bridge_oer_subjects(
+        self,
+        oer_df: DataFrame,
+        dim_subjects: DataFrame,
+    ) -> DataFrame:
+        """
+        Bridge Table: OER Resources ↔ Subjects (Many-to-Many)
+        
+        Purpose: Link OER resources to their matched subjects
+        Allows queries like:
+        - "Get all subjects for OER X"
+        - "Get all OER for subject Y"
+        - "Export OER with their full subject list"
+        
+        Grain: One row per (OER, Subject) pair
+        """
+        # Explode matched_subjects array to get one row per match
+        bridge = oer_df.select(
+            F.col("resource_uid").alias("resource_key"),
+            F.explode_outer("matched_subjects").alias("matched_subject")
+        ).select(
+            F.col("resource_key"),
+            F.col("matched_subject.subject_id").alias("subject_id"),
+            F.col("matched_subject.subject_code").alias("subject_code"),
+            F.col("matched_subject.similarity").alias("similarity_score"),
+            F.col("matched_subject.matched_text").alias("matched_text"),
+        ).where(F.col("subject_id").isNotNull())
+        
+        # Join with dim_subjects to get subject_key
+        bridge = bridge.join(
+            dim_subjects.select("subject_key", "subject_id").dropDuplicates(["subject_id"]),
+            "subject_id",
+            "left"
+        ).select(
+            F.col("resource_key"),
+            F.col("subject_key"),
+            F.col("subject_id"),
+            F.col("subject_code"),
+            F.col("similarity_score"),
+            F.col("matched_text"),
+        )
+        
+        return bridge.orderBy("resource_key", F.desc("similarity_score"))
+
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
-        """Write DataFrame to Gold Iceberg table."""
+        """Write DataFrame to Gold Iceberg table - full refresh strategy with cleanup."""
         if df is None or df.rdd.isEmpty():
             print(f" {description}: No data to write")
             return
 
         try:
             count = df.count()
+            
+            # Gold tables are FULL REFRESH (not incremental)
+            # Because we rebuild ALL dimensions and facts from current Silver state
+            print(f" {description}: Full refresh with {count:,} records")
+            
+            # Write fresh data (createOrReplace creates new snapshot)
             df.writeTo(table_name).using("iceberg").createOrReplace()
+            
             print(f" {description}: Wrote {count:,} records to {table_name}")
+            
+            # Cleanup old snapshots and orphan files using Iceberg maintenance
+            self._cleanup_iceberg_table(table_name, description)
+            
         except Exception as exc:
             print(f" {description}: Failed to write - {exc}")
+
+    def _cleanup_iceberg_table(self, table_name: str, description: str) -> None:
+        """
+        Iceberg table maintenance: expire old snapshots and remove orphan files.
+        
+        This ensures:
+        1. Only latest snapshot is kept (no duplicate data from previous runs)
+        2. Orphan parquet files are removed (storage cleanup)
+        """
+        try:
+            # Expire all snapshots older than now (keep only the latest)
+            # retain_last=1 keeps only the most recent snapshot
+            print(f" {description}: Running Iceberg maintenance...")
+            
+            # Method 1: Expire snapshots older than current timestamp
+            self.spark.sql(f"""
+                CALL iceberg.system.expire_snapshots(
+                    table => '{table_name}',
+                    older_than => TIMESTAMP '{self._get_current_timestamp()}',
+                    retain_last => 1
+                )
+            """)
+            print(f" {description}: Expired old snapshots (kept last 1)")
+            
+            # Method 2: Remove orphan files (parquet files not in any snapshot)
+            self.spark.sql(f"""
+                CALL iceberg.system.remove_orphan_files(
+                    table => '{table_name}',
+                    older_than => TIMESTAMP '{self._get_current_timestamp()}'
+                )
+            """)
+            print(f" {description}: Removed orphan files")
+            
+        except Exception as cleanup_exc:
+            # Cleanup is optional - don't fail the write if cleanup fails
+            print(f" {description}: Iceberg cleanup note - {cleanup_exc}")
+
+    def _get_current_timestamp(self) -> str:
+        """Get current timestamp in format suitable for Iceberg procedures."""
+        from datetime import datetime, timedelta
+        # Add 1 minute buffer to ensure we're after the write
+        ts = datetime.now() + timedelta(minutes=1)
+        return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main() -> None:

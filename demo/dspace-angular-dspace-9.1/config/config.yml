@@ -1,0 +1,5 @@
+rest:
+  ssl: false
+  host: localhost
+  port: 8180
+  nameSpace: /server

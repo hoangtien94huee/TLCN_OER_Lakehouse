@@ -70,10 +70,10 @@ class MITOCWScraper:
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.82 Safari/537.36'
         })
         
-        # Multimedia settings - chá»‰ focus vÃ o lecture notes
-        self.enable_video_scraping = os.getenv('ENABLE_VIDEO_SCRAPING', '0') == '1'  # Táº¯t video máº·c Ä‘á»‹nh
+        # Multimedia settings - chỉ focus vào lecture notes
+        self.enable_video_scraping = os.getenv('ENABLE_VIDEO_SCRAPING', '0') == '1'  
         self.enable_pdf_scraping = os.getenv('ENABLE_PDF_SCRAPING', '0') == '1'
-        self.max_pdf_size_mb = float(os.getenv('MAX_PDF_SIZE_MB', '50.0'))  # TÄƒng limit cho lecture notes
+        self.max_pdf_size_mb = float(os.getenv('MAX_PDF_SIZE_MB', '50.0'))  # Tăng limit cho lecture notes
         self.download_pdfs = os.getenv('DOWNLOAD_PDFS', '1') == '1'
         
         # Smart download configuration 
@@ -95,10 +95,8 @@ class MITOCWScraper:
         if self.existing_course_ids:
             print(f"[MIT OCW] Loaded {len(self.existing_course_ids)} existing courses; duplicates will be skipped.")
 
-        # Báº¯t buá»™c setup Selenium
         self._setup_selenium()
         
-        # Kiá»ƒm tra Selenium Ä‘Ã£ setup thÃ nh cÃ´ng
         if not self.driver:
             raise Exception("Selenium WebDriver is required for MIT OCW scraping but failed to initialize")
         
@@ -267,11 +265,47 @@ class MITOCWScraper:
             self.cleanup()
     
     def _get_course_urls(self) -> set:
-        """Get course URLs using advanced method with fallback"""
+        """Get course URLs from sitemap - MUCH FASTER than scrolling search page"""
+        course_urls = set()
         
         try:
+            # MIT OCW has sitemap with all course URLs
+            sitemap_url = "https://ocw.mit.edu/sitemap.xml"
+            print(f"Fetching course list from sitemap: {sitemap_url}")
+            
+            response = self.session.get(sitemap_url, timeout=30)
+            response.raise_for_status()
+            
+            # Try XML parser first, fallback to html.parser if lxml not available
+            try:
+                soup = BeautifulSoup(response.content, 'xml')
+            except Exception:
+                soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Find all <loc> tags containing course URLs
+            for loc in soup.find_all('loc'):
+                url = loc.get_text(strip=True)
+                
+                # Convert sitemap URLs to actual course URLs
+                # https://ocw.mit.edu/courses/xxx/sitemap.xml → https://ocw.mit.edu/courses/xxx/
+                if '/sitemap.xml' in url:
+                    url = url.replace('/sitemap.xml', '/')
+                
+                if self._is_valid_course_url(url):
+                    course_urls.add(url)
+            
+            print(f"✓ Found {len(course_urls)} courses from sitemap")
+            return course_urls
+            
+        except Exception as e:
+            print(f"⚠ Sitemap fetch failed: {e}, trying search page fallback...")
+            return self._get_course_urls_fallback()
+    
+    def _get_course_urls_fallback(self) -> set:
+        """Fallback: Get course URLs from search page using Selenium"""
+        try:
             search_url = "https://ocw.mit.edu/search/?s=department_course_numbers.sort_coursenum&type=course"
-            print(f"Getting courses from: {search_url}")
+            print(f"Getting courses from search page: {search_url}")
             
             self.driver.get(search_url)
             time.sleep(3)
@@ -281,7 +315,7 @@ class MITOCWScraper:
             
             # Extract course URLs
             course_urls = self._extract_course_urls()
-            print(f"Found {len(course_urls)} course URLs")
+            print(f"Found {len(course_urls)} course URLs from search")
             
             return course_urls
             
@@ -294,7 +328,7 @@ class MITOCWScraper:
         try:
             last_height = self.driver.execute_script("return document.body.scrollHeight")
             scroll_attempts = 0
-            max_scrolls = 200
+            max_scrolls = 5
             
             while scroll_attempts < max_scrolls:
                 # Scroll down
@@ -342,7 +376,10 @@ class MITOCWScraper:
             return False
         
         # Skip unwanted patterns
-        skip_patterns = ['/about/', '/instructor-insights/', '/download/', '/calendar/']
+        skip_patterns = [
+            '/about/', '/instructor-insights/', '/download/', '/calendar/',
+            '/sitemap.xml', '.xml', '.json'  # Skip sitemap and data files
+        ]
         return not any(pattern in url for pattern in skip_patterns)
     
     def _scrape_course(self, url: str) -> Dict[str, Any]:
@@ -355,24 +392,16 @@ class MITOCWScraper:
             # Extract basic course info
             course_info = self._extract_course_info(soup, url)
             
-            # Extract multimedia content with deep navigation
+            # Extract multimedia content from main page
             videos = []
             pdfs = []
             
             if self.enable_video_scraping or self.enable_pdf_scraping:
-                videos, pdfs = self._extract_multimedia_deep(url, soup, course_info)
+                videos, pdfs = self._extract_multimedia_simple(url, soup, course_info)
             
             # Update course info with multimedia content
             course_info['videos'] = videos
             course_info['pdfs'] = pdfs
-            course_info['has_videos'] = len(videos) > 0
-            course_info['has_pdfs'] = len(pdfs) > 0
-            course_info['multimedia_count'] = len(videos) + len(pdfs)
-            
-            # Add summary info
-            course_info['video_count'] = len(videos)
-            course_info['pdf_count'] = len(pdfs)
-            course_info['lecture_notes_count'] = len([p for p in pdfs if p.get('category') == 'lecture_notes'])
             
             return course_info
             
@@ -600,75 +629,31 @@ class MITOCWScraper:
                     return None
     
     def _extract_course_info(self, soup, url: str) -> Dict[str, Any]:
-        """Extract comprehensive course information for MIT OCW"""
+        """Extract essential course information for Silver layer"""
         
-        # Basic course identification
-        course_number = self._extract_course_number_from_url(url)
         course_id = self.create_document_id(self.source, url)
-        
-        # Title extraction
         title = self._extract_title(soup)
-        
-        # Instructor extraction with multiple methods
         instructors = self._extract_instructors_comprehensive(soup)
-        
-        # Department/Subject extraction
-        department = self._extract_department_comprehensive(soup, course_number)
-        
-        # Description extraction
         description = self._extract_description_comprehensive(soup)
         
-        # Level determination
-        level = self._extract_level_from_course_number(course_number)
-        
-        # Semester/Year extraction
-        semester, year = self._extract_semester_year(course_number, soup)
-        
-        # Additional metadata
-        tags = self._extract_course_tags(soup, title)
-        difficulty = self._extract_difficulty_level(soup, course_number)
-        prerequisites = self._extract_prerequisites(soup)
+        # Extract year from URL or page
+        course_number = self._extract_course_number_from_url(url)
+        _, year = self._extract_semester_year(course_number, soup)
         
         return {
-            # Core identifiers
             'id': course_id,
-            'course_id': course_number,
-            'course_number': course_number,
             'title': title,
             'url': url,
-            
-            # People
             'instructors': instructors,
-            'instructor_count': len(instructors) if instructors else 0,
-            
-            # Classification
-            'department': department,
-            'subject': department,  # For compatibility with silver layer
-            'level': level,
-            'difficulty': difficulty,
-            
-            # Time information
-            'semester': semester,
-            'year': year,
-            'academic_term': f"{semester} {year}" if semester != 'Unknown' and year != 'Unknown' else 'Unknown',
-            
-            # Content
             'description': description,
-            'description_length': len(description) if description else 0,
-            'prerequisites': prerequisites,
-            'tags': tags,
-            
-            # Technical metadata
+            'year': year if year != 'Unknown' else None,
             'source': self.source,
             'scraped_at': datetime.now().isoformat(),
-            'scraping_version': '2.0',
+            'language': 'en',  # MIT OCW is English
             
-            # Placeholder for multimedia content
+            # Placeholder for multimedia (populated if enabled)
             'videos': [],
-            'pdfs': [],
-            'has_videos': False,
-            'has_pdfs': False,
-            'multimedia_count': 0
+            'pdfs': []
         }
     
     def _extract_course_number_from_url(self, url: str) -> str:
@@ -983,87 +968,6 @@ class MITOCWScraper:
         except:
             return 'unknown-course'
     
-    def _extract_text_by_selectors(self, soup, selectors, attribute=None):
-        """Extract text using multiple CSS selectors"""
-        for selector in selectors:
-            try:
-                element = soup.select_one(selector)
-                if element:
-                    return element.get(attribute) if attribute else element.get_text()
-            except:
-                continue
-        return ""
-    
-    def _extract_subject(self, soup):
-        """Extract subject/department"""
-        subject_selectors = [
-            '.breadcrumbs a',
-            '.course-subject',
-            '.department',
-            'meta[name="subject"]'
-        ]
-        
-        subject = self._extract_text_by_selectors(soup, subject_selectors, 'content')
-        if subject and len(subject) > 5:
-            return subject
-        
-        # Try breadcrumbs
-        breadcrumbs = soup.find('nav', class_='breadcrumbs') or soup.find('ol', class_='breadcrumb')
-        if breadcrumbs:
-            links = breadcrumbs.find_all('a')
-            for link in links:
-                text = link.get_text().strip()
-                if text and text.lower() not in ['home', 'courses', 'mit ocw']:
-                    return text
-        
-        return "General"
-    
-    def _guess_subject_from_title(self, title: str) -> str:
-        """Guess subject from course title"""
-        subjects = {
-            'mathematics': ['math', 'calculus', 'algebra', 'geometry', 'statistics'],
-            'physics': ['physics', 'mechanics', 'quantum', 'thermodynamics'],
-            'chemistry': ['chemistry', 'chemical', 'organic', 'inorganic'],
-            'biology': ['biology', 'biological', 'bio', 'genetics', 'molecular'],
-            'computer_science': ['computer', 'programming', 'algorithms', 'software'],
-            'engineering': ['engineering', 'mechanical', 'electrical', 'civil'],
-            'economics': ['economics', 'economic', 'finance', 'business'],
-            'literature': ['literature', 'writing', 'english', 'poetry']
-        }
-        
-        title_lower = title.lower()
-        for subject, keywords in subjects.items():
-            if any(keyword in title_lower for keyword in keywords):
-                return subject.replace('_', ' ').title()
-        
-        return "General"
-    
-    def _extract_level(self, soup) -> str:
-        """Extract course level"""
-        level_indicators = soup.find_all(string=lambda text: text and any(
-            level in text.lower() for level in ['undergraduate', 'graduate', 'level']))
-        
-        for indicator in level_indicators:
-            text = indicator.lower()
-            if 'undergraduate' in text:
-                return 'Undergraduate'
-            elif 'graduate' in text:
-                return 'Graduate'
-        
-        return 'Unknown'
-    
-    def _extract_semester(self, soup) -> str:
-        """Extract semester information"""
-        semester_indicators = soup.find_all(string=lambda text: text and any(
-            term in text.lower() for term in ['spring', 'fall', 'summer', 'winter']))
-        
-        for indicator in semester_indicators:
-            text = indicator.strip()
-            if any(term in text.lower() for term in ['spring', 'fall', 'summer', 'winter']):
-                return text[:20]
-        
-        return 'Unknown'
-    
     def _extract_videos(self, soup, course_url: str, course_info: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Extract videos and transcripts"""
         if not self.enable_video_scraping:
@@ -1348,22 +1252,22 @@ class MITOCWScraper:
         
         combined_text = (title + " " + url + " " + context).lower()
         
-        # Lecture notes vÃ  slides
+        # Lecture notes 
         lecture_keywords = ['lecture', 'notes', 'slides', 'slide', 'presentation', 'handout']
         if any(keyword in combined_text for keyword in lecture_keywords):
             return 'lecture_notes'
         
-        # Readings cÃ³ thá»ƒ cÃ³ giÃ¡ trá»‹
+        # Readings material
         reading_keywords = ['reading', 'textbook', 'book', 'chapter']
         if any(keyword in combined_text for keyword in reading_keywords):
             return 'reading_material'
         
-        # Tá»« chá»‘i assignments vÃ  exams
+        # Reject assignments and exams
         reject_keywords = ['assignment', 'homework', 'problem', 'pset', 'exam', 'test', 'quiz', 'midterm', 'final']
         if any(keyword in combined_text for keyword in reject_keywords):
             return 'rejected'
         
-        # Máº·c Ä‘á»‹nh coi nhÆ° educational material
+        # Default to educational material
         return 'educational_material'
     
     def _should_download_pdf(self, pdf_data: Dict[str, Any]) -> bool:
@@ -1603,254 +1507,54 @@ class MITOCWScraper:
         
         return None
 
-
-
     def _load_existing_course_ids(self) -> Set[str]:
+        """Load existing course IDs from MinIO bronze layer"""
         existing: Set[str] = set()
+        
+        if not self.minio_client:
+            return existing
+        
         try:
-            if not self.output_path.exists():
-                return existing
-            for json_file in sorted(self.output_path.glob("mit_ocw_bronze_*.json")):
+            # List all JSON files in bronze/mit_ocw/json/ prefix
+            objects = self.minio_client.list_objects(
+                self.minio_bucket,
+                prefix='bronze/mit_ocw/json/',
+                recursive=True
+            )
+            
+            for obj in objects:
+                if not obj.object_name.endswith('.json'):
+                    continue
+                
                 try:
-                    with open(json_file, "r", encoding="utf-8") as handle:
-                        content = handle.read().strip()
+                    # Download and parse JSON file
+                    response = self.minio_client.get_object(self.minio_bucket, obj.object_name)
+                    content = response.read().decode('utf-8').strip()
+                    response.close()
+                    response.release_conn()
+                    
                     if not content:
                         continue
-                    records: List[Dict[str, Any]] = []
                     
-                    # Check if content is JSON array (new format like old file)
-                    if content.startswith("["):
-                        try:
-                            parsed = json.loads(content)
-                            if isinstance(parsed, list):
-                                records = [item for item in parsed if isinstance(item, dict)]
-                        except json.JSONDecodeError:
-                            records = []
-                    else:
-                        # Handle JSON Lines format (old new format)
-                        for line in content.splitlines():
-                            line = line.strip()
-                            if not line:
-                                continue
-                            try:
-                                parsed_line = json.loads(line)
-                            except json.JSONDecodeError:
-                                continue
-                            if isinstance(parsed_line, dict):
-                                records.append(parsed_line)
+                    # Parse JSON Array format (not JSON Lines)
+                    records = json.loads(content)
+                    if not isinstance(records, list):
+                        records = [records]
                     
+                    # Extract course IDs
                     for record in records:
-                        course_id = record.get("id")
-                        if not course_id and record.get("url"):
-                            course_id = self.create_document_id(self.source, record["url"])
-                        if course_id:
-                            existing.add(course_id)
+                        if isinstance(record, dict):
+                            course_id = record.get('id')
+                            if not course_id and record.get('url'):
+                                course_id = self.create_document_id(self.source, record['url'])
+                            if course_id:
+                                existing.add(course_id)
                 except Exception as exc:
-                    print(f"[MIT OCW] Skipping existing file {json_file.name}: {exc}")
+                    print(f"[MIT OCW] Skipping file {obj.object_name}: {exc}")
                     continue
         except Exception as exc:
-            print(f"[MIT OCW] Unable to scan existing bronze files: {exc}")
+            print(f"[MIT OCW] Unable to scan MinIO bronze files: {exc}")
         return existing
-
-    def _extract_instructors_advanced(self, soup) -> str:
-        """Extract instructors using multiple methods"""
-        try:
-            # Method 1: Look for instructor-specific elements
-            instructor_selectors = [
-                '.instructors', '.faculty', '.instructor-name', 
-                '[class*="instructor"]', '[class*="faculty"]'
-            ]
-            
-            for selector in instructor_selectors:
-                elements = soup.select(selector)
-                if elements:
-                    instructors = []
-                    for elem in elements:
-                        text = elem.get_text().strip()
-                        if text and text.lower() not in ['unknown', 'n/a']:
-                            instructors.append(text)
-                    if instructors:
-                        return '; '.join(instructors)
-            
-            # Method 2: Search for instructor patterns in text
-            all_text = soup.get_text()
-            import re
-            
-            # Look for "Taught by X" or "Instructor: X" patterns
-            patterns = [
-                r'Taught by[:\s]+([^\\n.;,]+)',
-                r'Instructor[s]?[:\s]+([^\\n.;,]+)',
-                r'Prof[essor]*[:\s]+([^\\n.;,]+)',
-                r'Dr[:\s]+([^\\n.;,]+)'
-            ]
-            
-            for pattern in patterns:
-                matches = re.findall(pattern, all_text, re.IGNORECASE)
-                if matches:
-                    instructors = []
-                    for match in matches:
-                        name = match.strip()
-                        if len(name) > 2 and len(name) < 100:  # Reasonable name length
-                            instructors.append(name)
-                    if instructors:
-                        return '; '.join(instructors[:3])  # Max 3 instructors
-            
-            # Method 3: Look in specific content areas
-            content_areas = soup.find_all(['div', 'section'], class_=lambda x: x and any(
-                keyword in x.lower() for keyword in ['course', 'about', 'instructor', 'faculty']
-            ))
-            
-            for area in content_areas:
-                text = area.get_text()
-                for pattern in patterns:
-                    matches = re.findall(pattern, text, re.IGNORECASE)
-                    if matches:
-                        return matches[0].strip()
-            
-            return "Unknown"
-            
-        except Exception as e:
-            print(f"Error extracting instructors: {e}")
-            return "Unknown"
-    
-    def _extract_subject_advanced(self, soup, title: str) -> str:
-        """Extract subject using advanced methods"""
-        try:
-            # Method 1: From URL department prefix (e.g., 1-89 = Civil Engineering)
-            url_parts = soup.find('link', {'rel': 'canonical'})
-            if url_parts:
-                url = url_parts.get('href', '')
-                dept_map = {
-                    '1-': 'Civil and Environmental Engineering',
-                    '2-': 'Mechanical Engineering', 
-                    '3-': 'Materials Science and Engineering',
-                    '6-': 'Electrical Engineering and Computer Science',
-                    '8-': 'Physics',
-                    '14-': 'Economics',
-                    '15-': 'Management',
-                    '16-': 'Aeronautics and Astronautics',
-                    '18-': 'Mathematics'
-                }
-                
-                for prefix, department in dept_map.items():
-                    if prefix in url:
-                        return department
-            
-            # Method 2: From page title breadcrumbs
-            page_title = soup.find('title')
-            if page_title:
-                title_text = page_title.get_text()
-                if ' | ' in title_text:
-                    parts = title_text.split(' | ')
-                    if len(parts) >= 2:
-                        # Usually format: "Course | Department | MIT OCW"
-                        department = parts[1].strip()
-                        if department not in ['MIT OpenCourseWare', 'MIT OCW']:
-                            return department
-            
-            # Method 3: Guess from course title keywords
-            return self._guess_subject_from_title(title)
-            
-        except Exception as e:
-            print(f"Error extracting subject: {e}")
-            return "General"
-    
-    def _extract_description_advanced(self, soup) -> str:
-        """Extract course description using multiple methods"""
-        try:
-            # Method 1: Meta description
-            meta_desc = soup.find('meta', {'name': 'description'})
-            if meta_desc and meta_desc.get('content'):
-                desc = meta_desc.get('content').strip()
-                if len(desc) > 20:  # Reasonable description length
-                    return desc
-            
-            # Method 2: Course description sections
-            desc_selectors = [
-                '.course-description', '.course-intro', '.description',
-                '[class*="description"]', '[class*="intro"]', '[class*="about"]'
-            ]
-            
-            for selector in desc_selectors:
-                elements = soup.select(selector)
-                for elem in elements:
-                    text = elem.get_text().strip()
-                    if len(text) > 50:  # Substantial content
-                        return text[:500]
-            
-            # Method 3: Look for description in first few paragraphs
-            paragraphs = soup.find_all('p')
-            for p in paragraphs[:5]:  # Check first 5 paragraphs
-                text = p.get_text().strip()
-                if len(text) > 100 and any(keyword in text.lower() for keyword in 
-                    ['course', 'subject', 'covers', 'introduces', 'focuses', 'examines']):
-                    return text[:500]
-            
-            return ""
-            
-        except Exception as e:
-            print(f"Error extracting description: {e}")
-            return ""
-    
-    def _extract_level_advanced(self, soup, title: str) -> str:
-        """Extract course level with better detection"""
-        try:
-            # Check common level indicators
-            text = soup.get_text().lower()
-            
-            if any(term in text for term in ['graduate', 'grad', 'phd', 'doctoral']):
-                return 'Graduate'
-            elif any(term in text for term in ['undergraduate', 'undergrad', 'bachelor']):
-                return 'Undergraduate'
-            
-            # Check course number pattern (graduate courses usually 600+)
-            import re
-            course_num_match = re.search(r'(\\d+)\\.(\\d+)', title)
-            if course_num_match:
-                major_num = int(course_num_match.group(2))
-                if major_num >= 600:
-                    return 'Graduate'
-                else:
-                    return 'Undergraduate'
-            
-            return 'Unknown'
-            
-        except Exception as e:
-            print(f"Error extracting level: {e}")
-            return 'Unknown'
-    
-    def _extract_semester_advanced(self, soup) -> str:
-        """Extract semester info with better parsing"""
-        try:
-            text = soup.get_text()
-            
-            # Look for semester patterns
-            import re
-            semester_patterns = [
-                r'(Fall|Spring|Summer|Winter)\\s+(\\d{4})',
-                r'(Fall|Spring|Summer|Winter)\\s+\\d{2}',
-                r'(Fall|Spring|Summer|Winter)\\s+Semester'
-            ]
-            
-            for pattern in semester_patterns:
-                matches = re.findall(pattern, text, re.IGNORECASE)
-                if matches:
-                    if isinstance(matches[0], tuple):
-                        return ' '.join(matches[0])
-                    else:
-                        return matches[0]
-            
-            # Simple semester detection
-            seasons = ['Fall', 'Spring', 'Summer', 'Winter']
-            for season in seasons:
-                if season.lower() in text.lower():
-                    return season
-            
-            return 'Unknown'
-            
-        except Exception as e:
-            print(f"Error extracting semester: {e}")
-            return 'Unknown'
 
 
 def run_mit_ocw_scraper(**kwargs):

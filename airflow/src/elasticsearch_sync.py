@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import os
 import json
+import logging
+import warnings
 from datetime import date, datetime
 from io import BytesIO
 from decimal import Decimal
@@ -23,6 +25,10 @@ from elasticsearch import Elasticsearch, helpers
 from minio import Minio
 import pdfplumber
 import PyPDF2
+
+# Suppress pdfminer warnings about invalid color values (common in some PDFs)
+logging.getLogger("pdfminer").setLevel(logging.ERROR)
+warnings.filterwarnings("ignore", message=".*invalid float value.*")
 
 
 try:
@@ -99,6 +105,7 @@ class OERElasticsearchIndexer:
         self.max_pdf_texts = int(os.getenv("ELASTICSEARCH_MAX_PDF_PER_RESOURCE", "3"))  # Max 3 PDFs per resource
         self.max_pdf_pages = int(os.getenv("ELASTICSEARCH_PDF_MAX_PAGES", "50"))  # Max pages to parse per PDF
         self.max_pdf_page_chars = int(os.getenv("ELASTICSEARCH_PDF_PAGE_CHARS", "2000"))  # Max chars per page chunk
+        self.search_pdf_chars = int(os.getenv("ELASTICSEARCH_SEARCH_PDF_CHARS", "5000"))  # Max chars to append to search_text
         
         # Kết nối MinIO để lấy PDF content (nếu cần)
         self.minio_client = self._create_minio_client() if self.index_pdf_content else None
@@ -117,7 +124,7 @@ class OERElasticsearchIndexer:
         # Sử dụng local JARs thay vì download từ Maven (tránh network issues)
         jars_dir = "/opt/airflow/jars"
         local_jars = ",".join([
-            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",  # Iceberg support
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",  # Iceberg support
             f"{jars_dir}/hadoop-aws-3.3.4.jar",  # S3A filesystem
             f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"  # AWS SDK
         ])
@@ -127,7 +134,7 @@ class OERElasticsearchIndexer:
         # Tạo Spark session với các cấu hình tối ưu
         session = (
             SparkSession.builder.appName("OER-Gold-Elasticsearch")
-            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Chạy local với 2 cores
+            .master(os.getenv("SPARK_MASTER", "local[*]"))  # Local mode để tránh network issues
             .config("spark.jars", local_jars)  # Load JARs vào classpath
             .config("spark.driver.extraClassPath", local_jars)  # Classpath cho driver
             .config("spark.executor.extraClassPath", local_jars)  # Classpath cho executor
@@ -283,6 +290,7 @@ class OERElasticsearchIndexer:
 
         if system in {"mit_ocw", "mit ocw"}:
             course_id = None
+            # Try to get course_id from bronze record first
             if record:
                 course_id = record.get("course_id") or record.get("course_number")
                 if not course_id and record.get("url"):
@@ -294,15 +302,15 @@ class OERElasticsearchIndexer:
             pdf_entries = self._collect_pdf_entries(prefix)
         elif system in {"otl", "open textbook library"}:
             normalized_id = resource_id.strip()
-            prefixes = [
-                f"bronze/otl/otl-pdfs/{normalized_id}_",
-                f"bronze/otl/otl-pdfs/{normalized_id}/",
-                f"bronze/otl/otl-pdfs/{normalized_id}",
-            ]
-            for prefix in prefixes:
-                pdf_entries = self._collect_pdf_entries(prefix)
-                if pdf_entries:
-                    break
+            # Remove "open textbook library_" or "otl_" prefix if present
+            if normalized_id.startswith("open textbook library_"):
+                normalized_id = normalized_id.replace("open textbook library_", "")
+            elif normalized_id.startswith("otl_"):
+                normalized_id = normalized_id.replace("otl_", "")
+            
+            # List all PDFs in OTL folder and find ones starting with the hash
+            prefix = f"bronze/otl/otl-pdfs/{normalized_id}"
+            pdf_entries = self._collect_pdf_entries(prefix)
         else:
             return None
 
@@ -554,12 +562,14 @@ class OERElasticsearchIndexer:
             return
         resource_id = str(resource_id)
 
+        source_system = document.get("source_system")
         bronze_path = document.get("bronze_source_path")
+        
         record = None
         if isinstance(bronze_path, str):
             record = self._get_bronze_record(bronze_path, resource_id)
 
-        bundle = self._bundle_from_minio(document.get("source_system"), record, resource_id)
+        bundle = self._bundle_from_minio(source_system, record, resource_id)
         if not bundle:
             return
 
@@ -672,6 +682,7 @@ class OERElasticsearchIndexer:
             ("source_code", "source_system"),
             ("language_code", "language"),
             ("publication_date", "publication_date"),
+            ("bronze_source_path", "bronze_source_path"),  # Needed for PDF lookup
         ]
 
         select_exprs = [F.col(col).alias(alias) for col, alias in column_aliases if col in docs.columns]
@@ -823,12 +834,39 @@ class OERElasticsearchIndexer:
 
     def _yield_actions(self, df: DataFrame) -> Iterator[Dict[str, Any]]:
         """Yield Elasticsearch bulk actions from a Spark DataFrame."""
+        pdf_by_source: Dict[str, int] = {}  # Track PDFs by source system
+        source_counts: Dict[str, int] = {}  # Track total docs by source system
+        pdf_error_count = 0
+        total_count = 0
+        
         for row in df.toLocalIterator():
             doc = row.asDict(recursive=True)
             doc = {k: v for k, v in doc.items() if v is not None}
-            self._augment_with_pdf_content(doc)
+            total_count += 1
+            
+            # Track source systems
+            source = doc.get("source_system", "unknown")
+            source_counts[source] = source_counts.get(source, 0) + 1
+            
+            try:
+                self._augment_with_pdf_content(doc)
+                if doc.get("pdf_text") or doc.get("pdf_chunks"):
+                    pdf_by_source[source] = pdf_by_source.get(source, 0) + 1
+            except Exception as exc:
+                pdf_error_count += 1
+                if pdf_error_count <= 3:
+                    print(f"[Warning] PDF augment error for {doc.get('resource_id')}: {exc}")
+            
             doc_id = doc.get("resource_key") or doc.get("resource_id")
             yield {"_index": self.index_name, "_id": doc_id, "_source": doc}
+        
+        # Summary by source
+        total_pdf = sum(pdf_by_source.values())
+        print(f"[PDF Stats] Total: {total_pdf}/{total_count} documents with PDF content")
+        print(f"[Source Systems] {source_counts}")
+        for source, count in sorted(source_counts.items()):
+            pdf_count = pdf_by_source.get(source, 0)
+            print(f"  - {source}: {pdf_count}/{count} PDFs")
 
     def run(self) -> None:
         """Main function: Đồng bộ dữ liệu từ Gold layer sang Elasticsearch"""
@@ -871,4 +909,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

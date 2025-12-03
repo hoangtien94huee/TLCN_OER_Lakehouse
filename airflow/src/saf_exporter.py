@@ -108,8 +108,18 @@ class SAFExporter:
                     if auth:
                         add_element('contributor', 'author', auth)
         
-        # Date Issued - default to current year
-        add_element('date', 'issued', str(datetime.now().year))
+        # Date Issued - use publication_date if available, otherwise current year
+        pub_date = row.get('publication_date')
+        if pub_date:
+            # Handle datetime objects and strings
+            if hasattr(pub_date, 'strftime'):
+                add_element('date', 'issued', pub_date.strftime('%Y-%m-%d'))
+            elif hasattr(pub_date, 'isoformat'):
+                add_element('date', 'issued', pub_date.isoformat()[:10])
+            else:
+                add_element('date', 'issued', str(pub_date)[:10])
+        else:
+            add_element('date', 'issued', str(datetime.now().year))
         
         # Publisher
         publisher = row.get('publisher_name')
@@ -168,20 +178,43 @@ class SAFExporter:
         """
         Read OER data from Gold layer Parquet.
         
-        Gold layer schema (dim_oer_resources):
-        - resource_key, resource_id, title, description, source_url
-        - publisher_name, license_name, license_url
-        - creator_names (array), matched_subjects (array of struct)
-        - dc_xml_path, bronze_source_path
+        Uses Star Schema:
+        - dim_oer_resources: descriptive attributes (title, description, etc.)
+        - fact_oer_resources: keys and measures (publication_date_key, etc.)
+        - dim_date: date dimension for publication_date lookup
         """
         logger.info("Reading Gold layer data...")
         
-        # Read directly from Gold Parquet (Iceberg 1.9.2)
-        gold_oer_path = f"s3a://{self.bucket}/gold/analytics/dim_oer_resources/data/*.parquet"
+        # Read dimension and fact tables
+        dim_oer_path = f"s3a://{self.bucket}/gold/analytics/dim_oer_resources/data/*.parquet"
+        fact_oer_path = f"s3a://{self.bucket}/gold/analytics/fact_oer_resources/data/*.parquet"
+        dim_date_path = f"s3a://{self.bucket}/gold/analytics/dim_date/data/*.parquet"
         
-        logger.info(f"Reading from: {gold_oer_path}")
+        logger.info(f"Reading dim_oer_resources: {dim_oer_path}")
+        dim_oer = self.spark.read.parquet(dim_oer_path)
         
-        df = self.spark.read.parquet(gold_oer_path)
+        logger.info(f"Reading fact_oer_resources: {fact_oer_path}")
+        fact_oer = self.spark.read.parquet(fact_oer_path)
+        
+        logger.info(f"Reading dim_date: {dim_date_path}")
+        dim_date = self.spark.read.parquet(dim_date_path)
+        
+        # Join dim_oer with fact_oer to get publication_date_key
+        df = dim_oer.join(
+            fact_oer.select("resource_key", "publication_date_key"),
+            "resource_key",
+            "left"
+        )
+        
+        # Join with dim_date to get actual publication_date
+        df = df.join(
+            dim_date.select(
+                dim_date.date_key.alias("publication_date_key"),
+                dim_date.date.alias("publication_date")
+            ),
+            "publication_date_key",
+            "left"
+        )
         
         # Filter valid records
         df = df.where(
@@ -191,7 +224,6 @@ class SAFExporter:
         )
         
         # DEDUPLICATE by resource_id - keep first occurrence
-        # This is necessary because Gold layer may have duplicates from multiple runs
         logger.info("Deduplicating by resource_id...")
         df = df.dropDuplicates(["resource_id"])
         

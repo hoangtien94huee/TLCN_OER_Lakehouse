@@ -433,6 +433,8 @@ class GoldAnalyticsBuilder:
             F.col("creator_names"),
             F.col("matched_subjects"),
             F.col("bronze_source_path"),
+            F.col("license_name"),
+            F.col("license_url"),
         )
         
         return dim.dropDuplicates(["resource_key"]).orderBy("resource_key")
@@ -600,6 +602,7 @@ class GoldAnalyticsBuilder:
         )
 
         # Select only keys and measures (NO descriptive attributes)
+        # Normalize data_quality_score to 0-1 scale (handle legacy 0-10 scale)
         fact = fact.select(
             # Primary Key
             F.col("oer.resource_uid").alias("resource_key"),
@@ -616,7 +619,13 @@ class GoldAnalyticsBuilder:
             # Measures (numeric facts) - Only meaningful aggregatable metrics
             F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
             F.size(F.col("oer.program_ids")).alias("matched_programs_count"),
-            F.col("oer.data_quality_score"),
+            # Normalize: if score > 1, it's on 0-10 scale, divide by 10
+            F.when(
+                F.col("oer.data_quality_score") > 1.0,
+                F.round(F.col("oer.data_quality_score") / 10.0, 2)
+            ).otherwise(
+                F.col("oer.data_quality_score")
+            ).alias("data_quality_score"),
         )
 
         return fact.orderBy(F.desc("data_quality_score"))
@@ -675,62 +684,26 @@ class GoldAnalyticsBuilder:
             count = df.count()
             
             # Gold tables are FULL REFRESH (not incremental)
-            # Because we rebuild ALL dimensions and facts from current Silver state
-            print(f" {description}: Full refresh with {count:,} records")
+            # Drop existing table to ensure clean state (no stale data)
+            print(f" {description}: Dropping existing table for clean refresh...")
+            try:
+                self.spark.sql(f"DROP TABLE IF EXISTS {table_name} PURGE")
+            except Exception:
+                # PURGE might not be supported, try without it
+                try:
+                    self.spark.sql(f"DROP TABLE IF EXISTS {table_name}")
+                except Exception as drop_err:
+                    print(f" {description}: Note - could not drop table: {drop_err}")
             
-            # Write fresh data (createOrReplace creates new snapshot)
-            df.writeTo(table_name).using("iceberg").createOrReplace()
+            print(f" {description}: Creating fresh table with {count:,} records")
+            
+            # Write fresh data
+            df.writeTo(table_name).using("iceberg").create()
             
             print(f" {description}: Wrote {count:,} records to {table_name}")
             
-            # Cleanup old snapshots and orphan files using Iceberg maintenance
-            self._cleanup_iceberg_table(table_name, description)
-            
         except Exception as exc:
             print(f" {description}: Failed to write - {exc}")
-
-    def _cleanup_iceberg_table(self, table_name: str, description: str) -> None:
-        """
-        Iceberg table maintenance: expire old snapshots and remove orphan files.
-        
-        This ensures:
-        1. Only latest snapshot is kept (no duplicate data from previous runs)
-        2. Orphan parquet files are removed (storage cleanup)
-        """
-        try:
-            # Expire all snapshots older than now (keep only the latest)
-            # retain_last=1 keeps only the most recent snapshot
-            print(f" {description}: Running Iceberg maintenance...")
-            
-            # Method 1: Expire snapshots older than current timestamp
-            self.spark.sql(f"""
-                CALL iceberg.system.expire_snapshots(
-                    table => '{table_name}',
-                    older_than => TIMESTAMP '{self._get_current_timestamp()}',
-                    retain_last => 1
-                )
-            """)
-            print(f" {description}: Expired old snapshots (kept last 1)")
-            
-            # Method 2: Remove orphan files (parquet files not in any snapshot)
-            self.spark.sql(f"""
-                CALL iceberg.system.remove_orphan_files(
-                    table => '{table_name}',
-                    older_than => TIMESTAMP '{self._get_current_timestamp()}'
-                )
-            """)
-            print(f" {description}: Removed orphan files")
-            
-        except Exception as cleanup_exc:
-            # Cleanup is optional - don't fail the write if cleanup fails
-            print(f" {description}: Iceberg cleanup note - {cleanup_exc}")
-
-    def _get_current_timestamp(self) -> str:
-        """Get current timestamp in format suitable for Iceberg procedures."""
-        from datetime import datetime, timedelta
-        # Add 1 minute buffer to ensure we're after the write
-        ts = datetime.now() + timedelta(minutes=1)
-        return ts.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def main() -> None:

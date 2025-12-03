@@ -148,10 +148,10 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>🔍 OER Search</h1>
+            <h1> OER Search</h1>
             <p>Tìm kiếm tài nguyên giáo dục mở</p>
             <a href="/recommend" style="color: #34a853; text-decoration: none; font-size: 14px;">
-                💡 Xem gợi ý tài liệu theo lịch sử mượn sách →
+                 Xem gợi ý tài liệu theo lịch sử mượn sách →
             </a>
         </div>
         
@@ -188,13 +188,13 @@
                     </div>
                     <div class="meta">
                         {% if item.source %}
-                            <span>📚 {{ item.source }}</span>
+                            <span> {{ item.source }}</span>
                         {% endif %}
-                        <span>⭐ {{ "%.1f"|format(item.score) }}</span>
+                        <span> {{ "%.1f"|format(item.score) }}</span>
                     </div>
                     {% if item.pdf_links %}
                     <div class="pdf-links" style="margin-top: 10px;">
-                        📄 PDF:
+                         PDF:
                         {% for pdf in item.pdf_links[:3] %}
                             <a href="{{ pdf.url }}" target="_blank" 
                                style="display: inline-block; margin: 4px; padding: 4px 12px; 

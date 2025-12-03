@@ -58,7 +58,7 @@ services:
       resources:
         limits:
           cpus: '4.0'      # Giới hạn 4 CPU cores (25% của 16 cores)
-          memory: 2048M    # Giới hạn 2GB RAM
+          memory: 2G    # Giới hạn 4GB RAM
         reservations:
           cpus: '1.0'
           memory: 512M

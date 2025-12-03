@@ -197,21 +197,21 @@
         <a href="/" class="nav-link">← Quay lại Tìm kiếm</a>
         
         <div class="header">
-            <h1>💡 Gợi ý tài liệu</h1>
+            <h1> Gợi ý tài liệu</h1>
             <p>Dựa trên lịch sử mượn sách của bạn</p>
         </div>
         
         <form class="search-box" method="GET" action="/recommend">
             <input type="text" name="student_id" value="{{ student_id or '' }}" 
-                   placeholder="Nhập mã sinh viên (VD: 22142278)..." autofocus>
+                   placeholder="Nhập mã sinh viên ..." autofocus>
             <button type="submit">Xem gợi ý</button>
         </form>
         
         {% if student_id %}
             {% if topics %}
                 <div class="topics-section">
-                    <h3>👤 {{ student_name or student_id }}</h3>
-                    <h4 style="margin-top: 15px; color: #666;">📚 Chủ đề bạn quan tâm:</h4>
+                    <h3> {{ student_name or student_id }}</h3>
+                    <h4 style="margin-top: 15px; color: #666;"> Chủ đề bạn quan tâm:</h4>
                     <div class="topic-tags" style="margin-top: 10px;">
                         {% for topic, count in topics.items() %}
                         <span class="topic-tag">
@@ -238,9 +238,9 @@
                         </div>
                         <div class="meta">
                             {% if item.source %}
-                                <span>📚 {{ item.source }}</span>
+                                <span> {{ item.source }}</span>
                             {% endif %}
-                            <span>⭐ {{ "%.1f"|format(item.score) }}</span>
+                            <span> {{ "%.1f"|format(item.score) }}</span>
                         </div>
                         {% if item.subjects %}
                         <div class="subjects">

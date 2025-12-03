@@ -683,7 +683,6 @@ class SilverTransformer:
                     "mit_ocw": "MIT OpenCourseWare",
                     "openstax": "OpenStax",
                     "otl": "Open Textbook Library",
-                    "oer_commons": "OER Commons",
                 }
                 return source_map.get(source_system, "Unknown")
             
@@ -717,22 +716,23 @@ class SilverTransformer:
                 return None
             
             def compute_quality_score(title, description, creators, publisher_name, language, license_name, source_url):
+                """Compute quality score on 0-1 scale."""
                 score = 0.0
                 if title:
-                    score += 1.5
+                    score += 0.15
                 if description and len(description) > 50:
-                    score += 2.0
+                    score += 0.20
                 if creators:
-                    score += 1.5
+                    score += 0.15
                 if publisher_name and publisher_name != "Unknown":
-                    score += 1.0
+                    score += 0.10
                 if language and language != "unknown":
-                    score += 0.5
+                    score += 0.05
                 if license_name and license_name != "Unknown":
-                    score += 1.5
+                    score += 0.15
                 if source_url:
-                    score += 2.0
-                return round(min(score, 10.0), 2)
+                    score += 0.20
+                return round(min(score, 1.0), 2)
             
             # Main processing logic
             source_system = detect_source_system(row_dict)

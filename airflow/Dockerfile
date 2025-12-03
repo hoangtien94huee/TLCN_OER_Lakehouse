@@ -68,7 +68,7 @@ USER airflow
 # Copy requirements file
 COPY requirements.txt /opt/airflow/
 
-# Install Python dependencies (force no hash check to avoid mismatch)
+# Install Python dependencies with upgrade flag to ensure all dependencies are resolved
 RUN pip install --no-cache-dir --upgrade pip && \
     pip install --no-cache-dir -U -r /opt/airflow/requirements.txt
 

@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OER Learning Hub - {{ student_name or student_id }}</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            min-height: 100vh;
+        }
+        
+        /* Header */
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 16px 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .header-logo {
+            width: 40px;
+            height: 40px;
+            object-fit: contain;
+            background: white;
+            border-radius: 8px;
+            padding: 4px;
+        }
+        
+        .header h1 {
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+        
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.15);
+            padding: 8px 16px;
+            border-radius: 20px;
+        }
+        
+        .user-info .avatar {
+            width: 32px;
+            height: 32px;
+            background: white;
+            color: #667eea;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+        }
+        
+        .user-info .name {
+            font-size: 14px;
+        }
+        
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        /* Main container */
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 24px;
+        }
+        
+        /* Search Section */
+        .search-section {
+            background: white;
+            padding: 24px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .search-box {
+            display: flex;
+            gap: 12px;
+        }
+        
+        .search-box input {
+            flex: 1;
+            padding: 14px 20px;
+            font-size: 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .search-box input:focus {
+            border-color: #667eea;
+        }
+        
+        .search-box button {
+            padding: 14px 32px;
+            font-size: 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .search-box button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+        
+        /* Topics Section */
+        .topics-section {
+            background: white;
+            padding: 20px 24px;
+            border-radius: 12px;
+            margin-bottom: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        }
+        
+        .topics-section h3 {
+            color: #333;
+            font-size: 16px;
+            margin-bottom: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .topic-tags {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        
+        .topic-tag {
+            background: linear-gradient(135deg, #e8f0fe 0%, #f0e8fe 100%);
+            color: #5c4d9a;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: transform 0.2s;
+        }
+        
+        .topic-tag:hover {
+            transform: scale(1.05);
+        }
+        
+        .topic-tag .count {
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .topic-tag.top {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .topic-tag.top .count {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        /* Two Column Layout */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+        
+        @media (max-width: 900px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        /* Section Cards */
+        .section-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        
+        .section-card.full-width {
+            grid-column: 1 / -1;
+        }
+        
+        .section-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .section-header h2 {
+            font-size: 16px;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .section-header .badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        
+        .section-content {
+            padding: 0;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+        
+        /* Resource Item */
+        .resource-item {
+            padding: 16px 20px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.2s;
+        }
+        
+        .resource-item:last-child {
+            border-bottom: none;
+        }
+        
+        .resource-item:hover {
+            background: #fafbfc;
+        }
+        
+        .resource-item h4 {
+            margin-bottom: 6px;
+        }
+        
+        .resource-item h4 a {
+            color: #1a0dab;
+            text-decoration: none;
+            font-size: 15px;
+            line-height: 1.4;
+        }
+        
+        .resource-item h4 a:hover {
+            text-decoration: underline;
+        }
+        
+        .resource-item .description {
+            color: #666;
+            font-size: 13px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .resource-item .meta {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .resource-item .source-tag {
+            background: #e8f5e9;
+            color: #2e7d32;
+            padding: 3px 8px;
+            border-radius: 4px;
+        }
+        
+        .resource-item .subjects {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 8px;
+        }
+        
+        .resource-item .subject-tag {
+            background: #f0f4ff;
+            color: #5c6bc0;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 11px;
+        }
+        
+        .resource-item .match-tag {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        /* PDF Links */
+        .pdf-links {
+            margin-top: 10px;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .pdf-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 10px;
+            background: #fff3e0;
+            color: #e65100;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 12px;
+            transition: background 0.2s;
+        }
+        
+        .pdf-link:hover {
+            background: #ffe0b2;
+        }
+        
+        /* Empty State */
+        .empty-state {
+            padding: 40px 20px;
+            text-align: center;
+            color: #888;
+        }
+        
+        .empty-state .icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+        
+        /* Highlight */
+        mark {
+            background: #fff3cd;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        
+        /* Score badge */
+        .score {
+            color: #888;
+            font-size: 11px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <img src="/static/images/logo.png" alt="Logo" class="header-logo">
+            <h1>OER Learning Hub</h1>
+        </div>
+        <div class="header-right">
+            <div class="user-info">
+                <div class="avatar">{{ (student_name or student_id)[:1] }}</div>
+                <span class="name">{{ student_name or student_id }}</span>
+            </div>
+            <a href="/logout" class="logout-btn">Đăng xuất</a>
+        </div>
+    </header>
+    
+    <div class="container">
+        <!-- Search Section -->
+        <div class="search-section">
+            <form class="search-box" method="GET" action="/dashboard">
+                <input type="text" name="q" value="{{ query or '' }}" 
+                       placeholder="🔍 Tìm kiếm tài liệu OER (sách, bài giảng, video...)">
+                <button type="submit">Tìm kiếm</button>
+            </form>
+        </div>
+        
+        <!-- User Topics -->
+        {% if topics %}
+        <div class="topics-section">
+            <h3> Chủ đề bạn quan tâm (dựa trên lịch sử mượn sách)</h3>
+            <div class="topic-tags">
+                {% for topic, count in topics.items() %}
+                <span class="topic-tag {% if loop.index <= 2 %}top{% endif %}">
+                    {{ topic }}
+                    <span class="count">{{ count }} lần</span>
+                </span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Main Content -->
+        {% if query %}
+        <!-- Search Results (Full Width) -->
+        <div class="section-card full-width" style="margin-bottom: 24px;">
+            <div class="section-header">
+                <h2> Kết quả tìm kiếm: "{{ query }}"</h2>
+                <span class="badge">{{ search_results|length }} kết quả</span>
+            </div>
+            <div class="section-content">
+                {% if search_results %}
+                    {% for item in search_results %}
+                    <div class="resource-item">
+                        <h4>
+                            <a href="{{ item.url }}" target="_blank">
+                                {% if item.highlight and item.highlight.title %}
+                                    {{ item.highlight.title[0] | safe }}
+                                {% else %}
+                                    {{ item.title }}
+                                {% endif %}
+                            </a>
+                        </h4>
+                        <div class="description">
+                            {% if item.highlight and item.highlight.description %}
+                                {{ item.highlight.description[0] | safe }}
+                            {% else %}
+                                {{ item.description[:200] }}{% if item.description|length > 200 %}...{% endif %}
+                            {% endif %}
+                        </div>
+                        <div class="meta">
+                            {% if item.source %}
+                            <span class="source-tag">{{ item.source }}</span>
+                            {% endif %}
+                        </div>
+                        {% if item.pdf_links %}
+                        <div class="pdf-links">
+                            {% for pdf in item.pdf_links[:2] %}
+                            <a href="{{ pdf.url }}" target="_blank" class="pdf-link">
+                                 {{ pdf.name[:30] }}{% if pdf.name|length > 30 %}...{% endif %}
+                            </a>
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        {% if item.subjects %}
+                        <div class="subjects">
+                            {% for subj in item.subjects[:4] %}
+                                {% if subj %}
+                                <span class="subject-tag">{{ subj }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <div class="icon"></div>
+                        <p>Không tìm thấy kết quả phù hợp.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+        
+        <!-- Recommendations Section -->
+        <div class="section-card full-width">
+            <div class="section-header">
+                <h2> Gợi ý dành cho bạn</h2>
+                <span class="badge">{{ recommendations|length }} tài liệu</span>
+            </div>
+            <div class="section-content">
+                {% if recommendations %}
+                    {% for item in recommendations %}
+                    <div class="resource-item">
+                        <h4>
+                            <a href="{{ item.url }}" target="_blank">{{ item.title }}</a>
+                        </h4>
+                        <div class="description">
+                            {{ item.description[:200] }}{% if item.description|length > 200 %}...{% endif %}
+                        </div>
+                        <div class="meta">
+                            {% if item.source %}
+                            <span class="source-tag">{{ item.source }}</span>
+                            {% endif %}
+                            <span class="score"> {{ "%.1f"|format(item.score) }}</span>
+                            {% if item.matched_topics %}
+                            <span style="color: #667eea;"> Phù hợp: {{ item.matched_topics | join(', ') }}</span>
+                            {% endif %}
+                        </div>
+                        {% if item.subjects %}
+                        <div class="subjects">
+                            {% for subj in item.subjects[:4] %}
+                                {% if subj %}
+                                <span class="subject-tag {% if subj in top_topics %}match-tag{% endif %}">
+                                    {{ subj }}
+                                </span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="empty-state">
+                        <div class="icon"></div>
+                        <p>Chưa có gợi ý. Hãy mượn thêm sách để nhận gợi ý phù hợp!</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</body>
+</html>

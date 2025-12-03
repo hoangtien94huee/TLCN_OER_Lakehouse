@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from datetime import timedelta
 
 import requests
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Query, Request, Form, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -18,7 +18,7 @@ from minio import Minio
 ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200").rstrip("/")
 ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
 RESULT_SIZE = int(os.getenv("SEARCH_RESULT_SIZE", "20"))
-USER_DATA_PATH = os.getenv("USER_DATA_PATH", "/app/data/user_final.csv")
+USER_DATA_PATH = os.getenv("USER_DATA_PATH", "/opt/airflow/database/user_final.csv")
 
 # MinIO config for PDF access
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -174,14 +174,29 @@ def get_user_topics(student_id: str) -> Dict[str, int]:
     return topic_counts
 
 
-def get_recommendations(topic_counts: Dict[str, int], limit: int = 10) -> List[Dict[str, Any]]:
-    """Get OER recommendations based on user topics."""
+def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_topics: int = 2) -> List[Dict[str, Any]]:
+    """Get OER recommendations based on user's top topics.
+    
+    Args:
+        topic_counts: Dict of topic -> borrow count
+        limit: Max number of results (default 10)
+        top_n_topics: Number of top topics to prioritize (default 2)
+    """
     if not topic_counts:
         return []
     
+    # Get top N topics by count
+    sorted_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)
+    top_topics = [t[0] for t in sorted_topics[:top_n_topics]]
+    
     should_clauses = []
     for topic, count in topic_counts.items():
-        boost_val = min(count, 5)
+        # Higher boost for top topics
+        if topic in top_topics:
+            boost_val = min(count, 5) * 2  # Double boost for top topics
+        else:
+            boost_val = min(count, 5)
+        
         should_clauses.append({
             "multi_match": {
                 "query": topic,
@@ -213,13 +228,19 @@ def get_recommendations(topic_counts: Dict[str, int], limit: int = 10) -> List[D
         results = []
         for hit in data.get("hits", {}).get("hits", []):
             source = hit.get("_source", {})
+            subjects = [s.get("subject_name", "") for s in source.get("matched_subjects", [])]
+            
+            # Find which top topics this resource matches
+            matched_topics = [t for t in top_topics if any(t.lower() in s.lower() for s in subjects)]
+            
             results.append({
                 "title": source.get("title", "Untitled"),
                 "description": source.get("description", ""),
                 "url": source.get("source_url", "#"),
                 "source": source.get("source_system", ""),
-                "subjects": [s.get("subject_name", "") for s in source.get("matched_subjects", [])],
+                "subjects": subjects,
                 "score": hit.get("_score", 0),
+                "matched_topics": matched_topics,
             })
         
         return results
@@ -228,45 +249,122 @@ def get_recommendations(topic_counts: Dict[str, int], limit: int = 10) -> List[D
         return []
 
 
-@app.get("/", response_class=HTMLResponse)
-async def search_page(request: Request, q: Optional[str] = Query(None)):
-    """Main search page."""
-    results = search_elasticsearch(q) if q else []
+def validate_student(student_id: str, password: str) -> Optional[str]:
+    """Validate student login. Returns student name if valid, None otherwise."""
+    if student_id != password:
+        return None
     
-    return templates.TemplateResponse("index.html", {
+    df = get_user_data()
+    if df is None or df.empty:
+        return None
+    
+    match = df[df['So_the'].astype(str) == str(student_id)]
+    if match.empty:
+        return None
+    
+    return match.iloc[0].get('Ho_ten', student_id)
+
+
+def get_student_name(student_id: str) -> Optional[str]:
+    """Get student name by ID."""
+    df = get_user_data()
+    if df is None or df.empty:
+        return None
+    
+    match = df[df['So_the'].astype(str) == str(student_id)]
+    if match.empty:
+        return None
+    
+    return match.iloc[0].get('Ho_ten', '')
+
+
+# ============ ROUTES ============
+
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    """Redirect to login page."""
+    student_id = request.cookies.get("student_id")
+    if student_id:
+        return RedirectResponse(url="/dashboard", status_code=302)
+    return RedirectResponse(url="/login", status_code=302)
+
+
+@app.get("/login", response_class=HTMLResponse)
+async def login_page(request: Request):
+    """Login page."""
+    student_id = request.cookies.get("student_id")
+    if student_id:
+        return RedirectResponse(url="/dashboard", status_code=302)
+    
+    return templates.TemplateResponse("login.html", {
         "request": request,
-        "query": q or "",
-        "results": results,
-        "total": len(results)
+        "error": None,
+        "username": ""
     })
 
 
-@app.get("/recommend", response_class=HTMLResponse)
-async def recommend_page(request: Request, student_id: Optional[str] = Query(None)):
-    """Recommendation page for a student."""
-    topics = {}
-    results = []
-    student_name = None
+@app.post("/login", response_class=HTMLResponse)
+async def login_submit(request: Request, username: str = Form(...), password: str = Form(...)):
+    """Handle login form submission."""
+    student_name = validate_student(username, password)
     
-    if student_id:
-        topics = get_user_topics(student_id)
-        results = get_recommendations(topics, limit=15)
-        # Lấy tên sinh viên
-        df = get_user_data()
-        if df is not None and not df.empty:
-            match = df[df['So_the'].astype(str) == str(student_id)]
-            if not match.empty:
-                student_name = match.iloc[0].get('Ho_ten', '')
+    if student_name is None:
+        return templates.TemplateResponse("login.html", {
+            "request": request,
+            "error": "Mã sinh viên không tồn tại hoặc mật khẩu không đúng.",
+            "username": username
+        })
     
-    return templates.TemplateResponse("recommend.html", {
+    # Set cookie and redirect to dashboard
+    response = RedirectResponse(url="/dashboard", status_code=302)
+    response.set_cookie(key="student_id", value=username, max_age=86400)  # 1 day
+    return response
+
+
+@app.get("/logout")
+async def logout():
+    """Logout and clear session."""
+    response = RedirectResponse(url="/login", status_code=302)
+    response.delete_cookie(key="student_id")
+    return response
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, q: Optional[str] = Query(None)):
+    """Main dashboard with search and recommendations."""
+    student_id = request.cookies.get("student_id")
+    if not student_id:
+        return RedirectResponse(url="/login", status_code=302)
+    
+    # Get student info and topics
+    student_name = get_student_name(student_id)
+    topics = get_user_topics(student_id)
+    
+    # Get top 2 topics for highlighting
+    sorted_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)
+    top_topics = [t[0] for t in sorted_topics[:2]]
+    
+    # Get recommendations (limit 10, prioritize top 2 topics)
+    recommendations = get_recommendations(topics, limit=10, top_n_topics=2)
+    
+    # Search results if query provided
+    search_results = []
+    if q:
+        search_results = search_elasticsearch(q)
+    
+    return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "student_id": student_id,
         "student_name": student_name,
         "topics": topics,
-        "results": results,
-        "total": len(results)
+        "top_topics": top_topics,
+        "recommendations": recommendations,
+        "search_results": search_results,
+        "query": q or ""
     })
 
+
+# ============ API ENDPOINTS ============
 
 @app.get("/api/search")
 async def api_search(q: str = Query(..., description="Search query")):

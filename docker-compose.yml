@@ -54,14 +54,6 @@ services:
         condition: service_healthy
     ports:
       - "8080:8080"
-    deploy:
-      resources:
-        limits:
-          cpus: '4.0'      # Giới hạn 4 CPU cores (25% của 16 cores)
-          memory: 2048M    # Giới hạn 2GB RAM
-        reservations:
-          cpus: '1.0'
-          memory: 512M
     volumes:
       - ./data/scraped:/opt/airflow/scraped_data
       - ./data:/opt/airflow/database
@@ -103,12 +95,12 @@ services:
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       # Use local JARs instead of downloading from Maven
-      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.9.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
-      # Spark Memory Configuration (increased for OTL large dataset)
-      - SPARK_DRIVER_MEMORY=1536m
-      - SPARK_EXECUTOR_MEMORY=768m
-      - SPARK_DRIVER_MAXRESULTSIZE=512m
-      - SPARK_SHUFFLE_PARTITIONS=4
+      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.4.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
+      # Spark Memory Configuration (optimized for 7GB total system)
+      - SPARK_DRIVER_MEMORY=512m
+      - SPARK_EXECUTOR_MEMORY=512m
+      - SPARK_DRIVER_MAXRESULTSIZE=256m
+      - SPARK_SHUFFLE_PARTITIONS=2
       # Optional: download and upload PDFs for OTL
       - OTL_DOWNLOAD_PDFS=0
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
@@ -122,6 +114,12 @@ services:
       - DSPACE_USER=admin@dspace.org
       - DSPACE_PASSWORD=dspace
       - DSPACE_COLLECTION_UUID=1e9be5e4-6056-4f43-bad0-0288669ce6ad
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+        reservations:
+          memory: 2G
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -134,14 +132,6 @@ services:
   spark-master:
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-master
-    deploy:
-      resources:
-        limits:
-          cpus: '2.0'      # Giới hạn 2 CPU cores
-          memory: 1536M    # Giới hạn 1.5GB RAM
-        reservations:
-          cpus: '0.5'
-          memory: 512M
     environment:
       - SPARK_MODE=master
       - PYSPARK_PYTHON=python3
@@ -149,7 +139,7 @@ services:
       - SPARK_DRIVER_MEMORY=1g
       - SPARK_EXECUTOR_MEMORY=1g
       - SPARK_DRIVER_MAXRESULTSIZE=512m
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
@@ -183,9 +173,9 @@ services:
       - PYSPARK_PYTHON=python3
       - PYSPARK_DRIVER_PYTHON=python3
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=2g
-      - SPARK_WORKER_CORES=2
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_WORKER_MEMORY=512m
+      - SPARK_WORKER_CORES=1
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
@@ -260,7 +250,6 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Simple OER Search & Recommendations UI
   search-web:
     build:
       context: ./search_app
@@ -268,12 +257,14 @@ services:
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=oer_resources
-      - USER_DATA_PATH=/app/data/user_final.csv
+      - MINIO_BROWSER_ENDPOINT=http://localhost:9000/browser
+      - MINIO_BUCKET=oer-lakehouse
       - MINIO_ENDPOINT=minio:9000
       - MINIO_PUBLIC_ENDPOINT=http://localhost:9000
+      - MINIO_SIGNING_ENDPOINT=http://minio:9000
       - MINIO_ACCESS_KEY=minioadmin
       - MINIO_SECRET_KEY=minioadmin
-      - MINIO_BUCKET=oer-lakehouse
+      - MINIO_SECURE=0
     extra_hosts:
       - "localhost:host-gateway"
     depends_on:
@@ -282,7 +273,8 @@ services:
     ports:
       - "8088:8080"
     volumes:
-      - ./data:/app/data:ro
+      - ./data/reference:/app/reference:ro
+      - ./data:/opt/airflow/database:ro
     restart: unless-stopped
 
   # --- DSpace Services (Official Setup) ---

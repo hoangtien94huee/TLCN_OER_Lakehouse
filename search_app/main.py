@@ -4,7 +4,9 @@ Includes Search and Recommendations with PDF support.
 """
 
 import os
+import json
 import pandas as pd
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import timedelta
 
@@ -19,6 +21,7 @@ ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200").rstrip("/")
 ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
 RESULT_SIZE = int(os.getenv("SEARCH_RESULT_SIZE", "20"))
 USER_DATA_PATH = os.getenv("USER_DATA_PATH", "/opt/airflow/database/user_final.csv")
+REF_DIR = Path(os.getenv("REFERENCE_DIR", "/opt/airflow/database/reference"))
 
 # MinIO config for PDF access
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -89,6 +92,76 @@ def get_user_data() -> Optional[pd.DataFrame]:
     return _user_df
 
 
+def get_reference_tree() -> List[Dict[str, Any]]:
+    """
+    Build faculty -> programs -> subjects tree from local reference JSON files.
+    """
+    faculties_path = REF_DIR / "faculties.json"
+    programs_path = REF_DIR / "programs.json"
+    subjects_path = REF_DIR / "subjects.json"
+    links_path = REF_DIR / "program_subject_links.json"
+
+    if not (faculties_path.exists() and programs_path.exists() and subjects_path.exists() and links_path.exists()):
+        print(f"Reference files not found in {REF_DIR}")
+        return []
+
+    try:
+        faculties = json.loads(faculties_path.read_text(encoding="utf-8"))
+        programs = json.loads(programs_path.read_text(encoding="utf-8"))
+        subjects = json.loads(subjects_path.read_text(encoding="utf-8"))
+        links = json.loads(links_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        print(f"Error loading reference files: {e}")
+        return []
+
+    # Build subjects lookup
+    subjects_by_id = {s["subject_id"]: s for s in subjects if "subject_id" in s}
+
+    # Build program -> subjects mapping
+    prog_subjects: Dict[int, List[Dict[str, Any]]] = {}
+    for link in links:
+        pid = link.get("program_id")
+        sid = link.get("subject_id")
+        subj = subjects_by_id.get(sid)
+        if pid is None or subj is None:
+            continue
+        prog_subjects.setdefault(pid, []).append(subj)
+
+    # Build faculty -> programs mapping
+    faculty_map = {f["faculty_id"]: f.get("faculty_name") for f in faculties if "faculty_id" in f}
+    programs_by_faculty: Dict[int, List[Dict[str, Any]]] = {}
+    for p in programs:
+        fid = p.get("faculty_id")
+        if fid is None:
+            continue
+        programs_by_faculty.setdefault(fid, []).append(p)
+
+    # Build tree structure
+    tree: List[Dict[str, Any]] = []
+    for fid, fname in faculty_map.items():
+        prog_list = []
+        for prog in sorted(programs_by_faculty.get(fid, []), key=lambda x: x.get("program_name", "")):
+            pid = prog.get("program_id")
+            prog_list.append({
+                "program_id": pid,
+                "program_name": prog.get("program_name"),
+                "program_code": prog.get("program_code"),
+                "subjects": sorted(
+                    prog_subjects.get(pid, []),
+                    key=lambda s: s.get("subject_name_en") or s.get("subject_name") or "",
+                ),
+            })
+        tree.append({
+            "faculty_id": fid,
+            "faculty_name": fname,
+            "programs": prog_list
+        })
+
+    return sorted(tree, key=lambda x: x.get("faculty_name") or "")
+
+
+# ...existing search_elasticsearch, get_user_topics, get_recommendations functions...
+
 def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
     """Search OER resources in Elasticsearch."""
     if not query:
@@ -131,7 +204,6 @@ def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
             for pdf_path in source.get("pdf_files", []):
                 url = generate_presigned_url(pdf_path)
                 if url:
-                    # Extract filename from path
                     filename = pdf_path.split("/")[-1] if pdf_path else "PDF"
                     pdf_links.append({"name": filename, "url": url})
             
@@ -156,16 +228,11 @@ def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
 
 
 def get_user_topics(student_id: str) -> Dict[str, int]:
-    """Get topics and frequency for a user from borrowing history.
-    
-    Args:
-        student_id: Mã sinh viên (VD: 22142278, 23142367)
-    """
+    """Get topics and frequency for a user from borrowing history."""
     df = get_user_data()
     if df is None or df.empty:
         return {}
     
-    # Tìm theo mã sinh viên (So_the)
     user_history = df[df['So_the'].astype(str) == str(student_id)]
     if user_history.empty:
         return {}
@@ -175,25 +242,17 @@ def get_user_topics(student_id: str) -> Dict[str, int]:
 
 
 def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_topics: int = 2) -> List[Dict[str, Any]]:
-    """Get OER recommendations based on user's top topics.
-    
-    Args:
-        topic_counts: Dict of topic -> borrow count
-        limit: Max number of results (default 10)
-        top_n_topics: Number of top topics to prioritize (default 2)
-    """
+    """Get OER recommendations based on user's top topics."""
     if not topic_counts:
         return []
     
-    # Get top N topics by count
     sorted_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)
     top_topics = [t[0] for t in sorted_topics[:top_n_topics]]
     
     should_clauses = []
     for topic, count in topic_counts.items():
-        # Higher boost for top topics
         if topic in top_topics:
-            boost_val = min(count, 5) * 2  # Double boost for top topics
+            boost_val = min(count, 5) * 2
         else:
             boost_val = min(count, 5)
         
@@ -230,7 +289,14 @@ def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_top
             source = hit.get("_source", {})
             subjects = [s.get("subject_name", "") for s in source.get("matched_subjects", [])]
             
-            # Find which top topics this resource matches
+            # Generate PDF links for recommendations too
+            pdf_links = []
+            for pdf_path in source.get("pdf_files", []):
+                url = generate_presigned_url(pdf_path)
+                if url:
+                    filename = pdf_path.split("/")[-1] if pdf_path else "PDF"
+                    pdf_links.append({"name": filename, "url": url})
+            
             matched_topics = [t for t in top_topics if any(t.lower() in s.lower() for s in subjects)]
             
             results.append({
@@ -241,6 +307,7 @@ def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_top
                 "subjects": subjects,
                 "score": hit.get("_score", 0),
                 "matched_topics": matched_topics,
+                "pdf_links": pdf_links,
             })
         
         return results
@@ -250,7 +317,7 @@ def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_top
 
 
 def validate_student(student_id: str, password: str) -> Optional[str]:
-    """Validate student login. Returns student name if valid, None otherwise."""
+    """Validate student login."""
     if student_id != password:
         return None
     
@@ -315,9 +382,8 @@ async def login_submit(request: Request, username: str = Form(...), password: st
             "username": username
         })
     
-    # Set cookie and redirect to dashboard
     response = RedirectResponse(url="/dashboard", status_code=302)
-    response.set_cookie(key="student_id", value=username, max_age=86400)  # 1 day
+    response.set_cookie(key="student_id", value=username, max_age=86400)
     return response
 
 
@@ -331,26 +397,25 @@ async def logout():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, q: Optional[str] = Query(None)):
-    """Main dashboard with search and recommendations."""
+    """Main dashboard with search, recommendations and reference tree."""
     student_id = request.cookies.get("student_id")
     if not student_id:
         return RedirectResponse(url="/login", status_code=302)
     
-    # Get student info and topics
     student_name = get_student_name(student_id)
     topics = get_user_topics(student_id)
     
-    # Get top 2 topics for highlighting
     sorted_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)
     top_topics = [t[0] for t in sorted_topics[:2]]
     
-    # Get recommendations (limit 10, prioritize top 2 topics)
     recommendations = get_recommendations(topics, limit=10, top_n_topics=2)
     
-    # Search results if query provided
     search_results = []
     if q:
         search_results = search_elasticsearch(q)
+    
+    # Get reference tree for sidebar
+    reference_tree = get_reference_tree()
     
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
@@ -360,7 +425,9 @@ async def dashboard(request: Request, q: Optional[str] = Query(None)):
         "top_topics": top_topics,
         "recommendations": recommendations,
         "search_results": search_results,
-        "query": q or ""
+        "query": q or "",
+        "reference_tree": reference_tree,
+        "total": len(search_results)
     })
 
 
@@ -379,7 +446,7 @@ async def api_search(q: str = Query(..., description="Search query")):
 
 @app.get("/api/recommend/{student_id}")
 async def api_recommend(student_id: str, limit: int = Query(10, ge=1, le=50)):
-    """REST API endpoint for recommendations by student ID (mã sinh viên)."""
+    """REST API endpoint for recommendations."""
     topics = get_user_topics(student_id)
     results = get_recommendations(topics, limit=limit)
     return {
@@ -388,3 +455,13 @@ async def api_recommend(student_id: str, limit: int = Query(10, ge=1, le=50)):
         "total": len(results),
         "results": results
     }
+
+
+@app.get("/api/facets")
+async def api_facets():
+    """REST API endpoint for faculties/programs/subjects tree."""
+    try:
+        tree = get_reference_tree()
+        return {"faculties": tree}
+    except Exception as exc:
+        return {"faculties": [], "error": str(exc)}

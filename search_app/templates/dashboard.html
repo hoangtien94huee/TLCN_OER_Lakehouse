@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OER Learning Hub - {{ student_name or student_id }}</title>
-    <style>
+    <title>Dashboard - OER Learning Hub</title>
+     <style>
         * {
             box-sizing: border-box;
             margin: 0;
@@ -13,30 +13,260 @@
         
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f7fa;
-            min-height: 100vh;
+            background: #f5f5f5;
         }
         
         /* Header */
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 16px 24px;
+            padding: 1rem 2rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
         }
         
-        .header-left {
+        .header h1 {
+            font-size: 1.5rem;
+        }
+        
+        .header .user-info {
             display: flex;
             align-items: center;
-            gap: 16px;
+            gap: 1rem;
         }
         
+        .logout-btn {
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.3);
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            cursor: pointer;
+            text-decoration: none;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        .logout-btn:hover {
+            background: rgba(255,255,255,0.3);
+        }
+        
+        /* Layout */
+        .layout {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            gap: 1.5rem;
+            padding: 2rem;
+            max-width: 1800px;
+            margin: 0 auto;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            background: white;
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-height: calc(100vh - 150px);
+            overflow-y: auto;
+            position: sticky;
+            top: 2rem;
+        }
+        
+        .sidebar h3 {
+            color: #667eea;
+            margin-bottom: 1rem;
+            font-size: 1.1rem;
+            border-bottom: 2px solid #f0f0f0;
+            padding-bottom: 0.5rem;
+        }
+        
+        .sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+        
+        .sidebar::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 3px;
+        }
+        
+        .sidebar::-webkit-scrollbar-thumb {
+            background: #667eea;
+            border-radius: 3px;
+        }
+        
+        /* Faculty/Program Tree */
+        .sidebar details {
+            margin-bottom: 0.5rem;
+        }
+        
+        .sidebar summary {
+            cursor: pointer;
+            padding: 0.5rem;
+            border-radius: 6px;
+            background: #f8f9fa;
+            font-weight: 500;
+            color: #333;
+            transition: background 0.2s;
+            user-select: none;
+        }
+        
+        .sidebar summary:hover {
+            background: #e9ecef;
+        }
+        
+        .sidebar ul {
+            list-style: none;
+            padding-left: 1rem;
+            margin-top: 0.5rem;
+        }
+        
+        .sidebar .program-item {
+            margin-bottom: 0.5rem;
+        }
+        
+        .sidebar .program-summary {
+            font-size: 0.9rem;
+            padding: 0.4rem;
+            background: #fff;
+            border-left: 3px solid #667eea;
+        }
+        
+        .sidebar .subject-item {
+            cursor: pointer;
+            padding: 0.4rem 0.5rem;
+            border-radius: 4px;
+            color: #667eea;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            margin-bottom: 0.25rem;
+        }
+        
+        .sidebar .subject-item:hover {
+            background: #f0f4ff;
+            color: #764ba2;
+            transform: translateX(4px);
+        }
+        
+        .sidebar .subject-item small {
+            display: block;
+            color: #999;
+            font-size: 0.75rem;
+            margin-top: 0.1rem;
+        }
+        
+        /* Main Content */
+        .main-content {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        /* User Stats Section */
+        .user-stats {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            color: white;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        .user-stats h3 {
+            font-size: 1.2rem;
+            margin-bottom: 1rem;
+            border-bottom: 2px solid rgba(255,255,255,0.2);
+            padding-bottom: 0.5rem;
+        }
+        
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+        
+        .stat-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .stat-card .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            margin-bottom: 0.25rem;
+        }
+        
+        .stat-card .stat-label {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+        
+        .topic-distribution {
+            background: rgba(255,255,255,0.1);
+            border-radius: 8px;
+            padding: 1rem;
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255,255,255,0.2);
+        }
+        
+        .topic-distribution h4 {
+            font-size: 1rem;
+            margin-bottom: 0.75rem;
+        }
+        
+        .topic-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .topic-bar .topic-name {
+            flex: 0 0 200px;
+            font-size: 0.85rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            padding-right: 0.5rem;
+        }
+        
+        .topic-bar .topic-progress {
+            flex: 1;
+            height: 20px;
+            background: rgba(255,255,255,0.2);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 0 0.5rem;
+        }
+        
+        .topic-bar .topic-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #ffd700 0%, #ffed4e 100%);
+            border-radius: 10px;
+            transition: width 0.5s ease;
+        }
+        
+        .topic-bar .topic-count {
+            flex: 0 0 40px;
+            text-align: right;
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        /* Search Box */
+        .search-box {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+                
         .header-logo {
             width: 40px;
             height: 40px;
@@ -46,102 +276,30 @@
             padding: 4px;
         }
         
-        .header h1 {
-            font-size: 1.3rem;
-            font-weight: 600;
-        }
-        
-        .header-right {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            background: rgba(255,255,255,0.15);
-            padding: 8px 16px;
-            border-radius: 20px;
-        }
-        
-        .user-info .avatar {
-            width: 32px;
-            height: 32px;
-            background: white;
-            color: #667eea;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 600;
-            font-size: 14px;
-        }
-        
-        .user-info .name {
-            font-size: 14px;
-        }
-        
-        .logout-btn {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }
-        
-        .logout-btn:hover {
-            background: rgba(255,255,255,0.3);
-        }
-        
-        /* Main container */
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 24px;
-        }
-        
-        /* Search Section */
-        .search-section {
-            background: white;
-            padding: 24px;
-            border-radius: 12px;
-            margin-bottom: 24px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-        }
-        
-        .search-box {
-            display: flex;
-            gap: 12px;
-        }
-        
         .search-box input {
             flex: 1;
-            padding: 14px 20px;
-            font-size: 16px;
+            padding: 1rem;
             border: 2px solid #e0e0e0;
-            border-radius: 10px;
+            border-radius: 8px;
+            font-size: 16px;
             outline: none;
             transition: border-color 0.2s;
         }
         
         .search-box input:focus {
             border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
         
         .search-box button {
-            padding: 14px 32px;
-            font-size: 16px;
+            padding: 1rem 2rem;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 10px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
             cursor: pointer;
-            font-weight: 500;
             transition: transform 0.2s, box-shadow 0.2s;
         }
         
@@ -150,244 +308,291 @@
             box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }
         
-        /* Topics Section */
+        .search-box button:active {
+            transform: translateY(0);
+        }
+        
+        /* Results */
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 2px solid #f0f0f0;
+        }
+        
+        .results-count {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .result-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border-left: 4px solid #667eea;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .result-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .result-card h4 {
+            margin-bottom: 0.5rem;
+            color: #333;
+        }
+        
+        .result-card h4 a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .result-card h4 a:hover {
+            text-decoration: underline;
+        }
+        
+        .result-meta {
+            font-size: 0.85rem;
+            color: #999;
+            margin-bottom: 0.5rem;
+        }
+        
+        .result-description {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 0.5rem;
+        }
+        
+        .highlight {
+            background: #fff3cd;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+        }
+        
+        .pdf-links {
+            margin-top: 0.75rem;
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+        
+        .pdf-link {
+            background: #e3f2fd;
+            color: #1976d2;
+            padding: 0.4rem 0.8rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-size: 0.85rem;
+            border: 1px solid #bbdefb;
+            transition: background 0.2s;
+        }
+        
+        .pdf-link:hover {
+            background: #bbdefb;
+        }
+        
+        /* Topics Section - NEW DESIGN */
         .topics-section {
-            background: white;
-            padding: 20px 24px;
+            background: #f8f9fa;
             border-radius: 12px;
-            margin-bottom: 24px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+            border: 1px solid #e9ecef;
         }
         
         .topics-section h3 {
-            color: #333;
-            font-size: 16px;
-            margin-bottom: 14px;
+            color: #667eea;
+            font-size: 1.1rem;
+            margin-bottom: 1rem;
             display: flex;
             align-items: center;
-            gap: 8px;
+            gap: 0.5rem;
+        }
+        
+        .topics-section h3::before {
+            content: "📚";
+            font-size: 1.3rem;
         }
         
         .topic-tags {
             display: flex;
-            gap: 10px;
             flex-wrap: wrap;
+            gap: 0.75rem;
         }
         
         .topic-tag {
-            background: linear-gradient(135deg, #e8f0fe 0%, #f0e8fe 100%);
-            color: #5c4d9a;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            display: flex;
+            display: inline-flex;
             align-items: center;
-            gap: 8px;
-            transition: transform 0.2s;
+            gap: 0.5rem;
+            padding: 0.6rem 1rem;
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            color: #333;
+            transition: all 0.2s;
+            cursor: pointer;
         }
         
         .topic-tag:hover {
-            transform: scale(1.05);
-        }
-        
-        .topic-tag .count {
-            background: #667eea;
-            color: white;
-            padding: 2px 8px;
-            border-radius: 10px;
-            font-size: 12px;
-            font-weight: 600;
+            border-color: #667eea;
+            background: #f0f4ff;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
         }
         
         .topic-tag.top {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-        }
-        
-        .topic-tag.top .count {
-            background: rgba(255,255,255,0.3);
-        }
-        
-        /* Two Column Layout */
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 24px;
-        }
-        
-        @media (max-width: 900px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-        }
-        
-        /* Section Cards */
-        .section-card {
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
-            overflow: hidden;
-        }
-        
-        .section-card.full-width {
-            grid-column: 1 / -1;
-        }
-        
-        .section-header {
-            padding: 16px 20px;
-            border-bottom: 1px solid #eee;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .section-header h2 {
-            font-size: 16px;
-            color: #333;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-        
-        .section-header .badge {
-            background: #667eea;
-            color: white;
-            padding: 4px 10px;
-            border-radius: 12px;
-            font-size: 12px;
+            border-color: transparent;
             font-weight: 600;
         }
         
-        .section-content {
-            padding: 0;
-            max-height: 600px;
-            overflow-y: auto;
+        .topic-tag.top:hover {
+            transform: translateY(-2px) scale(1.05);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
         }
         
-        /* Resource Item */
-        .resource-item {
-            padding: 16px 20px;
-            border-bottom: 1px solid #f0f0f0;
-            transition: background 0.2s;
+        .topic-tag .count {
+            background: rgba(0,0,0,0.1);
+            padding: 0.2rem 0.5rem;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            font-weight: bold;
         }
         
-        .resource-item:last-child {
-            border-bottom: none;
+        .topic-tag.top .count {
+            background: rgba(255,255,255,0.2);
         }
         
-        .resource-item:hover {
-            background: #fafbfc;
+        /* Recommendations */
+        .recommendations {
+            margin-top: 2rem;
+            padding-top: 2rem;
+            border-top: 2px solid #f0f0f0;
         }
         
-        .resource-item h4 {
-            margin-bottom: 6px;
+        .recommendations h3 {
+            color: #667eea;
+            margin-bottom: 1rem;
         }
         
-        .resource-item h4 a {
-            color: #1a0dab;
+        .recommendation-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1rem;
+        }
+        
+        .recommendation-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            padding: 1rem;
+            border: 1px solid #dee2e6;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .recommendation-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        
+        .recommendation-card h5 {
+            color: #333;
+            margin-bottom: 0.5rem;
+            font-size: 0.95rem;
+        }
+        
+        .recommendation-card h5 a {
+            color: #667eea;
             text-decoration: none;
-            font-size: 15px;
-            line-height: 1.4;
         }
         
-        .resource-item h4 a:hover {
+        .recommendation-card h5 a:hover {
             text-decoration: underline;
         }
         
-        .resource-item .description {
+        .recommendation-card p {
+            font-size: 0.85rem;
             color: #666;
-            font-size: 13px;
-            line-height: 1.5;
-            margin-bottom: 10px;
-            display: -webkit-box;
-            -webkit-line-clamp: 2;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
+            line-height: 1.4;
+            margin-bottom: 0.5rem;
         }
         
-        .resource-item .meta {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
-            font-size: 12px;
-            color: #888;
+        .recommendation-card small {
+            color: #999;
+            font-size: 0.8rem;
         }
         
-        .resource-item .source-tag {
-            background: #e8f5e9;
-            color: #2e7d32;
-            padding: 3px 8px;
-            border-radius: 4px;
-        }
-        
-        .resource-item .subjects {
-            display: flex;
-            gap: 6px;
-            flex-wrap: wrap;
-            margin-top: 8px;
-        }
-        
-        .resource-item .subject-tag {
-            background: #f0f4ff;
-            color: #5c6bc0;
-            padding: 3px 10px;
-            border-radius: 12px;
-            font-size: 11px;
-        }
-        
-        .resource-item .match-tag {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-        }
-        
-        /* PDF Links */
-        .pdf-links {
-            margin-top: 10px;
-            display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-        
-        .pdf-link {
-            display: inline-flex;
-            align-items: center;
-            gap: 4px;
-            padding: 4px 10px;
-            background: #fff3e0;
-            color: #e65100;
-            border-radius: 4px;
-            text-decoration: none;
-            font-size: 12px;
-            transition: background 0.2s;
-        }
-        
-        .pdf-link:hover {
-            background: #ffe0b2;
-        }
-        
-        /* Empty State */
         .empty-state {
-            padding: 40px 20px;
             text-align: center;
-            color: #888;
+            padding: 3rem;
+            color: #999;
         }
         
-        .empty-state .icon {
-            font-size: 48px;
-            margin-bottom: 16px;
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
         }
         
-        /* Highlight */
-        mark {
-            background: #fff3cd;
-            padding: 0 2px;
-            border-radius: 2px;
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .layout {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                position: relative;
+                top: 0;
+                max-height: none;
+            }
+            
+            .stats-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            
+            .topic-bar .topic-name {
+                flex: 0 0 150px;
+            }
         }
         
-        /* Score badge */
-        .score {
-            color: #888;
-            font-size: 11px;
+        @media (max-width: 768px) {
+            .layout {
+                padding: 1rem;
+                gap: 1rem;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 1rem;
+                text-align: center;
+            }
+            
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .search-box {
+                flex-direction: column;
+            }
+            
+            .recommendation-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .topic-tags {
+                gap: 0.5rem;
+            }
+            
+            .topic-tag {
+                font-size: 0.85rem;
+                padding: 0.5rem 0.8rem;
+            }
         }
     </style>
 </head>
@@ -398,149 +603,183 @@
             <img src="/static/images/logo.png" alt="Logo" class="header-logo">
             <h1>OER Learning Hub</h1>
         </div>
-        <div class="header-right">
-            <div class="user-info">
-                <div class="avatar">{{ (student_name or student_id)[:1] }}</div>
-                <span class="name">{{ student_name or student_id }}</span>
-            </div>
+        <div class="user-info">
+            <span>Xin chào, <strong>{{ student_name }}</strong> ({{ student_id }})</span>
             <a href="/logout" class="logout-btn">Đăng xuất</a>
         </div>
     </header>
-    
-    <div class="container">
-        <!-- Search Section -->
-        <div class="search-section">
-            <form class="search-box" method="GET" action="/dashboard">
-                <input type="text" name="q" value="{{ query or '' }}" 
+
+    <!-- Main Layout -->
+    <div class="layout">
+        <!-- Sidebar: Faculties/Programs/Subjects -->
+        <aside class="sidebar">
+            <h3>🎓 Khoa - Ngành - Môn học</h3>
+            
+            {% if reference_tree %}
+                {% for faculty in reference_tree %}
+                <details>
+                    <summary>{{ faculty.faculty_name }}</summary>
+                    <ul>
+                        {% for program in faculty.programs %}
+                        <li class="program-item">
+                            <details>
+                                <summary class="program-summary">
+                                    {{ program.program_name }} ({{ program.program_code }})
+                                </summary>
+                                {% if program.subjects %}
+                                <ul>
+                                    {% for subject in program.subjects %}
+                                    <li class="subject-item"
+                                        onclick="searchSubject('{{ subject.subject_name_en or subject.subject_name }}')">
+                                        {{ subject.subject_name }}
+                                        {% if subject.subject_name_en %}
+                                        <small>{{ subject.subject_name_en }}</small>
+                                        {% endif %}
+                                    </li>
+                                    {% endfor %}
+                                </ul>
+                                {% else %}
+                                <small style="color:#999; padding-left:1rem;">Chưa có môn học</small>
+                                {% endif %}
+                            </details>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </details>
+                {% endfor %}
+            {% else %}
+                <div class="empty-state">
+                    <p>Không có dữ liệu khoa/ngành</p>
+                </div>
+            {% endif %}
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Search Box -->
+            <form method="GET" action="/dashboard" class="search-box">
+                <input type="text" 
+                       id="search_input" 
+                       name="q" 
+                       value="{{ query }}" 
                        placeholder="🔍 Tìm kiếm tài liệu OER (sách, bài giảng, video...)">
                 <button type="submit">Tìm kiếm</button>
             </form>
-        </div>
-        
-        <!-- User Topics -->
-        {% if topics %}
-        <div class="topics-section">
-            <h3> Chủ đề bạn quan tâm (dựa trên lịch sử mượn sách)</h3>
-            <div class="topic-tags">
-                {% for topic, count in topics.items() %}
-                <span class="topic-tag {% if loop.index <= 2 %}top{% endif %}">
-                    {{ topic }}
-                    <span class="count">{{ count }} lần</span>
-                </span>
+            <!-- Search Results -->
+            {% if query %}
+            <div class="results-header">
+                <h3>Kết quả tìm kiếm</h3>
+                <span class="results-count">Tìm thấy {{ total }} tài liệu</span>
+            </div>
+
+            {% if search_results %}
+                {% for item in search_results %}
+                <div class="result-card">
+                    <h4>
+                        {% if item.url %}
+                        <a href="{{ item.url }}" target="_blank">{{ item.title }}</a>
+                        {% else %}
+                        {{ item.title }}
+                        {% endif %}
+                    </h4>
+                    
+                    <div class="result-meta">
+                        Nguồn: {{ item.source }} | Điểm: {{ "%.2f"|format(item.score) }}
+                    </div>
+                    
+                    {% if item.highlight.description %}
+                    <div class="result-description">
+                        {% for snippet in item.highlight.description %}
+                        <span class="highlight">{{ snippet|safe }}</span>
+                        {% endfor %}
+                    </div>
+                    {% elif item.description %}
+                    <div class="result-description">
+                        {{ item.description[:200] }}{% if item.description|length > 200 %}...{% endif %}
+                    </div>
+                    {% endif %}
+
+                    {% if item.pdf_links %}
+                    <div class="pdf-links">
+                        {% for pdf in item.pdf_links %}
+                        <a href="{{ pdf.url }}" target="_blank" class="pdf-link">
+                            📄 {{ pdf.name }}
+                        </a>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
                 {% endfor %}
-            </div>
-        </div>
-        {% endif %}
-        
-        <!-- Main Content -->
-        {% if query %}
-        <!-- Search Results (Full Width) -->
-        <div class="section-card full-width" style="margin-bottom: 24px;">
-            <div class="section-header">
-                <h2> Kết quả tìm kiếm: "{{ query }}"</h2>
-                <span class="badge">{{ search_results|length }} kết quả</span>
-            </div>
-            <div class="section-content">
-                {% if search_results %}
-                    {% for item in search_results %}
-                    <div class="resource-item">
-                        <h4>
-                            <a href="{{ item.url }}" target="_blank">
-                                {% if item.highlight and item.highlight.title %}
-                                    {{ item.highlight.title[0] | safe }}
-                                {% else %}
-                                    {{ item.title }}
-                                {% endif %}
-                            </a>
-                        </h4>
-                        <div class="description">
-                            {% if item.highlight and item.highlight.description %}
-                                {{ item.highlight.description[0] | safe }}
-                            {% else %}
-                                {{ item.description[:200] }}{% if item.description|length > 200 %}...{% endif %}
-                            {% endif %}
-                        </div>
-                        <div class="meta">
-                            {% if item.source %}
-                            <span class="source-tag">{{ item.source }}</span>
-                            {% endif %}
-                        </div>
-                        {% if item.pdf_links %}
-                        <div class="pdf-links">
-                            {% for pdf in item.pdf_links[:2] %}
-                            <a href="{{ pdf.url }}" target="_blank" class="pdf-link">
-                                 {{ pdf.name[:30] }}{% if pdf.name|length > 30 %}...{% endif %}
-                            </a>
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                        {% if item.subjects %}
-                        <div class="subjects">
-                            {% for subj in item.subjects[:4] %}
-                                {% if subj %}
-                                <span class="subject-tag">{{ subj }}</span>
-                                {% endif %}
-                            {% endfor %}
-                        </div>
-                        {% endif %}
-                    </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>Không tìm thấy kết quả nào cho "<strong>{{ query }}</strong>"</p>
+                </div>
+            {% endif %}
+            {% endif %}
+                      <!-- User Topics -->
+   <!-- User Topics Tags - NEW BEAUTIFUL DESIGN -->
+            {% if topics %}
+            <div class="topics-section">
+                <h3>Chủ đề bạn quan tâm (dựa trên lịch sử mượn sách)</h3>
+                <div class="topic-tags">
+                    {% set sorted_topics = topics.items()|list|sort(attribute='1', reverse=True) %}
+                    {% for topic, count in sorted_topics %}
+                    <span class="topic-tag {% if loop.index <= 2 %}top{% endif %}" 
+                          onclick="searchSubject('{{ topic }}')">
+                        {{ topic }}
+                        <span class="count">{{ count }} lần</span>
+                    </span>
                     {% endfor %}
-                {% else %}
-                    <div class="empty-state">
-                        <div class="icon"></div>
-                        <p>Không tìm thấy kết quả phù hợp.</p>
-                    </div>
-                {% endif %}
+                </div>
             </div>
-        </div>
-        {% endif %}
-        
-        <!-- Recommendations Section -->
-        <div class="section-card full-width">
-            <div class="section-header">
-                <h2> Gợi ý dành cho bạn</h2>
-                <span class="badge">{{ recommendations|length }} tài liệu</span>
-            </div>
-            <div class="section-content">
+            {% endif %}
+            <!-- Recommendations -->
+            <div class="recommendations">
+                <h3>Gợi ý dành cho bạn</h3>
+                
                 {% if recommendations %}
-                    {% for item in recommendations %}
-                    <div class="resource-item">
-                        <h4>
-                            <a href="{{ item.url }}" target="_blank">{{ item.title }}</a>
-                        </h4>
-                        <div class="description">
-                            {{ item.description[:200] }}{% if item.description|length > 200 %}...{% endif %}
-                        </div>
-                        <div class="meta">
-                            {% if item.source %}
-                            <span class="source-tag">{{ item.source }}</span>
+                <div class="recommendation-grid">
+                    {% for rec in recommendations %}
+                    <div class="recommendation-card">
+                        <h5>
+                            {% if rec.url %}
+                            <a href="{{ rec.url }}" target="_blank">{{ rec.title }}</a>
+                            {% else %}
+                            {{ rec.title }}
                             {% endif %}
-                            <span class="score"> {{ "%.1f"|format(item.score) }}</span>
-                            {% if item.matched_topics %}
-                            <span style="color: #667eea;"> Phù hợp: {{ item.matched_topics | join(', ') }}</span>
-                            {% endif %}
-                        </div>
-                        {% if item.subjects %}
-                        <div class="subjects">
-                            {% for subj in item.subjects[:4] %}
-                                {% if subj %}
-                                <span class="subject-tag {% if subj in top_topics %}match-tag{% endif %}">
-                                    {{ subj }}
-                                </span>
-                                {% endif %}
+                        </h5>
+                        <p>{{ rec.description[:100] }}{% if rec.description|length > 100 %}...{% endif %}</p>
+                        {% if rec.subjects %}
+                        <small>🏷️ {{ rec.subjects|join(', ') }}</small>
+                        {% endif %}
+                        {% if rec.pdf_links %}
+                        <div class="pdf-links" style="margin-top:0.5rem;">
+                            {% for pdf in rec.pdf_links %}
+                            <a href="{{ pdf.url }}" target="_blank" class="pdf-link">
+                                📄 {{ pdf.name }}
+                            </a>
                             {% endfor %}
                         </div>
                         {% endif %}
                     </div>
                     {% endfor %}
+                </div>
                 {% else %}
-                    <div class="empty-state">
-                        <div class="icon"></div>
-                        <p>Chưa có gợi ý. Hãy mượn thêm sách để nhận gợi ý phù hợp!</p>
-                    </div>
+                <div class="empty-state">
+                    <p>Chưa có gợi ý. Hãy mượn sách tại thư viện để nhận gợi ý cá nhân hóa!</p>
+                </div>
                 {% endif %}
             </div>
-        </div>
+        </main>
     </div>
+
+    <script>
+        function searchSubject(subjectName) {
+            if (subjectName) {
+                document.getElementById('search_input').value = subjectName;
+                document.querySelector('.search-box').submit();
+            }
+        }
+    </script>
 </body>
 </html>

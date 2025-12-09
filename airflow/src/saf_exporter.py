@@ -144,6 +144,7 @@ class SAFExporter:
             add_element('rights', 'uri', license_url)
         
         # Subject - Matched curriculum subjects (KEY FEATURE: OER-to-Subject mapping)
+        # Data source: bridge_oer_subjects → dim_subjects (Kimball Star Schema)
         # Only Vietnamese subject names are exported
         subjects = row.get('matched_subjects')
         if subjects:
@@ -176,19 +177,23 @@ class SAFExporter:
     
     def read_gold_data(self, limit: int = None):
         """
-        Read OER data from Gold layer Parquet.
+        Read OER data from Gold layer Parquet 
         
-        Uses Star Schema:
+        Uses Star Schema with Bridge Table:
         - dim_oer_resources: descriptive attributes (title, description, etc.)
         - fact_oer_resources: keys and measures (publication_date_key, etc.)
         - dim_date: date dimension for publication_date lookup
+        - bridge_oer_subjects: M-N relationship between fact and dim_subjects
+        - dim_subjects: subject dimension with subject_name
         """
-        logger.info("Reading Gold layer data...")
+        logger.info("Reading Gold layer data (Kimball Star Schema)...")
         
-        # Read dimension and fact tables
+        # Read dimension, fact, and bridge tables
         dim_oer_path = f"s3a://{self.bucket}/gold/analytics/dim_oer_resources/data/*.parquet"
         fact_oer_path = f"s3a://{self.bucket}/gold/analytics/fact_oer_resources/data/*.parquet"
         dim_date_path = f"s3a://{self.bucket}/gold/analytics/dim_date/data/*.parquet"
+        bridge_oer_subjects_path = f"s3a://{self.bucket}/gold/analytics/bridge_oer_subjects/data/*.parquet"
+        dim_subjects_path = f"s3a://{self.bucket}/gold/analytics/dim_subjects/data/*.parquet"
         
         logger.info(f"Reading dim_oer_resources: {dim_oer_path}")
         dim_oer = self.spark.read.parquet(dim_oer_path)
@@ -198,6 +203,34 @@ class SAFExporter:
         
         logger.info(f"Reading dim_date: {dim_date_path}")
         dim_date = self.spark.read.parquet(dim_date_path)
+        
+        logger.info(f"Reading bridge_oer_subjects: {bridge_oer_subjects_path}")
+        bridge_oer_subjects = self.spark.read.parquet(bridge_oer_subjects_path)
+        
+        logger.info(f"Reading dim_subjects: {dim_subjects_path}")
+        dim_subjects = self.spark.read.parquet(dim_subjects_path)
+        
+        # Build matched_subjects array via bridge table (Kimball pattern)
+        # Join bridge with dim_subjects to get subject details
+        from pyspark.sql import functions as F
+        
+        subjects_with_details = bridge_oer_subjects.join(
+            dim_subjects.select("subject_key", "subject_name", "subject_code"),
+            "subject_key",
+            "inner"
+        ).select(
+            "resource_key",
+            F.struct(
+                F.col("subject_name"),
+                F.col("subject_code"),
+                F.col("similarity_score").alias("similarity")
+            ).alias("subject_info")
+        )
+        
+        # Aggregate subjects per resource into array
+        matched_subjects_agg = subjects_with_details.groupBy("resource_key").agg(
+            F.collect_list("subject_info").alias("matched_subjects")
+        )
         
         # Join dim_oer with fact_oer to get publication_date_key
         df = dim_oer.join(
@@ -213,6 +246,13 @@ class SAFExporter:
                 dim_date.date.alias("publication_date")
             ),
             "publication_date_key",
+            "left"
+        )
+        
+        # Join with aggregated matched_subjects from bridge table
+        df = df.join(
+            matched_subjects_agg,
+            "resource_key",
             "left"
         )
         

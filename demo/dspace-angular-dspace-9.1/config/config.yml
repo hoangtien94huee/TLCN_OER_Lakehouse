@@ -3,3 +3,10 @@ rest:
   host: localhost
   port: 8180
   nameSpace: /server
+
+themes:
+  - name: custom
+
+# OER Recommendation & Review API
+oerApi:
+  url: http://localhost:8088/api

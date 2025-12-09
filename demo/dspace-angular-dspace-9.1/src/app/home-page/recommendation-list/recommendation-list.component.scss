@@ -1,0 +1,117 @@
+/* Recommendation List Styles - Matches DSpace Theme */
+
+.recommendation-section {
+  margin-bottom: 2rem;
+}
+
+.recommendation-section h2 {
+  color: var(--ds-primary-color, #2c3e50);
+  font-size: 1.5rem;
+  font-weight: 600;
+}
+
+.recommendation-card {
+  transition: all 0.2s ease-in-out;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.125);
+  
+  &:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+    border-color: var(--ds-primary-color, #007bff);
+  }
+}
+
+.card-header {
+  background-color: #f8f9fa;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.source-badge {
+  display: flex;
+  align-items: center;
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.source-icon {
+  font-size: 1.1rem;
+  margin-right: 0.5rem;
+}
+
+.source-label {
+  font-weight: 500;
+}
+
+.score-badge {
+  background-color: #fff3cd;
+  color: #856404;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.card-title {
+  font-size: 1rem;
+  line-height: 1.4;
+  margin-bottom: 0.5rem;
+  
+  a {
+    color: var(--ds-primary-color, #2c3e50);
+    
+    &:hover {
+      color: var(--ds-link-hover-color, #007bff);
+      text-decoration: underline !important;
+    }
+  }
+}
+
+.item-list-title {
+  font-weight: 600;
+}
+
+.item-list-abstract {
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #6c757d;
+}
+
+.subjects-container {
+  .badge {
+    font-size: 0.75rem;
+    font-weight: 400;
+    padding: 0.35rem 0.5rem;
+  }
+}
+
+.card-footer {
+  padding: 0.75rem;
+  
+  .btn {
+    font-size: 0.875rem;
+  }
+}
+
+/* Loading Spinner */
+.spinner-border {
+  width: 2rem;
+  height: 2rem;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .recommendation-card {
+    margin-bottom: 1rem;
+  }
+  
+  .card-title {
+    font-size: 0.95rem;
+  }
+}
+
+/* Match DSpace color scheme */
+:host {
+  --ds-primary-color: #2c3e50;
+  --ds-link-hover-color: #007bff;
+}

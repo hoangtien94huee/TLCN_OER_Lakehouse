@@ -285,7 +285,7 @@
   "admin.registries.schema.breadcrumbs": "Lược đồ thông tin mô tả",
 
   // "admin.registries.schema.description": "This is the metadata schema for \"{{namespace}}\".",
-  "admin.registries.schema.description": "Đây là lược đồ thông tin mô tả cho \"{{namespace}}\".",
+  "admin.registries.schema.description": 'Đây là lược đồ thông tin mô tả cho "{{namespace}}".',
 
   // "admin.registries.schema.fields.select": "Select",
   // TODO New key - Add a translation
@@ -336,7 +336,7 @@
   "admin.registries.schema.head": "Lược đồ thông tin mô tả",
 
   // "admin.registries.schema.notification.created": "Successfully created metadata schema \"{{prefix}}\"",
-  "admin.registries.schema.notification.created": "Tạo thành công lược đồ thông tin mô tả \"{{prefix}}\"",
+  "admin.registries.schema.notification.created": 'Tạo thành công lược đồ thông tin mô tả "{{prefix}}"',
 
   // "admin.registries.schema.notification.deleted.failure": "Failed to delete {{amount}} metadata schemas",
   "admin.registries.schema.notification.deleted.failure": "Xóa không thành công {{amount}} lược đồ thông tin mô tả",
@@ -345,13 +345,13 @@
   "admin.registries.schema.notification.deleted.success": "Đã xóa thành công {{amount}} lược đồ thông tin mô tả",
 
   // "admin.registries.schema.notification.edited": "Successfully edited metadata schema \"{{prefix}}\"",
-  "admin.registries.schema.notification.edited": "Chỉnh sửa thành công lược đồ thông tin mô tả \"{{prefix}}\"",
+  "admin.registries.schema.notification.edited": 'Chỉnh sửa thành công lược đồ thông tin mô tả "{{prefix}}"',
 
   // "admin.registries.schema.notification.failure": "Error",
   "admin.registries.schema.notification.failure": "Lỗi",
 
   // "admin.registries.schema.notification.field.created": "Successfully created metadata field \"{{field}}\"",
-  "admin.registries.schema.notification.field.created": "Tạo thành công trường thông tin mô tả \"{{field}}\"",
+  "admin.registries.schema.notification.field.created": 'Tạo thành công trường thông tin mô tả "{{field}}"',
 
   // "admin.registries.schema.notification.field.deleted.failure": "Failed to delete {{amount}} metadata fields",
   "admin.registries.schema.notification.field.deleted.failure": "Xóa không thành công {{amount}} trường thông tin mô tả",
@@ -360,7 +360,7 @@
   "admin.registries.schema.notification.field.deleted.success": "Đã xóa thành công {{amount}} trường thông tin mô tả",
 
   // "admin.registries.schema.notification.field.edited": "Successfully edited metadata field \"{{field}}\"",
-  "admin.registries.schema.notification.field.edited": "Chỉnh sửa thành công trường thông tin mô tả \"{{field}}\"",
+  "admin.registries.schema.notification.field.edited": 'Chỉnh sửa thành công trường thông tin mô tả "{{field}}"',
 
   // "admin.registries.schema.notification.success": "Success",
   "admin.registries.schema.notification.success": "Thành công",
@@ -474,21 +474,21 @@
   "admin.access-control.epeople.table.edit": "Chỉnh sửa",
 
   // "admin.access-control.epeople.table.edit.buttons.edit": "Edit \"{{name}}\"",
-  "admin.access-control.epeople.table.edit.buttons.edit": "Chỉnh sửa \"{{name}}\"",
+  "admin.access-control.epeople.table.edit.buttons.edit": 'Chỉnh sửa "{{name}}"',
 
   // "admin.access-control.epeople.table.edit.buttons.edit-disabled": "You are not authorized to edit this group",
   "admin.access-control.epeople.table.edit.buttons.edit-disabled": "Bạn không có quyền chỉnh sửa nhóm này",
 
   // "admin.access-control.epeople.table.edit.buttons.remove": "Delete \"{{name}}\"",
-  "admin.access-control.epeople.table.edit.buttons.remove": "Xóa \"{{name}}\"",
+  "admin.access-control.epeople.table.edit.buttons.remove": 'Xóa "{{name}}"',
 
   // "admin.access-control.epeople.table.edit.buttons.remove.modal.header": "Delete Group \"{{ dsoName }}\"",
   // TODO New key - Add a translation
-  "admin.access-control.epeople.table.edit.buttons.remove.modal.header": "Delete Group \"{{ dsoName }}\"",
+  "admin.access-control.epeople.table.edit.buttons.remove.modal.header": 'Delete Group "{{ dsoName }}"',
 
   // "admin.access-control.epeople.table.edit.buttons.remove.modal.info": "Are you sure you want to delete Group \"{{ dsoName }}\" and all its associated policies?",
   // TODO New key - Add a translation
-  "admin.access-control.epeople.table.edit.buttons.remove.modal.info": "Are you sure you want to delete Group \"{{ dsoName }}\" and all its associated policies?",
+  "admin.access-control.epeople.table.edit.buttons.remove.modal.info": 'Are you sure you want to delete Group "{{ dsoName }}" and all its associated policies?',
 
   // "admin.access-control.epeople.table.edit.buttons.remove.modal.cancel": "Cancel",
   // TODO New key - Add a translation
@@ -529,28 +529,28 @@
   "admin.access-control.epeople.form.return": "Quay lại",
 
   // "admin.access-control.epeople.form.notification.created.success": "Successfully created EPerson \"{{name}}\"",
-  "admin.access-control.epeople.form.notification.created.success": "Tạo thành công người dùng \"{{name}}\"",
+  "admin.access-control.epeople.form.notification.created.success": 'Tạo thành công người dùng "{{name}}"',
 
   // "admin.access-control.epeople.form.notification.created.failure": "Failed to create EPerson \"{{name}}\"",
-  "admin.access-control.epeople.form.notification.created.failure": "Tạo không thành công người dùng \"{{name}}\"",
+  "admin.access-control.epeople.form.notification.created.failure": 'Tạo không thành công người dùng "{{name}}"',
 
   // "admin.access-control.epeople.form.notification.created.failure.emailInUse": "Failed to create EPerson \"{{name}}\", email \"{{email}}\" already in use.",
-  "admin.access-control.epeople.form.notification.created.failure.emailInUse": "Tạo không thành công người dùng \"{{name}}\" email \"{{email}}\" đã được sử dụng.",
+  "admin.access-control.epeople.form.notification.created.failure.emailInUse": 'Tạo không thành công người dùng "{{name}}" email "{{email}}" đã được sử dụng.',
 
   // "admin.access-control.epeople.form.notification.edited.failure.emailInUse": "Failed to edit EPerson \"{{name}}\", email \"{{email}}\" already in use.",
-  "admin.access-control.epeople.form.notification.edited.failure.emailInUse": "Chỉnh sửa không thành công người dùng \"{{name}}\" email \"{{email}}\" đã được sử dụng.",
+  "admin.access-control.epeople.form.notification.edited.failure.emailInUse": 'Chỉnh sửa không thành công người dùng "{{name}}" email "{{email}}" đã được sử dụng.',
 
   // "admin.access-control.epeople.form.notification.edited.success": "Successfully edited EPerson \"{{name}}\"",
-  "admin.access-control.epeople.form.notification.edited.success": "Chỉnh sửa thành công người dùng \"{{name}}\"",
+  "admin.access-control.epeople.form.notification.edited.success": 'Chỉnh sửa thành công người dùng "{{name}}"',
 
   // "admin.access-control.epeople.form.notification.edited.failure": "Failed to edit EPerson \"{{name}}\"",
-  "admin.access-control.epeople.form.notification.edited.failure": "Chỉnh sửa không thành công người dùng \"{{name}}\"",
+  "admin.access-control.epeople.form.notification.edited.failure": 'Chỉnh sửa không thành công người dùng "{{name}}"',
 
   // "admin.access-control.epeople.form.notification.deleted.success": "Successfully deleted EPerson \"{{name}}\"",
-  "admin.access-control.epeople.form.notification.deleted.success": "Xóa thành công người dùng \"{{name}}\"",
+  "admin.access-control.epeople.form.notification.deleted.success": 'Xóa thành công người dùng "{{name}}"',
 
   // "admin.access-control.epeople.form.notification.deleted.failure": "Failed to delete EPerson \"{{name}}\"",
-  "admin.access-control.epeople.form.notification.deleted.failure": "Xóa không thành công người dùng \"{{name}}\"",
+  "admin.access-control.epeople.form.notification.deleted.failure": 'Xóa không thành công người dùng "{{name}}"',
 
   // "admin.access-control.epeople.form.groupsEPersonIsMemberOf": "Member of these groups:",
   // TODO New key - Add a translation
@@ -573,11 +573,11 @@
 
   // "admin.access-control.epeople.notification.deleted.failure": "Error occurred when trying to delete EPerson with id \"{{id}}\" with code: \"{{statusCode}}\" and message: \"{{restResponse.errorMessage}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.epeople.notification.deleted.failure": "Error occurred when trying to delete EPerson with id \"{{id}}\" with code: \"{{statusCode}}\" and message: \"{{restResponse.errorMessage}}\"",
+  "admin.access-control.epeople.notification.deleted.failure": 'Error occurred when trying to delete EPerson with id "{{id}}" with code: "{{statusCode}}" and message: "{{restResponse.errorMessage}}"',
 
   // "admin.access-control.epeople.notification.deleted.success": "Successfully deleted EPerson: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.epeople.notification.deleted.success": "Successfully deleted EPerson: \"{{name}}\"",
+  "admin.access-control.epeople.notification.deleted.success": 'Successfully deleted EPerson: "{{name}}"',
 
   // "admin.access-control.groups.title": "Groups",
   "admin.access-control.groups.title": "Nhóm người dùng",
@@ -631,29 +631,29 @@
   "admin.access-control.groups.table.edit": "Chỉnh sửa",
 
   // "admin.access-control.groups.table.edit.buttons.edit": "Edit \"{{name}}\"",
-  "admin.access-control.groups.table.edit.buttons.edit": "Chỉnh sửa \"{{name}}\"",
+  "admin.access-control.groups.table.edit.buttons.edit": 'Chỉnh sửa "{{name}}"',
 
   // "admin.access-control.groups.table.edit.buttons.remove": "Delete \"{{name}}\"",
-  "admin.access-control.groups.table.edit.buttons.remove": "Xóa \"{{name}}\"",
+  "admin.access-control.groups.table.edit.buttons.remove": 'Xóa "{{name}}"',
 
   // "admin.access-control.groups.no-items": "No groups found with this in their name or this as UUID",
   "admin.access-control.groups.no-items": "Không tìm thấy nhóm nào có tên hoặc UUID như vậy",
 
   // "admin.access-control.groups.notification.deleted.success": "Successfully deleted group \"{{name}}\"",
-  "admin.access-control.groups.notification.deleted.success": "Xóa thành công nhóm \"{{name}}\"",
+  "admin.access-control.groups.notification.deleted.success": 'Xóa thành công nhóm "{{name}}"',
 
   // "admin.access-control.groups.notification.deleted.failure.title": "Failed to delete group \"{{name}}\"",
-  "admin.access-control.groups.notification.deleted.failure.title": "Xóa không thành công nhóm \"{{name}}\"",
+  "admin.access-control.groups.notification.deleted.failure.title": 'Xóa không thành công nhóm "{{name}}"',
 
   // "admin.access-control.groups.notification.deleted.failure.content": "Cause: \"{{cause}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.notification.deleted.failure.content": "Cause: \"{{cause}}\"",
+  "admin.access-control.groups.notification.deleted.failure.content": 'Cause: "{{cause}}"',
 
   // "admin.access-control.groups.form.alert.permanent": "This group is permanent, so it can't be edited or deleted. You can still add and remove group members using this page.",
   "admin.access-control.groups.form.alert.permanent": "Nhóm này là cố định vì vậy nó không thể bị chỉnh sửa hoặc xóa. Bạn vẫn có thể thêm và loại bỏ thành viên trong nhóm tại trang này.",
 
   // "admin.access-control.groups.form.alert.workflowGroup": "This group can’t be modified or deleted because it corresponds to a role in the submission and workflow process in the \"{{name}}\" {{comcol}}. You can delete it from the <a href='{{comcolEditRolesRoute}}'>\"assign roles\"</a> tab on the edit {{comcol}} page. You can still add and remove group members using this page.",
-  "admin.access-control.groups.form.alert.workflowGroup": "Không thể chỉnh sửa hoặc xóa nhóm này vì nó tương ứng với một vai trò trong quá trình gửi và quy trình xử lý trong \"{{name}}\" {{comcol}}. Bạn có thể xóa nó từ thẻ <a href='{{comcolEditRolesRoute}}'>assign roles</a> trên trang chỉnh sửa {{comcol}}. Bạn vẫn có thể thêm và loại bỏ thành viên nhóm bằng trang này.\"",
+  "admin.access-control.groups.form.alert.workflowGroup": 'Không thể chỉnh sửa hoặc xóa nhóm này vì nó tương ứng với một vai trò trong quá trình gửi và quy trình xử lý trong "{{name}}" {{comcol}}. Bạn có thể xóa nó từ thẻ <a href=\'{{comcolEditRolesRoute}}\'>assign roles</a> trên trang chỉnh sửa {{comcol}}. Bạn vẫn có thể thêm và loại bỏ thành viên nhóm bằng trang này."',
 
   // "admin.access-control.groups.form.head.create": "Create group",
   "admin.access-control.groups.form.head.create": "Tạo nhóm người dùng",
@@ -671,33 +671,33 @@
   "admin.access-control.groups.form.groupDescription": "Mô tả",
 
   // "admin.access-control.groups.form.notification.created.success": "Successfully created Group \"{{name}}\"",
-  "admin.access-control.groups.form.notification.created.success": "Tạo thành công nhóm người dùng \"{{name}}\"",
+  "admin.access-control.groups.form.notification.created.success": 'Tạo thành công nhóm người dùng "{{name}}"',
 
   // "admin.access-control.groups.form.notification.created.failure": "Failed to create Group \"{{name}}\"",
-  "admin.access-control.groups.form.notification.created.failure": "Tạo không thành công nhóm người dùng \"{{name}}\"",
+  "admin.access-control.groups.form.notification.created.failure": 'Tạo không thành công nhóm người dùng "{{name}}"',
 
   // "admin.access-control.groups.form.notification.created.failure.groupNameInUse": "Failed to create Group with name: \"{{name}}\", make sure the name is not already in use.",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.notification.created.failure.groupNameInUse": "Failed to create Group with name: \"{{name}}\", make sure the name is not already in use.",
+  "admin.access-control.groups.form.notification.created.failure.groupNameInUse": 'Failed to create Group with name: "{{name}}", make sure the name is not already in use.',
 
   // "admin.access-control.groups.form.notification.edited.failure": "Failed to edit Group \"{{name}}\"",
-  "admin.access-control.groups.form.notification.edited.failure": "Chỉnh sửa không thành công nhóm người dùng \"{{name}}\"",
+  "admin.access-control.groups.form.notification.edited.failure": 'Chỉnh sửa không thành công nhóm người dùng "{{name}}"',
 
   // "admin.access-control.groups.form.notification.edited.failure.groupNameInUse": "Name \"{{name}}\" already in use!",
-  "admin.access-control.groups.form.notification.edited.failure.groupNameInUse": "Tên \"{{name}}\" đã được sử dụng!\"",
+  "admin.access-control.groups.form.notification.edited.failure.groupNameInUse": 'Tên "{{name}}" đã được sử dụng!"',
 
   // "admin.access-control.groups.form.notification.edited.success": "Successfully edited Group \"{{name}}\"",
-  "admin.access-control.groups.form.notification.edited.success": "Chỉnh sửa thành công nhóm người dùng \"{{name}}\"",
+  "admin.access-control.groups.form.notification.edited.success": 'Chỉnh sửa thành công nhóm người dùng "{{name}}"',
 
   // "admin.access-control.groups.form.actions.delete": "Delete Group",
   "admin.access-control.groups.form.actions.delete": "Xóa nhóm người dùng",
 
   // "admin.access-control.groups.form.delete-group.modal.header": "Delete Group \"{{ dsoName }}\"",
-  "admin.access-control.groups.form.delete-group.modal.header": "Xóa nhóm người dùng \"{{ dsoName }}\"",
+  "admin.access-control.groups.form.delete-group.modal.header": 'Xóa nhóm người dùng "{{ dsoName }}"',
 
   // "admin.access-control.groups.form.delete-group.modal.info": "Are you sure you want to delete Group \"{{ dsoName }}\" and all its associated policies?",
   // TODO Source message changed - Revise the translation
-  "admin.access-control.groups.form.delete-group.modal.info": "Bạn có chắc chắn rằng bạn muốn xóa nhóm người dùng \"{{ dsoName }}\"",
+  "admin.access-control.groups.form.delete-group.modal.info": 'Bạn có chắc chắn rằng bạn muốn xóa nhóm người dùng "{{ dsoName }}"',
 
   // "admin.access-control.groups.form.delete-group.modal.cancel": "Cancel",
   "admin.access-control.groups.form.delete-group.modal.cancel": "Hủy",
@@ -706,14 +706,14 @@
   "admin.access-control.groups.form.delete-group.modal.confirm": "Xóa",
 
   // "admin.access-control.groups.form.notification.deleted.success": "Successfully deleted group \"{{ name }}\"",
-  "admin.access-control.groups.form.notification.deleted.success": "Xóa thành công nhóm người dùng \"{{ name }}\"",
+  "admin.access-control.groups.form.notification.deleted.success": 'Xóa thành công nhóm người dùng "{{ name }}"',
 
   // "admin.access-control.groups.form.notification.deleted.failure.title": "Failed to delete group \"{{ name }}\"",
-  "admin.access-control.groups.form.notification.deleted.failure.title": "Xóa không thành công nhóm người dùng \"{{ name }}\"",
+  "admin.access-control.groups.form.notification.deleted.failure.title": 'Xóa không thành công nhóm người dùng "{{ name }}"',
 
   // "admin.access-control.groups.form.notification.deleted.failure.content": "Cause: \"{{ cause }}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.notification.deleted.failure.content": "Cause: \"{{ cause }}\"",
+  "admin.access-control.groups.form.notification.deleted.failure.content": 'Cause: "{{ cause }}"',
 
   // "admin.access-control.groups.form.members-list.head": "EPeople",
   "admin.access-control.groups.form.members-list.head": "Người dùng",
@@ -749,26 +749,26 @@
   "admin.access-control.groups.form.members-list.table.edit": "Loại bỏ / Thêm",
 
   // "admin.access-control.groups.form.members-list.table.edit.buttons.remove": "Remove member with name \"{{name}}\"",
-  "admin.access-control.groups.form.members-list.table.edit.buttons.remove": "Loại bỏ thành viên với tên \"{{name}}\"",
+  "admin.access-control.groups.form.members-list.table.edit.buttons.remove": 'Loại bỏ thành viên với tên "{{name}}"',
 
   // "admin.access-control.groups.form.members-list.notification.success.addMember": "Successfully added member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.members-list.notification.success.addMember": "Successfully added member: \"{{name}}\"",
+  "admin.access-control.groups.form.members-list.notification.success.addMember": 'Successfully added member: "{{name}}"',
 
   // "admin.access-control.groups.form.members-list.notification.failure.addMember": "Failed to add member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.members-list.notification.failure.addMember": "Failed to add member: \"{{name}}\"",
+  "admin.access-control.groups.form.members-list.notification.failure.addMember": 'Failed to add member: "{{name}}"',
 
   // "admin.access-control.groups.form.members-list.notification.success.deleteMember": "Successfully deleted member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.members-list.notification.success.deleteMember": "Successfully deleted member: \"{{name}}\"",
+  "admin.access-control.groups.form.members-list.notification.success.deleteMember": 'Successfully deleted member: "{{name}}"',
 
   // "admin.access-control.groups.form.members-list.notification.failure.deleteMember": "Failed to delete member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.members-list.notification.failure.deleteMember": "Failed to delete member: \"{{name}}\"",
+  "admin.access-control.groups.form.members-list.notification.failure.deleteMember": 'Failed to delete member: "{{name}}"',
 
   // "admin.access-control.groups.form.members-list.table.edit.buttons.add": "Add member with name \"{{name}}\"",
-  "admin.access-control.groups.form.members-list.table.edit.buttons.add": "Thêm thành viên với tên \"{{name}}\"",
+  "admin.access-control.groups.form.members-list.table.edit.buttons.add": 'Thêm thành viên với tên "{{name}}"',
 
   // "admin.access-control.groups.form.members-list.notification.failure.noActiveGroup": "No current active group, submit a name first.",
   "admin.access-control.groups.form.members-list.notification.failure.noActiveGroup": "Hiện tại không có nhóm hoạt động gửi một tên trước.",
@@ -781,7 +781,7 @@
 
   // "admin.access-control.groups.form.subgroups-list.notification.failure": "Something went wrong: \"{{cause}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.subgroups-list.notification.failure": "Something went wrong: \"{{cause}}\"",
+  "admin.access-control.groups.form.subgroups-list.notification.failure": 'Something went wrong: "{{cause}}"',
 
   // "admin.access-control.groups.form.subgroups-list.head": "Groups",
   "admin.access-control.groups.form.subgroups-list.head": "Nhóm người dùng",
@@ -811,26 +811,26 @@
   "admin.access-control.groups.form.subgroups-list.table.edit": "Loại bỏ / Thêm",
 
   // "admin.access-control.groups.form.subgroups-list.table.edit.buttons.remove": "Remove subgroup with name \"{{name}}\"",
-  "admin.access-control.groups.form.subgroups-list.table.edit.buttons.remove": "Loại bỏ nhóm người dùng con với tên \"{{name}}\"",
+  "admin.access-control.groups.form.subgroups-list.table.edit.buttons.remove": 'Loại bỏ nhóm người dùng con với tên "{{name}}"',
 
   // "admin.access-control.groups.form.subgroups-list.table.edit.buttons.add": "Add subgroup with name \"{{name}}\"",
-  "admin.access-control.groups.form.subgroups-list.table.edit.buttons.add": "Thêm nhóm người dùng con với tên \"{{name}}\"",
+  "admin.access-control.groups.form.subgroups-list.table.edit.buttons.add": 'Thêm nhóm người dùng con với tên "{{name}}"',
 
   // "admin.access-control.groups.form.subgroups-list.notification.success.addSubgroup": "Successfully added subgroup: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.subgroups-list.notification.success.addSubgroup": "Successfully added subgroup: \"{{name}}\"",
+  "admin.access-control.groups.form.subgroups-list.notification.success.addSubgroup": 'Successfully added subgroup: "{{name}}"',
 
   // "admin.access-control.groups.form.subgroups-list.notification.failure.addSubgroup": "Failed to add subgroup: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.subgroups-list.notification.failure.addSubgroup": "Failed to add subgroup: \"{{name}}\"",
+  "admin.access-control.groups.form.subgroups-list.notification.failure.addSubgroup": 'Failed to add subgroup: "{{name}}"',
 
   // "admin.access-control.groups.form.subgroups-list.notification.success.deleteSubgroup": "Successfully deleted subgroup: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.subgroups-list.notification.success.deleteSubgroup": "Successfully deleted subgroup: \"{{name}}\"",
+  "admin.access-control.groups.form.subgroups-list.notification.success.deleteSubgroup": 'Successfully deleted subgroup: "{{name}}"',
 
   // "admin.access-control.groups.form.subgroups-list.notification.failure.deleteSubgroup": "Failed to delete subgroup: \"{{name}}\"",
   // TODO New key - Add a translation
-  "admin.access-control.groups.form.subgroups-list.notification.failure.deleteSubgroup": "Failed to delete subgroup: \"{{name}}\"",
+  "admin.access-control.groups.form.subgroups-list.notification.failure.deleteSubgroup": 'Failed to delete subgroup: "{{name}}"',
 
   // "admin.access-control.groups.form.subgroups-list.notification.failure.noActiveGroup": "No current active group, submit a name first.",
   "admin.access-control.groups.form.subgroups-list.notification.failure.noActiveGroup": "Hiện tại không có nhóm hoạt động gửi một tên trước.",
@@ -1410,7 +1410,7 @@
   "admin.metadata-import.page.validateOnly": "Kiểm tra nhập lô siêu dữ liệu",
 
   // "admin.metadata-import.page.validateOnly.hint": "When selected, the uploaded CSV will be validated. You will receive a report of detected changes, but no changes will be saved.",
-  "admin.metadata-import.page.validateOnly.hint": "Nếu chọn tùy chọn \"Kiểm tra nhập lô siêu dữ liệu\", hệ thống sẽ chạy một tiến trình kiểm tra nhập lô siêu dữ liệu thay vì đổ trực tiếp dữ liệu lên hệ thống. Bỏ chọn tùy chọn này để tiến hành nhập dữ liệu chính thức.",
+  "admin.metadata-import.page.validateOnly.hint": 'Nếu chọn tùy chọn "Kiểm tra nhập lô siêu dữ liệu", hệ thống sẽ chạy một tiến trình kiểm tra nhập lô siêu dữ liệu thay vì đổ trực tiếp dữ liệu lên hệ thống. Bỏ chọn tùy chọn này để tiến hành nhập dữ liệu chính thức.',
 
   // "advanced-workflow-action.rating.form.rating.label": "Rating",
   "advanced-workflow-action.rating.form.rating.label": "Xếp hạng",
@@ -1470,26 +1470,26 @@
   "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit": "Loại bỏ / Thêm",
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit.buttons.remove": "Remove member with name \"{{name}}\"",
-  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit.buttons.remove": "Loại bỏ người dùng \"{{name}}\"",
+  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit.buttons.remove": 'Loại bỏ người dùng "{{name}}"',
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.success.addMember": "Successfully added member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.success.addMember": "Successfully added member: \"{{name}}\"",
+  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.success.addMember": 'Successfully added member: "{{name}}"',
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.addMember": "Failed to add member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.addMember": "Failed to add member: \"{{name}}\"",
+  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.addMember": 'Failed to add member: "{{name}}"',
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.success.deleteMember": "Successfully deleted member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.success.deleteMember": "Successfully deleted member: \"{{name}}\"",
+  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.success.deleteMember": 'Successfully deleted member: "{{name}}"',
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.deleteMember": "Failed to delete member: \"{{name}}\"",
   // TODO New key - Add a translation
-  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.deleteMember": "Failed to delete member: \"{{name}}\"",
+  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.deleteMember": 'Failed to delete member: "{{name}}"',
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit.buttons.add": "Add member with name \"{{name}}\"",
-  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit.buttons.add": "Thêm thành viên \"{{name}}\"",
+  "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.table.edit.buttons.add": 'Thêm thành viên "{{name}}"',
 
   // "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.noActiveGroup": "No current active group, submit a name first.",
   "advanced-workflow-action-select-reviewer.groups.form.reviewers-list.notification.failure.noActiveGroup": "Không có nhóm hoạt động, gửi tên trước.",
@@ -1504,7 +1504,7 @@
   "advanced-workflow-action.select-reviewer.no-reviewer-selected.error": "Không có người kiểm duyệt nào được chọn.",
 
   // "admin.batch-import.page.validateOnly.hint": "When selected, the uploaded ZIP will be validated. You will receive a report of detected changes, but no changes will be saved.",
-  "admin.batch-import.page.validateOnly.hint": "Nếu chọn tùy chọn \"Kiểm tra file ZIP tải lên\", hệ thống sẽ chạy một tiến trình kiểm tra việc nhập dữ liệu theo lô thay vì đổ trực tiếp dữ liệu lên hệ thống. Việc này giúp cán bộ xác nhận lại kết quả của quy trình nhập trước khi nhập dữ liệu chính thức. Bỏ chọn tùy chọn này để đổ lô tài liệu lên hệ thống.",
+  "admin.batch-import.page.validateOnly.hint": 'Nếu chọn tùy chọn "Kiểm tra file ZIP tải lên", hệ thống sẽ chạy một tiến trình kiểm tra việc nhập dữ liệu theo lô thay vì đổ trực tiếp dữ liệu lên hệ thống. Việc này giúp cán bộ xác nhận lại kết quả của quy trình nhập trước khi nhập dữ liệu chính thức. Bỏ chọn tùy chọn này để đổ lô tài liệu lên hệ thống.',
 
   // "admin.batch-import.page.remove": "remove",
   "admin.batch-import.page.remove": "xóa",
@@ -1538,7 +1538,7 @@
   "bitstream.edit.bitstream": "Bitstream: ",
 
   // "bitstream.edit.form.description.hint": "Optionally, provide a brief description of the file, for example \"<i>Main article</i>\" or \"<i>Experiment data readings</i>\".",
-  "bitstream.edit.form.description.hint": "Tùy chọn cung cấp mô tả ngắn gọn về tệp ví dụ \"<i>Bài báo chính</i>\" or \"<i>Dữ liệu đọc thử nghiệm</i>\".",
+  "bitstream.edit.form.description.hint": 'Tùy chọn cung cấp mô tả ngắn gọn về tệp ví dụ "<i>Bài báo chính</i>" or "<i>Dữ liệu đọc thử nghiệm</i>".',
 
   // "bitstream.edit.form.description.label": "Description",
   "bitstream.edit.form.description.label": "Mô tả",
@@ -1559,13 +1559,13 @@
   "bitstream.edit.form.newFormat.label": "Mô tả định dạng mới",
 
   // "bitstream.edit.form.newFormat.hint": "The application you used to create the file, and the version number (for example, \"<i>ACMESoft SuperApp version 1.5</i>\").",
-  "bitstream.edit.form.newFormat.hint": "Ứng dụng bạn đã sử dụng để tạo tệp và thông tin phiên bản (ví dụ \"<i>ACMESoft SuperApp phiên bản 1.5</i>\").",
+  "bitstream.edit.form.newFormat.hint": 'Ứng dụng bạn đã sử dụng để tạo tệp và thông tin phiên bản (ví dụ "<i>ACMESoft SuperApp phiên bản 1.5</i>").',
 
   // "bitstream.edit.form.primaryBitstream.label": "Primary File",
   "bitstream.edit.form.primaryBitstream.label": "Tệp tin chính",
 
   // "bitstream.edit.form.selectedFormat.hint": "If the format is not in the above list, <b>select \"format not in list\" above</b> and describe it under \"Describe new format\".",
-  "bitstream.edit.form.selectedFormat.hint": "Nếu định dạng không có trong danh sách trên <b>chọn \"định dạng không có trong danh sách\" trên</b> và mô tả nó dưới mục\"Mô tả định dạng mới\".",
+  "bitstream.edit.form.selectedFormat.hint": 'Nếu định dạng không có trong danh sách trên <b>chọn "định dạng không có trong danh sách" trên</b> và mô tả nó dưới mục"Mô tả định dạng mới".',
 
   // "bitstream.edit.form.selectedFormat.label": "Selected Format",
   "bitstream.edit.form.selectedFormat.label": "Định dạng đã chọn",
@@ -1857,7 +1857,7 @@
   "browse.startsWith.submit": "Duyệt",
 
   // "browse.startsWith.type_date": "Filter results by date",
-  "browse.startsWith.type_date": "Hoặc nhập một ngày  (năm-tháng) và nhấp \"Duyệt\"",
+  "browse.startsWith.type_date": 'Hoặc nhập một ngày  (năm-tháng) và nhấp "Duyệt"',
 
   // "browse.startsWith.type_date.label": "Or type in a date (year-month) and click on the Browse button",
   "browse.startsWith.type_date.label": "Hoặc nhập một ngày  (năm-tháng) à nhấp Duyệt",
@@ -1934,7 +1934,7 @@
   "collection.delete.notification.success": "Xóa bộ sưu tập thành công",
 
   // "collection.delete.text": "Are you sure you want to delete collection \"{{ dso }}\"",
-  "collection.delete.text": "Bạn có chắc chắn rằng bạn muốn xóa bộ sưu tập \"{{ dso }}\"",
+  "collection.delete.text": 'Bạn có chắc chắn rằng bạn muốn xóa bộ sưu tập "{{ dso }}"',
 
   // "collection.edit.delete": "Delete this collection",
   "collection.edit.delete": "Xóa bộ sưu tập này",
@@ -1956,7 +1956,7 @@
 
   // "collection.edit.item-mapper.collection": "Collection: \"<b>{{name}}</b>\"",
   // TODO New key - Add a translation
-  "collection.edit.item-mapper.collection": "Collection: \"<b>{{name}}</b>\"",
+  "collection.edit.item-mapper.collection": 'Collection: "<b>{{name}}</b>"',
 
   // "collection.edit.item-mapper.confirm": "Map selected items",
   "collection.edit.item-mapper.confirm": "Ánh xạ những tài liệu đã chọn",
@@ -2153,7 +2153,7 @@
   "collection.edit.template.error": "Đã xảy ra lỗi khi truy xuất khung mẫu tài liệu",
 
   // "collection.edit.template.head": "Edit Template Item for Collection \"{{ collection }}\"",
-  "collection.edit.template.head": "Chỉnh sửa khung mẫu tài liệu cho bộ sưu tập \"{{ collection }}\"",
+  "collection.edit.template.head": 'Chỉnh sửa khung mẫu tài liệu cho bộ sưu tập "{{ collection }}"',
 
   // "collection.edit.template.label": "Template item",
   "collection.edit.template.label": "Khung mẫu tài liệu",
@@ -2396,7 +2396,7 @@
   "community.delete.notification.success": "Xóa đơn vị thành công",
 
   // "community.delete.text": "Are you sure you want to delete community \"{{ dso }}\"",
-  "community.delete.text": "Bạn có chắc chắn muốn xóa đơn vị \"{{ dso }}\"",
+  "community.delete.text": 'Bạn có chắc chắn muốn xóa đơn vị "{{ dso }}"',
 
   // "community.edit.delete": "Delete this community",
   "community.edit.delete": "Xóa đơn vị này",
@@ -2513,11 +2513,11 @@
 
   // "comcol-role.edit.delete.modal.header": "Delete Group \"{{ dsoName }}\"",
   // TODO New key - Add a translation
-  "comcol-role.edit.delete.modal.header": "Delete Group \"{{ dsoName }}\"",
+  "comcol-role.edit.delete.modal.header": 'Delete Group "{{ dsoName }}"',
 
   // "comcol-role.edit.delete.modal.info": "Are you sure you want to delete Group \"{{ dsoName }}\" and all its associated policies?",
   // TODO New key - Add a translation
-  "comcol-role.edit.delete.modal.info": "Are you sure you want to delete Group \"{{ dsoName }}\" and all its associated policies?",
+  "comcol-role.edit.delete.modal.info": 'Are you sure you want to delete Group "{{ dsoName }}" and all its associated policies?',
 
   // "comcol-role.edit.delete.modal.cancel": "Cancel",
   // TODO New key - Add a translation
@@ -2775,7 +2775,7 @@
   "curation-task.task.citationpage.label": "Tạo trang trích dẫn",
 
   // "curation-task.task.checklinks.label": "Check Links in Metadata",
-  "curation-task.task.checklinks.label": "\"Kiểm tra các link trong thông tin mô tả\"",
+  "curation-task.task.checklinks.label": '"Kiểm tra các link trong thông tin mô tả"',
 
   // "curation-task.task.noop.label": "NOOP",
   "curation-task.task.noop.label": "NOOP",
@@ -2826,7 +2826,7 @@
 
   // "deny-request-copy.email.message": "Dear {{ recipientName }},\nIn response to your request I regret to inform you that it's not possible to send you a copy of the file(s) you have requested, concerning the document: \"{{ itemUrl }}\" ({{ itemName }}), of which I am an author.\n\nBest regards,\n{{ authorName }} <{{ authorEmail }}>",
   // TODO New key - Add a translation
-  "deny-request-copy.email.message": "Dear {{ recipientName }},\nIn response to your request I regret to inform you that it's not possible to send you a copy of the file(s) you have requested, concerning the document: \"{{ itemUrl }}\" ({{ itemName }}), of which I am an author.\n\nBest regards,\n{{ authorName }} <{{ authorEmail }}>",
+  "deny-request-copy.email.message": 'Dear {{ recipientName }},\nIn response to your request I regret to inform you that it\'s not possible to send you a copy of the file(s) you have requested, concerning the document: "{{ itemUrl }}" ({{ itemName }}), of which I am an author.\n\nBest regards,\n{{ authorName }} <{{ authorEmail }}>',
 
   // "deny-request-copy.email.subject": "Request copy of document",
   "deny-request-copy.email.subject": "Yêu cầu bản sao tài liệu",
@@ -3022,10 +3022,10 @@
   "confirmation-modal.export-batch.confirm": "Xuất dữ liệu",
 
   // "confirmation-modal.delete-eperson.header": "Delete EPerson \"{{ dsoName }}\"",
-  "confirmation-modal.delete-eperson.header": "Xóa người dùng \"{{ dsoName }}\"",
+  "confirmation-modal.delete-eperson.header": 'Xóa người dùng "{{ dsoName }}"',
 
   // "confirmation-modal.delete-eperson.info": "Are you sure you want to delete EPerson \"{{ dsoName }}\"",
-  "confirmation-modal.delete-eperson.info": "Bạn có chắc muốn xóa người dùng \"{{ dsoName }}\"",
+  "confirmation-modal.delete-eperson.info": 'Bạn có chắc muốn xóa người dùng "{{ dsoName }}"',
 
   // "confirmation-modal.delete-eperson.cancel": "Cancel",
   "confirmation-modal.delete-eperson.cancel": "Hủy",
@@ -3055,7 +3055,7 @@
 
   // "confirmation-modal.delete-subscription.info": "Are you sure you want to delete subscription for \"{{ dsoName }}\"",
   // TODO New key - Add a translation
-  "confirmation-modal.delete-subscription.info": "Are you sure you want to delete subscription for \"{{ dsoName }}\"",
+  "confirmation-modal.delete-subscription.info": 'Are you sure you want to delete subscription for "{{ dsoName }}"',
 
   // "confirmation-modal.delete-subscription.cancel": "Cancel",
   // TODO New key - Add a translation
@@ -3127,7 +3127,7 @@
 
   // "error.invalid-search-query": "Search query is not valid. Please check <a href=\"https://solr.apache.org/guide/query-syntax-and-parsing.html\" target=\"_blank\">Solr query syntax</a> best practices for further information about this error.",
   // TODO New key - Add a translation
-  "error.invalid-search-query": "Search query is not valid. Please check <a href=\"https://solr.apache.org/guide/query-syntax-and-parsing.html\" target=\"_blank\">Solr query syntax</a> best practices for further information about this error.",
+  "error.invalid-search-query": 'Search query is not valid. Please check <a href="https://solr.apache.org/guide/query-syntax-and-parsing.html" target="_blank">Solr query syntax</a> best practices for further information about this error.',
 
   // "error.sub-collections": "Error fetching sub-collections",
   "error.sub-collections": "Lỗi tìm kiếm bộ sưu tập con",
@@ -3502,7 +3502,7 @@
 
   // "grant-request-copy.intro.link": "A message will be sent to the applicant of the request. A secure link providing access to the requested document(s) will be attached. The link will provide access for the duration of time selected in the \"Access Period\" menu below.",
   // TODO New key - Add a translation
-  "grant-request-copy.intro.link": "A message will be sent to the applicant of the request. A secure link providing access to the requested document(s) will be attached. The link will provide access for the duration of time selected in the \"Access Period\" menu below.",
+  "grant-request-copy.intro.link": 'A message will be sent to the applicant of the request. A secure link providing access to the requested document(s) will be attached. The link will provide access for the duration of time selected in the "Access Period" menu below.',
 
   // "grant-request-copy.intro.link.preview": "Below is a preview of the link that will be sent to the applicant:",
   // TODO New key - Add a translation
@@ -3612,6 +3612,20 @@
 
   // "home.top-level-communities.help": "Select a community to browse its collections.",
   "home.top-level-communities.help": "Chọn một đơn vị để xem các bộ sưu tập của nó.",
+
+  "home.recommendations.title": "Gợi ý dành cho bạn",
+  "home.recommendations.subtitle": "Dựa trên sở thích của bạn",
+  "home.recommendations.empty": "Hiện không có gợi ý nào",
+  "home.recommendations.loading": "Đang tải gợi ý...",
+  "home.recommendations.error": "Không thể tải gợi ý",
+  "home.recommendations.login-prompt": "Đăng nhập để xem gợi ý cá nhân. ",
+  "home.recommendations.login-link": "Đăng nhập ngay",
+  "home.recommendations.view-more": "Xem thêm",
+  "home.recommendations.view-resource": "Xem tài liệu",
+  "home.recommendations.by": "bởi",
+  "home.recommendations.based-on": "Dựa trên sở thích của bạn về",
+  "home.recommendations.no-recommendations": "Chưa có gợi ý nào",
+  "home.recommendations.borrow-more": "Mượn sách để nhận gợi ý cá nhân!",
 
   // "info.accessibility-settings.breadcrumbs": "Accessibility settings",
   // TODO New key - Add a translation
@@ -4101,7 +4115,7 @@
 
   // "item.edit.item-mapper.item": "Item: \"<b>{{name}}</b>\"",
   // TODO New key - Add a translation
-  "item.edit.item-mapper.item": "Item: \"<b>{{name}}</b>\"",
+  "item.edit.item-mapper.item": 'Item: "<b>{{name}}</b>"',
 
   // "item.edit.item-mapper.no-search": "Please enter a query to search",
   "item.edit.item-mapper.no-search": "Vui lòng nhập một truy vấn để tìm kiếm",
@@ -4187,7 +4201,7 @@
 
   // "item.edit.metadata.edit.buttons.virtual": "This is a virtual metadata value, i.e. a value inherited from a related entity. It can’t be modified directly. Add or remove the corresponding relationship in the \"Relationships\" tab",
   // TODO New key - Add a translation
-  "item.edit.metadata.edit.buttons.virtual": "This is a virtual metadata value, i.e. a value inherited from a related entity. It can’t be modified directly. Add or remove the corresponding relationship in the \"Relationships\" tab",
+  "item.edit.metadata.edit.buttons.virtual": 'This is a virtual metadata value, i.e. a value inherited from a related entity. It can’t be modified directly. Add or remove the corresponding relationship in the "Relationships" tab',
 
   // "item.edit.metadata.empty": "The item currently doesn't contain any metadata. Click Add to start adding a metadata value.",
   "item.edit.metadata.empty": "Bộ sưu tập này hiện không chứa trường thông tin mặc định nào. Nhập vào nút Thêm để bắt đầu thêm giá trị mặc định cho trường thông tin cho các tài liệu biên mục mới trong bộ sưu tập.",
@@ -4686,11 +4700,11 @@
 
   // "workflow-item.search.result.notification.deleted.success": "Successfully deleted supervision order \"{{name}}\"",
   // TODO New key - Add a translation
-  "workflow-item.search.result.notification.deleted.success": "Successfully deleted supervision order \"{{name}}\"",
+  "workflow-item.search.result.notification.deleted.success": 'Successfully deleted supervision order "{{name}}"',
 
   // "workflow-item.search.result.notification.deleted.failure": "Failed to delete supervision order \"{{name}}\"",
   // TODO New key - Add a translation
-  "workflow-item.search.result.notification.deleted.failure": "Failed to delete supervision order \"{{name}}\"",
+  "workflow-item.search.result.notification.deleted.failure": 'Failed to delete supervision order "{{name}}"',
 
   // "workflow-item.search.result.list.element.supervised-by": "Supervised by:",
   // TODO New key - Add a translation
@@ -9031,7 +9045,7 @@
   "submission.sections.describe.relationship-lookup.selection-tab.title": "Kết quả tìm kiếm",
 
   // "submission.sections.describe.relationship-lookup.name-variant.notification.content": "Would you like to save \"{{ value }}\" as a name variant for this person so you and others can reuse it for future submissions? If you don't you can still use it for this submission.",
-  "submission.sections.describe.relationship-lookup.name-variant.notification.content": "Bạn có muốn lưu \"{{ value }}\" làm tên biến thể cho người này để bạn và những người khác có thể sử dụng lại cho những lần gửi sau không? Nếu không bạn vẫn có thể sử dụng cho lần gửi này\"",
+  "submission.sections.describe.relationship-lookup.name-variant.notification.content": 'Bạn có muốn lưu "{{ value }}" làm tên biến thể cho người này để bạn và những người khác có thể sử dụng lại cho những lần gửi sau không? Nếu không bạn vẫn có thể sử dụng cho lần gửi này"',
 
   // "submission.sections.describe.relationship-lookup.name-variant.notification.confirm": "Save a new name variant",
   "submission.sections.describe.relationship-lookup.name-variant.notification.confirm": "Lưu một biến thể tên mới",
@@ -9470,7 +9484,7 @@
   "submission.workflow.generic.delete": "Xóa",
 
   // "submission.workflow.generic.delete-help": "Select this option to discard this item. You will then be asked to confirm it.",
-  "submission.workflow.generic.delete-help": "Nếu bạn muốn hủy tài liệu này hãy chọn \"Delete\". Sau đó bạn sẽ được yêu cầu xác nhận.\"",
+  "submission.workflow.generic.delete-help": 'Nếu bạn muốn hủy tài liệu này hãy chọn "Delete". Sau đó bạn sẽ được yêu cầu xác nhận."',
 
   // "submission.workflow.generic.edit": "Edit",
   "submission.workflow.generic.edit": "Chỉnh sửa",
@@ -9504,7 +9518,7 @@
   "submission.workflow.tasks.claimed.approve": "Chấp nhận",
 
   // "submission.workflow.tasks.claimed.approve_help": "If you have reviewed the item and it is suitable for inclusion in the collection, select \"Approve\".",
-  "submission.workflow.tasks.claimed.approve_help": "Nếu bạn đã xem xét tài liệu và thấy phù hợp để đưa vào bộ sưu tập hãy chọn \"Approve\".",
+  "submission.workflow.tasks.claimed.approve_help": 'Nếu bạn đã xem xét tài liệu và thấy phù hợp để đưa vào bộ sưu tập hãy chọn "Approve".',
 
   // "submission.workflow.tasks.claimed.edit": "Edit",
   "submission.workflow.tasks.claimed.edit": "Chỉnh sửa",
@@ -9536,7 +9550,7 @@
   "submission.workflow.tasks.claimed.reject.submit": "Từ chối",
 
   // "submission.workflow.tasks.claimed.reject_help": "If you have reviewed the item and found it is <strong>not</strong> suitable for inclusion in the collection, select \"Reject\".  You will then be asked to enter a message indicating why the item is unsuitable, and whether the submitter should change something and resubmit.",
-  "submission.workflow.tasks.claimed.reject_help": "Nếu bạn đã xem xét tài liệu và thấy  <strong>không</strong> phù hợp để đưa vào bộ sưu tập hãy chọn \"Reject\". Sau đó bạn sẽ được yêu cầu nhập một thông báo cho biết lý do tại sao tài liệu đó không phù hợp và liệu người gửi có nên thay đổi điều gì đó và gửi lại hay không.",
+  "submission.workflow.tasks.claimed.reject_help": 'Nếu bạn đã xem xét tài liệu và thấy  <strong>không</strong> phù hợp để đưa vào bộ sưu tập hãy chọn "Reject". Sau đó bạn sẽ được yêu cầu nhập một thông báo cho biết lý do tại sao tài liệu đó không phù hợp và liệu người gửi có nên thay đổi điều gì đó và gửi lại hay không.',
 
   // "submission.workflow.tasks.claimed.return": "Return to pool",
   "submission.workflow.tasks.claimed.return": "Trả lại nhiệm vụ",
@@ -9640,7 +9654,7 @@
 
   // "subscriptions.modal.delete-info": "To remove this subscription, please visit the \"Subscriptions\" page under your user profile",
   // TODO New key - Add a translation
-  "subscriptions.modal.delete-info": "To remove this subscription, please visit the \"Subscriptions\" page under your user profile",
+  "subscriptions.modal.delete-info": 'To remove this subscription, please visit the "Subscriptions" page under your user profile',
 
   // "subscriptions.modal.new-subscription-form.type.content": "Content",
   // TODO New key - Add a translation
@@ -9751,7 +9765,7 @@
   "thumbnail.person.placeholder": "Không có ảnh hồ sơ nào",
 
   // "title": "DSpace",
-  "title": "DSpace",
+  title: "DSpace",
 
   // "vocabulary-treeview.header": "Hierarchical tree view",
   "vocabulary-treeview.header": "Chế độ xem phân cấp",
@@ -10326,7 +10340,7 @@
   "person.page.orcid.synchronization-mode.label": "Chế độ đồng bộ",
 
   // "person.page.orcid.synchronization-mode-message": "Please select how you would like synchronization to ORCID to occur. The options include \"Manual\" (you must send your data to ORCID manually), or \"Batch\" (the system will send your data to ORCID via a scheduled script).",
-  "person.page.orcid.synchronization-mode-message": "Vui lòng chọn phương thức đồng bộ hóa với ORCID. Các tùy chọn bao gồm \"Thủ công\" (bạn phải gửi dữ liệu của mình tới ORCID theo cách thủ công) hoặc \"Tự động\" (hệ thống sẽ gửi dữ liệu của bạn tới ORCID thông qua tập lệnh đã lên lịch).",
+  "person.page.orcid.synchronization-mode-message": 'Vui lòng chọn phương thức đồng bộ hóa với ORCID. Các tùy chọn bao gồm "Thủ công" (bạn phải gửi dữ liệu của mình tới ORCID theo cách thủ công) hoặc "Tự động" (hệ thống sẽ gửi dữ liệu của bạn tới ORCID thông qua tập lệnh đã lên lịch).',
 
   // "person.page.orcid.synchronization-mode-funding-message": "Select whether to send your linked Project entities to your ORCID record's list of funding information.",
   "person.page.orcid.synchronization-mode-funding-message": "Chọn gửi/không gửi các thực thể dự án của bạn đến danh sách các quỹ tài trợ trong bản ghi ORCID của bạn hay không.",
@@ -10608,7 +10622,7 @@
 
   // "coar-notify-support-title.content": "Here, we fully support the COAR Notify protocol, which is designed to enhance the communication between repositories. To learn more about the COAR Notify protocol, visit the <a href=\"https://notify.coar-repositories.org/\" rel=\"noopener noreferrer\">COAR Notify website</a>.",
   // TODO New key - Add a translation
-  "coar-notify-support-title.content": "Here, we fully support the COAR Notify protocol, which is designed to enhance the communication between repositories. To learn more about the COAR Notify protocol, visit the <a href=\"https://notify.coar-repositories.org/\" rel=\"noopener noreferrer\">COAR Notify website</a>.",
+  "coar-notify-support-title.content": 'Here, we fully support the COAR Notify protocol, which is designed to enhance the communication between repositories. To learn more about the COAR Notify protocol, visit the <a href="https://notify.coar-repositories.org/" rel="noopener noreferrer">COAR Notify website</a>.',
 
   // "coar-notify-support.ldn-inbox.title": "LDN InBox",
   // TODO New key - Add a translation
@@ -12266,5 +12280,25 @@
   // TODO New key - Add a translation
   "file-download-link.request-copy": "Request a copy of ",
 
-
+  "item.reviews.title": "Đánh giá & Nhận xét",
+  "item.reviews.reviews": "đánh giá",
+  "item.reviews.write": "Viết đánh giá",
+  "item.reviews.edit": "Sửa đánh giá",
+  "item.reviews.write-review": "Viết đánh giá của bạn",
+  "item.reviews.edit-review": "Sửa đánh giá của bạn",
+  "item.reviews.your-rating": "Đánh giá của bạn",
+  "item.reviews.your-comment": "Nhận xét của bạn",
+  "item.reviews.comment-placeholder": "Chia sẻ suy nghĩ của bạn về tài liệu này...",
+  "item.reviews.submit": "Gửi đánh giá",
+  "item.reviews.update": "Cập nhật",
+  "item.reviews.cancel": "Hủy",
+  "item.reviews.delete": "Xóa",
+  "item.reviews.no-reviews": "Chưa có đánh giá. Hãy là người đầu tiên đánh giá tài liệu này!",
+  "item.reviews.login-prompt": "Vui lòng đăng nhập để viết đánh giá.",
+  "item.reviews.loading": "Đang tải đánh giá...",
+  "item.reviews.sort-by": "Sắp xếp theo",
+  "item.reviews.newest": "Mới nhất",
+  "item.reviews.rating": "Điểm",
+  "item.reviews.helpful": "Hữu ích",
+  "item.reviews.edited": "đã sửa",
 }

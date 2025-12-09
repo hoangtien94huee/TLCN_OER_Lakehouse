@@ -1,0 +1,99 @@
+<!-- Recommendation List Component - Styled to match DSpace theme -->
+@if (isLoggedIn) {
+  <div class="recommendation-section mt-4">
+    <div class="d-flex flex-row border-bottom mb-4 pb-2">
+      <h2 class="mb-0">
+        <i class="fas fa-lightbulb me-2"></i>
+        {{ 'home.recommendations.title' | translate }}
+      </h2>
+    </div>
+
+    <!-- Top Topics Badge -->
+    @if (topTopics.length > 0) {
+      <div class="mb-3">
+        <small class="text-muted">
+          {{ 'home.recommendations.based-on' | translate }}:
+        </small>
+        @for (topic of topTopics; track topic) {
+          <span class="badge bg-primary ms-2">{{ topic }}</span>
+        }
+      </div>
+    }
+
+    <!-- Loading State -->
+    @if (isLoading) {
+      <div class="text-center py-4">
+        <div class="spinner-border text-primary" role="status">
+          <span class="visually-hidden">Loading...</span>
+        </div>
+        <p class="mt-2 text-muted">{{ 'home.recommendations.loading' | translate }}</p>
+      </div>
+    }
+
+    <!-- Error State -->
+    @if (hasError && !isLoading) {
+      <div class="alert alert-warning" role="alert">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        {{ errorMessage }}
+      </div>
+    }
+
+    <!-- Recommendations List -->
+    @if (!isLoading && !hasError && recommendations.length > 0) {
+      <div class="row">
+        @for (item of recommendations; track item.resource_id) {
+          <div class="col-md-6 col-lg-4 mb-4">
+            <div class="card h-100 recommendation-card" (click)="openResource(item.url)">
+              <!-- Card Header with Source -->
+              <div class="card-header d-flex justify-content-between align-items-center py-2">
+                <span class="source-badge">
+                  <span class="source-icon">{{ getSourceIcon(item.source) }}</span>
+                  <span class="source-label">{{ getSourceLabel(item.source) }}</span>
+                </span>
+              </div>
+
+              <!-- Card Body -->
+              <div class="card-body">
+                <h5 class="card-title item-list-title">
+                  <a [href]="item.url" target="_blank" rel="noopener noreferrer" 
+                     class="text-decoration-none" (click)="$event.stopPropagation()">
+                    {{ item.title }}
+                  </a>
+                </h5>
+                
+                @if (item.description) {
+                  <p class="card-text text-muted small item-list-abstract">
+                    {{ truncateText(item.description, 120) }}
+                  </p>
+                }
+
+                <!-- Subjects -->
+                @if (item.subjects && item.subjects.length > 0) {
+                  <div class="subjects-container mt-2">
+                    @for (subject of item.subjects.slice(0, 3); track subject) {
+                      <span class="badge bg-light text-dark me-1 mb-1">{{ subject }}</span>
+                    }
+                    @if (item.subjects.length > 3) {
+                      <span class="badge bg-secondary">+{{ item.subjects.length - 3 }}</span>
+                    }
+                  </div>
+                }
+              </div>
+            </div>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- No Recommendations -->
+    @if (!isLoading && !hasError && recommendations.length === 0) {
+      <div class="text-center py-4">
+        <i class="fas fa-book-open fa-3x text-muted mb-3"></i>
+        <p class="text-muted">{{ 'home.recommendations.no-recommendations' | translate }}</p>
+        <small class="text-muted">{{ 'home.recommendations.borrow-more' | translate }}</small>
+      </div>
+    }
+  </div>
+}
+
+<!-- Not Logged In - Don't show anything -->

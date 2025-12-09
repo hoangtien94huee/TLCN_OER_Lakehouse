@@ -257,6 +257,11 @@ services:
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=oer_resources
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=dspace
+      - POSTGRES_USER=dspace
+      - POSTGRES_PASSWORD=dspace
       - MINIO_BROWSER_ENDPOINT=http://localhost:9000/browser
       - MINIO_BUCKET=oer-lakehouse
       - MINIO_ENDPOINT=minio:9000
@@ -269,6 +274,8 @@ services:
       - "localhost:host-gateway"
     depends_on:
       elasticsearch:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
     ports:
       - "8088:8080"

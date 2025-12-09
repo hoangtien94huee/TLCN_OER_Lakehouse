@@ -23,6 +23,7 @@ import { ThemedSearchFormComponent } from '../shared/search-form/themed-search-f
 import { HomeCoarComponent } from './home-coar/home-coar.component';
 import { ThemedHomeNewsComponent } from './home-news/themed-home-news.component';
 import { RecentItemListComponent } from './recent-item-list/recent-item-list.component';
+import { RecommendationListComponent } from './recommendation-list/recommendation-list.component';
 import { ThemedTopLevelCommunityListComponent } from './top-level-community-list/themed-top-level-community-list.component';
 
 @Component({
@@ -35,6 +36,7 @@ import { ThemedTopLevelCommunityListComponent } from './top-level-community-list
     HomeCoarComponent,
     NgTemplateOutlet,
     RecentItemListComponent,
+    RecommendationListComponent,
     SuggestionsPopupComponent,
     ThemedConfigurationSearchPageComponent,
     ThemedHomeNewsComponent,

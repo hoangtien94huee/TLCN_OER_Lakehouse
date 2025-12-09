@@ -8,6 +8,7 @@ import { TranslateModule } from '@ngx-translate/core';
 import { ThemedItemAlertsComponent } from '../../../../../app/item-page/alerts/themed-item-alerts.component';
 import { AccessByTokenNotificationComponent } from '../../../../../app/item-page/simple/access-by-token-notification/access-by-token-notification.component';
 import { ItemPageComponent as BaseComponent } from '../../../../../app/item-page/simple/item-page.component';
+import { ItemReviewsComponent } from '../../../../../app/item-page/simple/item-reviews/item-reviews.component';
 import { NotifyRequestsStatusComponent } from '../../../../../app/item-page/simple/notify-requests-status/notify-requests-status-component/notify-requests-status.component';
 import { QaEventNotificationComponent } from '../../../../../app/item-page/simple/qa-event-notification/qa-event-notification.component';
 import { ItemVersionsComponent } from '../../../../../app/item-page/versions/item-versions.component';
@@ -20,10 +21,8 @@ import { VarDirective } from '../../../../../app/shared/utils/var.directive';
 
 @Component({
   selector: 'ds-themed-item-page',
-  // styleUrls: ['./item-page.component.scss'],
   styleUrls: ['../../../../../app/item-page/simple/item-page.component.scss'],
-  // templateUrl: './item-page.component.html',
-  templateUrl: '../../../../../app/item-page/simple/item-page.component.html',
+  templateUrl: './item-page.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
   animations: [fadeInOut],
   standalone: true,
@@ -31,6 +30,7 @@ import { VarDirective } from '../../../../../app/shared/utils/var.directive';
     AccessByTokenNotificationComponent,
     AsyncPipe,
     ErrorComponent,
+    ItemReviewsComponent,
     ItemVersionsComponent,
     ItemVersionsNoticeComponent,
     ListableObjectComponentLoaderComponent,

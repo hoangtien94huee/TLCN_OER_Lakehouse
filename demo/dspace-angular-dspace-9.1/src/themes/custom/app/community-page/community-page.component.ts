@@ -10,6 +10,7 @@ import {
 import { TranslateModule } from '@ngx-translate/core';
 
 import { CommunityPageComponent as BaseComponent } from '../../../../app/community-page/community-page.component';
+import { RecommendationListComponent } from '../../../../app/home-page/recommendation-list/recommendation-list.component';
 import { fadeInOut } from '../../../../app/shared/animations/fade';
 import { ThemedComcolPageBrowseByComponent } from '../../../../app/shared/comcol/comcol-page-browse-by/themed-comcol-page-browse-by.component';
 import { ThemedComcolPageContentComponent } from '../../../../app/shared/comcol/comcol-page-content/themed-comcol-page-content.component';
@@ -23,8 +24,7 @@ import { VarDirective } from '../../../../app/shared/utils/var.directive';
 
 @Component({
   selector: 'ds-themed-community-page',
-  // templateUrl: './community-page.component.html',
-  templateUrl: '../../../../app/community-page/community-page.component.html',
+  templateUrl: './community-page.component.html',
   // styleUrls: ['./community-page.component.scss']
   styleUrls: ['../../../../app/community-page/community-page.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -36,6 +36,7 @@ import { VarDirective } from '../../../../app/shared/utils/var.directive';
     ComcolPageLogoComponent,
     DsoEditMenuComponent,
     ErrorComponent,
+    RecommendationListComponent,
     RouterModule,
     RouterOutlet,
     ThemedComcolPageBrowseByComponent,

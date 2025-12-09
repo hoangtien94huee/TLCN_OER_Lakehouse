@@ -1,0 +1,231 @@
+<div class="item-reviews-section mt-4">
+  <!-- Header -->
+  <div class="reviews-header d-flex justify-content-between align-items-center mb-3">
+    <h3 class="mb-0">
+      <i class="fas fa-star text-warning me-2"></i>
+      {{ 'item.reviews.title' | translate }}
+      <span class="badge bg-secondary ms-2" *ngIf="stats">{{ stats.total_reviews }}</span>
+    </h3>
+    
+    <button 
+      *ngIf="isAuthenticated && !showReviewForm" 
+      class="btn btn-primary btn-sm"
+      (click)="toggleReviewForm()">
+      <i class="fas fa-edit me-1"></i>
+      {{ userReview ? ('item.reviews.edit' | translate) : ('item.reviews.write' | translate) }}
+    </button>
+  </div>
+
+  <!-- Stats Summary -->
+  <div class="reviews-stats card mb-4" *ngIf="stats && stats.total_reviews > 0">
+    <div class="card-body">
+      <div class="row align-items-center">
+        <!-- Average Rating -->
+        <div class="col-md-4 text-center border-end">
+          <div class="display-4 fw-bold text-warning">{{ stats.average_rating }}</div>
+          <div class="stars-display mb-2">
+            <i *ngFor="let star of getStarsArray(5)" 
+               class="fas fa-star"
+               [class.text-warning]="star <= stats.average_rating"
+               [class.text-muted]="star > stats.average_rating">
+            </i>
+          </div>
+          <div class="text-muted">{{ stats.total_reviews }} {{ 'item.reviews.reviews' | translate }}</div>
+        </div>
+        
+        <!-- Rating Distribution -->
+        <div class="col-md-8">
+          <div class="rating-bars">
+            <div *ngFor="let star of [5,4,3,2,1]" class="d-flex align-items-center mb-1">
+              <span class="me-2" style="width: 20px;">{{ star }}</span>
+              <i class="fas fa-star text-warning me-2"></i>
+              <div class="progress flex-grow-1" style="height: 12px;">
+                <div class="progress-bar bg-warning" 
+                     [style.width.%]="getPercentage(stats.distribution[star])">
+                </div>
+              </div>
+              <span class="ms-2 text-muted" style="width: 40px;">{{ stats.distribution[star] }}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- No Reviews Message -->
+  <div class="alert alert-info" *ngIf="stats && stats.total_reviews === 0 && !isLoading">
+    <i class="fas fa-info-circle me-2"></i>
+    {{ 'item.reviews.no-reviews' | translate }}
+  </div>
+
+  <!-- Login Prompt -->
+  <div class="alert alert-secondary" *ngIf="!isAuthenticated">
+    <i class="fas fa-user me-2"></i>
+    {{ 'item.reviews.login-prompt' | translate }}
+  </div>
+
+  <!-- Messages -->
+  <div class="alert alert-success alert-dismissible" *ngIf="successMessage">
+    {{ successMessage }}
+    <button type="button" class="btn-close" (click)="successMessage = ''"></button>
+  </div>
+  <div class="alert alert-danger alert-dismissible" *ngIf="errorMessage">
+    {{ errorMessage }}
+    <button type="button" class="btn-close" (click)="errorMessage = ''"></button>
+  </div>
+
+  <!-- Review Form -->
+  <div class="review-form card mb-4" *ngIf="showReviewForm && isAuthenticated">
+    <div class="card-header">
+      <h5 class="mb-0">
+        {{ userReview ? ('item.reviews.edit-review' | translate) : ('item.reviews.write-review' | translate) }}
+      </h5>
+    </div>
+    <div class="card-body">
+      <!-- Star Rating Input -->
+      <div class="mb-3">
+        <label class="form-label">{{ 'item.reviews.your-rating' | translate }}</label>
+        <div class="star-rating-input">
+          <i *ngFor="let star of getStarsArray(5)"
+             class="fas fa-star fa-2x cursor-pointer"
+             [class.text-warning]="star <= newRating"
+             [class.text-muted]="star > newRating"
+             (click)="setRating(star)"
+             (mouseenter)="setRating(star)">
+          </i>
+          <span class="ms-3 fs-5">{{ newRating }}/5</span>
+        </div>
+      </div>
+
+      <!-- Comment Input -->
+      <div class="mb-3">
+        <label class="form-label">{{ 'item.reviews.your-comment' | translate }}</label>
+        <textarea 
+          class="form-control"
+          rows="4"
+          [(ngModel)]="newComment"
+          [placeholder]="'item.reviews.comment-placeholder' | translate">
+        </textarea>
+      </div>
+
+      <!-- Actions -->
+      <div class="d-flex gap-2">
+        <button 
+          class="btn btn-primary"
+          [disabled]="isSubmitting"
+          (click)="submitReview()">
+          <span *ngIf="isSubmitting" class="spinner-border spinner-border-sm me-1"></span>
+          {{ userReview ? ('item.reviews.update' | translate) : ('item.reviews.submit' | translate) }}
+        </button>
+        <button 
+          class="btn btn-secondary"
+          (click)="toggleReviewForm()">
+          {{ 'item.reviews.cancel' | translate }}
+        </button>
+        <button 
+          *ngIf="userReview"
+          class="btn btn-danger ms-auto"
+          (click)="deleteReview()">
+          <i class="fas fa-trash me-1"></i>
+          {{ 'item.reviews.delete' | translate }}
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Sort Options -->
+  <div class="d-flex gap-2 mb-3" *ngIf="reviews.length > 0">
+    <span class="text-muted">{{ 'item.reviews.sort-by' | translate }}:</span>
+    <button class="btn btn-sm" 
+            [class.btn-outline-primary]="sortBy !== 'created_at'"
+            [class.btn-primary]="sortBy === 'created_at'"
+            (click)="changeSort('created_at')">
+      {{ 'item.reviews.newest' | translate }}
+      <i class="fas fa-arrow-{{ sortOrder === 'desc' ? 'down' : 'up' }}" *ngIf="sortBy === 'created_at'"></i>
+    </button>
+    <button class="btn btn-sm"
+            [class.btn-outline-primary]="sortBy !== 'rating'"
+            [class.btn-primary]="sortBy === 'rating'"
+            (click)="changeSort('rating')">
+      {{ 'item.reviews.rating' | translate }}
+      <i class="fas fa-arrow-{{ sortOrder === 'desc' ? 'down' : 'up' }}" *ngIf="sortBy === 'rating'"></i>
+    </button>
+    <button class="btn btn-sm"
+            [class.btn-outline-primary]="sortBy !== 'helpful_count'"
+            [class.btn-primary]="sortBy === 'helpful_count'"
+            (click)="changeSort('helpful_count')">
+      {{ 'item.reviews.helpful' | translate }}
+      <i class="fas fa-arrow-{{ sortOrder === 'desc' ? 'down' : 'up' }}" *ngIf="sortBy === 'helpful_count'"></i>
+    </button>
+  </div>
+
+  <!-- Loading -->
+  <div class="text-center py-4" *ngIf="isLoading">
+    <div class="spinner-border text-primary"></div>
+    <p class="mt-2 text-muted">{{ 'item.reviews.loading' | translate }}</p>
+  </div>
+
+  <!-- Reviews List -->
+  <div class="reviews-list" *ngIf="!isLoading">
+    <div *ngFor="let review of reviews" class="review-item card mb-3">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <div class="reviewer-name fw-bold">
+              <i class="fas fa-user-circle me-1 text-muted"></i>
+              {{ review.display_name || review.email }}
+            </div>
+            <div class="review-date text-muted small">
+              {{ formatDate(review.created_at) }}
+              <span *ngIf="review.updated_at !== review.created_at" class="ms-1">
+                ({{ 'item.reviews.edited' | translate }})
+              </span>
+            </div>
+          </div>
+          <div class="review-rating">
+            <i *ngFor="let star of getStarsArray(5)"
+               class="fas fa-star"
+               [class.text-warning]="star <= review.rating"
+               [class.text-muted]="star > review.rating">
+            </i>
+          </div>
+        </div>
+        
+        <p class="review-comment mb-2" *ngIf="review.comment">
+          {{ review.comment }}
+        </p>
+        
+        <div class="review-actions d-flex align-items-center">
+          <button 
+            class="btn btn-sm btn-outline-secondary"
+            [disabled]="!isAuthenticated"
+            (click)="markHelpful(review)">
+            <i class="fas fa-thumbs-up me-1"></i>
+            {{ 'item.reviews.helpful' | translate }} ({{ review.helpful_count }})
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  <nav *ngIf="totalPages > 1" class="mt-3">
+    <ul class="pagination justify-content-center">
+      <li class="page-item" [class.disabled]="currentPage === 0">
+        <button class="page-link" (click)="changePage(currentPage - 1)">
+          <i class="fas fa-chevron-left"></i>
+        </button>
+      </li>
+      <li *ngFor="let page of pagesArray" 
+          class="page-item" 
+          [class.active]="page === currentPage">
+        <button class="page-link" (click)="changePage(page)">{{ page + 1 }}</button>
+      </li>
+      <li class="page-item" [class.disabled]="currentPage === totalPages - 1">
+        <button class="page-link" (click)="changePage(currentPage + 1)">
+          <i class="fas fa-chevron-right"></i>
+        </button>
+      </li>
+    </ul>
+  </nav>
+</div>

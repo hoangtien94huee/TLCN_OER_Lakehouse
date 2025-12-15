@@ -23,8 +23,17 @@ nltk==3.8.1
 yt-dlp==2023.9.24
 youtube-transcript-api==0.6.1
 PyPDF2==3.0.1
-pdfplumber==0.11.4
+pdfplumber>=0.10.0
 numpy==1.26.4
+pdfminer.six>=20221105
+
+# Semantic matching for OER-Subject mapping
+# sentence-transformers will auto-install: torch, transformers, huggingface_hub, scipy, scikit-learn, etc.
+sentence-transformers
+
+# Additional packages for other features
+Pillow
+regex
 # langchain==0.1.13
 # langchain-google-genai==1.0.10
 # pymarc

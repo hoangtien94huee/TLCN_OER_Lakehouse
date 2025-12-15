@@ -59,6 +59,7 @@ class GoldAnalyticsBuilder:
         self.dim_languages_table = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
         self.dim_date_table = f"{self.gold_catalog}.{self.gold_database}.dim_date"
         self.dim_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
+        self.bridge_oer_subjects_table = f"{self.gold_catalog}.{self.gold_database}.bridge_oer_subjects"
         self.fact_program_coverage_table = f"{self.gold_catalog}.{self.gold_database}.fact_program_coverage"
         self.fact_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
 
@@ -70,7 +71,7 @@ class GoldAnalyticsBuilder:
         # Use local JARs instead of downloading from Maven
         jars_dir = "/opt/airflow/jars"
         local_jars = ",".join([
-            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
             f"{jars_dir}/hadoop-aws-3.3.4.jar",
             f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
         ])
@@ -79,7 +80,7 @@ class GoldAnalyticsBuilder:
         
         session = (
             SparkSession.builder.appName("OER-Gold-Analytics")
-            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Limit to 2 cores to reduce memory pressure
+            .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))  # Use Spark cluster
             .config("spark.jars", local_jars)  # Load JARs into classpath
             .config("spark.driver.extraClassPath", local_jars)  # Add to driver classpath
             .config("spark.executor.extraClassPath", local_jars)  # Add to executor classpath
@@ -109,10 +110,7 @@ class GoldAnalyticsBuilder:
 
     def run(self) -> None:
         """Build all Gold layer tables."""
-        print("=" * 80)
-        print("Building Gold Analytics Layer")
-        print("=" * 80)
-
+       
         # Load source data
         oer_df = self._load_table(self.silver_oer_table, "Silver OER Resources")
         programs_df = self._load_table(self.reference_programs_table, "Programs")
@@ -127,9 +125,7 @@ class GoldAnalyticsBuilder:
             return
 
         # Build dimensions
-        print("\n" + "=" * 80)
-        print("Building Dimensions")
-        print("=" * 80)
+
         
         dim_programs = self._build_dim_programs(programs_df, faculties_df)
         dim_subjects = self._build_dim_subjects(subjects_df, faculties_df)
@@ -139,9 +135,6 @@ class GoldAnalyticsBuilder:
         dim_oer_resources = self._build_dim_oer_resources(oer_df)
 
         # Build facts
-        print("\n" + "=" * 80)
-        print("Building Fact Tables")
-        print("=" * 80)
         
         fact_program_coverage = self._build_fact_program_coverage(
             oer_df,
@@ -154,11 +147,15 @@ class GoldAnalyticsBuilder:
         fact_oer_resources = self._build_fact_oer_resources(
             oer_df, dim_sources, dim_languages, dim_date
         )
+        
+        # Build bridge tables (many-to-many relationships)
+        # Bridge connects FACT to DIMENSION (Kimball standard)
+        bridge_oer_subjects = self._build_bridge_oer_subjects(
+            oer_df, fact_oer_resources, dim_subjects
+        )
 
         # Write tables
-        print("\n" + "=" * 80)
-        print("Writing Gold Tables")
-        print("=" * 80)
+
         
         self._write_table(dim_programs, self.dim_programs_table, "dim_programs")
         self._write_table(dim_subjects, self.dim_subjects_table, "dim_subjects")
@@ -166,6 +163,7 @@ class GoldAnalyticsBuilder:
         self._write_table(dim_languages, self.dim_languages_table, "dim_languages")
         self._write_table(dim_date, self.dim_date_table, "dim_date")
         self._write_table(dim_oer_resources, self.dim_oer_resources_table, "dim_oer_resources")
+        self._write_table(bridge_oer_subjects, self.bridge_oer_subjects_table, "bridge_oer_subjects")
         self._write_table(fact_program_coverage, self.fact_program_coverage_table, "fact_program_coverage")
         self._write_table(fact_oer_resources, self.fact_oer_resources_table, "fact_oer_resources")
 
@@ -416,11 +414,19 @@ class GoldAnalyticsBuilder:
             F.col("title"),
             F.col("description"),
             F.col("source_url"),
-            F.col("publisher_name"),
+            # Fix Unknown publisher - derive from source_system
+            F.when(
+                (F.col("publisher_name").isNull()) | (F.col("publisher_name") == "Unknown"),
+                F.when(F.col("source_system") == "mit_ocw", "MIT OpenCourseWare")
+                 .when(F.col("source_system") == "openstax", "OpenStax")
+                 .when(F.col("source_system") == "open+textbook+library", "Open Textbook Library")
+                 .when(F.col("source_system") == "otl", "Open Textbook Library")
+                 .otherwise(F.col("source_system"))
+            ).otherwise(F.col("publisher_name")).alias("publisher_name"),
             F.col("creator_names"),
-            F.col("matched_subjects"),
-            F.col("dc_xml_path"),
             F.col("bronze_source_path"),
+            F.col("license_name"),
+            F.col("license_url"),
         )
         
         return dim.dropDuplicates(["resource_key"]).orderBy("resource_key")
@@ -442,23 +448,19 @@ class GoldAnalyticsBuilder:
         2. Which programs have best OER coverage?
         3. How many OER resources per program?
         
-        Grain: One row per Program
         """
         if programs_df is None or subjects_df is None or program_subject_links_df is None:
             print("[Warning] Missing reference data, creating empty fact_program_coverage")
             return self.spark.createDataFrame(
                 [],
                 T.StructType([
-                    T.StructField("program_key", T.LongType(), True),
-                    T.StructField("program_id", T.IntegerType(), False),
-                    T.StructField("program_name", T.StringType(), True),
-                    T.StructField("faculty_name", T.StringType(), True),
+                    T.StructField("program_key", T.LongType(), False),
+                    T.StructField("snapshot_date_key", T.IntegerType(), False),
                     T.StructField("total_subjects", T.IntegerType(), True),
                     T.StructField("subjects_with_oer", T.IntegerType(), True),
                     T.StructField("coverage_pct", T.DoubleType(), True),
                     T.StructField("total_oer_resources", T.IntegerType(), True),
                     T.StructField("avg_oer_per_subject", T.DoubleType(), True),
-                    T.StructField("snapshot_date_key", T.IntegerType(), True),
                 ])
             )
 
@@ -504,35 +506,42 @@ class GoldAnalyticsBuilder:
             F.round(F.col("total_oer_resources") / F.col("total_subjects"), 2)
         )
 
-        # Join surrogate program metadata
+        # Join with dim_programs to get program_key (surrogate key)
         dim_program_lookup = dim_programs.select(
             "program_id",
             "program_key",
-            "program_name",
-            "faculty_name",
         ).dropDuplicates(["program_id"])
 
         fact = program_coverage.join(
             dim_program_lookup,
             "program_id",
-            "left"
+            "inner"
         )
 
-        # Add snapshot_date_key as integer YYYYMMDD
+        # Create snapshot_date_key as integer YYYYMMDD
         fact = fact.withColumn(
             "snapshot_date_key",
             F.date_format(F.current_date(), "yyyyMMdd").cast("int")
-        ).select(
-            "program_key",
-            "program_id",
-            "program_name",
-            "faculty_name",
-            "total_subjects",
-            "subjects_with_oer",
-            "coverage_pct",
-            "total_oer_resources",
-            "avg_oer_per_subject",
-            "snapshot_date_key",
+        )
+
+        # Join with dim_date to validate snapshot_date_key exists (Kimball standard)
+        fact = fact.join(
+            dim_date.select("date_key").alias("snap_date"),
+            F.col("snapshot_date_key") == F.col("snap_date.date_key"),
+            "left"
+        )
+
+        # Select only Foreign Keys and Measures (Kimball standard - NO descriptive attributes)
+        fact = fact.select(
+            # Foreign Keys to Dimensions (Surrogate Keys)
+            F.col("program_key"),
+            F.col("snap_date.date_key").alias("snapshot_date_key"),
+            # Measures (numeric facts for aggregation)
+            F.col("total_subjects").cast(T.IntegerType()),
+            F.col("subjects_with_oer").cast(T.IntegerType()),
+            F.col("coverage_pct").cast(T.DoubleType()),
+            F.col("total_oer_resources").cast(T.IntegerType()),
+            F.col("avg_oer_per_subject").cast(T.DoubleType()),
         ).orderBy(F.desc("coverage_pct"))
 
         return fact
@@ -545,37 +554,32 @@ class GoldAnalyticsBuilder:
         dim_date: DataFrame,
     ) -> DataFrame:
         """
-        Fact Table: OER Resources (Keys + Measures Only)
+        Fact Table: OER Resources (Kimball Standard - Keys + Measures Only)
         
         Business Questions:
         1. How many OER resources by source/language?
         2. What's the average quality score?
-        3. Count resources by matched subjects/programs
-        
-        Grain: One row per OER resource
-        
-        Contains:
-        - Keys (resource_key, source_key, language_key, date_keys, program_ids)
-        - Measures (counts, scores)
+        3. Count resources by matched subjects (via bridge_oer_subjects)
+
         """
         # Join with dimension keys
         fact = oer_df.alias("oer")
 
-        # Join source dimension to get source_key
+        # Join source dimension to get source_key (surrogate key)
         fact = fact.join(
             dim_sources.select("source_key", "source_code").alias("src"),
             F.col("oer.source_system") == F.col("src.source_code"),
             "left"
         )
 
-        # Join language dimension to get language_key
+        # Join language dimension to get language_key (surrogate key)
         fact = fact.join(
             dim_languages.select("language_key", "language_code").alias("lang"),
             F.coalesce(F.col("oer.language"), F.lit("unknown")) == F.col("lang.language_code"),
             "left"
         )
 
-        # Join date dimensions for date keys (integer YYYYMMDD format)
+        # Create date keys for joining with dim_date (integer YYYYMMDD format)
         fact = fact.withColumn(
             "pub_date_key",
             F.when(
@@ -587,30 +591,98 @@ class GoldAnalyticsBuilder:
             F.date_format(F.to_date(F.col("oer.ingested_at")), "yyyyMMdd").cast("int")
         )
 
-        # Select only keys and measures (NO descriptive attributes)
+        # Join with dim_date to validate publication_date_key exists
+        fact = fact.join(
+            dim_date.select("date_key").alias("pub_date"),
+            F.col("pub_date_key") == F.col("pub_date.date_key"),
+            "left"
+        )
+
+        # Join with dim_date to validate ingested_date_key exists
+        fact = fact.join(
+            dim_date.select("date_key").alias("ing_date"),
+            F.col("ing_date_key") == F.col("ing_date.date_key"),
+            "left"
+        )
+
+        # Select only keys and measures (Kimball standard - NO arrays, NO descriptive attributes)
+        # Normalize data_quality_score to 0-1 scale (handle legacy 0-10 scale)
         fact = fact.select(
-            # Primary Key
+            # Primary Key (Degenerate Dimension - links to dim_oer_resources)
             F.col("oer.resource_uid").alias("resource_key"),
             
-            # Foreign Keys to Dimensions
+            # Foreign Keys to Dimensions (Surrogate Keys)
             F.col("src.source_key"),
             F.col("lang.language_key"),
-            F.col("pub_date_key").alias("publication_date_key"),
-            F.col("ing_date_key").alias("ingested_date_key"),
-            
-            # Array of foreign keys
-            F.col("oer.program_ids"),
+            F.col("pub_date.date_key").alias("publication_date_key"),
+            F.col("ing_date.date_key").alias("ingested_date_key"),
             
             # Measures (numeric facts) - Only meaningful aggregatable metrics
             F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
-            F.size(F.col("oer.program_ids")).alias("matched_programs_count"),
-            F.col("oer.data_quality_score"),
+            # Normalize: if score > 1, it's on 0-10 scale, divide by 10
+            F.when(
+                F.col("oer.data_quality_score") > 1.0,
+                F.round(F.col("oer.data_quality_score") / 10.0, 2)
+            ).otherwise(
+                F.col("oer.data_quality_score")
+            ).alias("data_quality_score"),
         )
 
         return fact.orderBy(F.desc("data_quality_score"))
 
+    def _build_bridge_oer_subjects(
+        self,
+        oer_df: DataFrame,
+        fact_oer_resources: DataFrame,
+        dim_subjects: DataFrame,
+    ) -> DataFrame:
+        """
+        Bridge Table: fact_oer_resources ↔ dim_subjects (Kimball Standard)
+        
+     
+        """
+        # Get valid resource_keys from fact table (ensures referential integrity)
+        valid_resource_keys = fact_oer_resources.select("resource_key").distinct()
+        
+        # Explode matched_subjects array to get one row per match
+        bridge = oer_df.select(
+            F.col("resource_uid").alias("resource_key"),
+            F.explode_outer("matched_subjects").alias("matched_subject")
+        ).select(
+            F.col("resource_key"),
+            F.col("matched_subject.subject_id").alias("subject_id"),
+            F.col("matched_subject.similarity").alias("similarity_score"),
+            F.col("matched_subject.matched_text").alias("matched_text"),
+        ).where(F.col("subject_id").isNotNull())
+        
+        # Join with fact_oer_resources to ensure referential integrity (Kimball standard)
+        # Only keep resource_keys that exist in the fact table
+        bridge = bridge.join(
+            valid_resource_keys,
+            "resource_key",
+            "inner"
+        )
+        
+        # Join with dim_subjects to get subject_key (surrogate key)
+        bridge = bridge.join(
+            dim_subjects.select("subject_key", "subject_id").dropDuplicates(["subject_id"]),
+            "subject_id",
+            "inner"  # Only keep matches that exist in dim_subjects
+        ).select(
+            # Foreign Key to fact_oer_resources (referential integrity enforced)
+            F.col("resource_key"),
+            # Foreign Key to dim_subjects (surrogate key - Kimball standard)
+            F.col("subject_key"),
+            # Weighting factor for bridge aggregations
+            F.col("similarity_score"),
+            # Degenerate dimension - match context
+            F.col("matched_text"),
+        )
+        
+        return bridge.dropDuplicates(["resource_key", "subject_key"]).orderBy("resource_key", F.desc("similarity_score"))
+
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
-        """Write DataFrame to Gold Iceberg table - full refresh strategy."""
+        """Write DataFrame to Gold Iceberg table - full refresh strategy with cleanup."""
         if df is None or df.rdd.isEmpty():
             print(f" {description}: No data to write")
             return
@@ -619,11 +691,24 @@ class GoldAnalyticsBuilder:
             count = df.count()
             
             # Gold tables are FULL REFRESH (not incremental)
-            # Because we rebuild ALL dimensions and facts from current Silver state
-            print(f" {description}: Full refresh with {count:,} records")
-            df.writeTo(table_name).using("iceberg").createOrReplace()
+            # Drop existing table to ensure clean state (no stale data)
+            print(f" {description}: Dropping existing table for clean refresh...")
+            try:
+                self.spark.sql(f"DROP TABLE IF EXISTS {table_name} PURGE")
+            except Exception:
+                # PURGE might not be supported, try without it
+                try:
+                    self.spark.sql(f"DROP TABLE IF EXISTS {table_name}")
+                except Exception as drop_err:
+                    print(f" {description}: Note - could not drop table: {drop_err}")
+            
+            print(f" {description}: Creating fresh table with {count:,} records")
+            
+            # Write fresh data
+            df.writeTo(table_name).using("iceberg").create()
             
             print(f" {description}: Wrote {count:,} records to {table_name}")
+            
         except Exception as exc:
             print(f" {description}: Failed to write - {exc}")
 

@@ -13,3 +13,15 @@ psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-E
 EOSQL
 
 echo "Iceberg catalog database created successfully"
+
+# Tạo database cho DSpace
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+    CREATE USER dspace WITH PASSWORD 'dspace';
+    CREATE DATABASE dspace OWNER dspace;
+    GRANT ALL PRIVILEGES ON DATABASE dspace TO dspace;
+    
+    \c dspace
+    CREATE EXTENSION IF NOT EXISTS pgcrypto;
+EOSQL
+
+echo "DSpace database created successfully"

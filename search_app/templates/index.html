@@ -1,190 +1,231 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="vi">
-  <head>
-    <meta charset="UTF-8" />
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OER Search</title>
-    <link
-      rel="stylesheet"
-      href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
-    />
     <style>
-      :root {
-        --primary: #60a5fa;
-        --primary-hover: #93c5fd;
-        --surface: #0f172a;
-        --panel: #111827;
-        --border: #1f2937;
-        --muted: #9ca3af;
-        color-scheme: dark;
-      }
-      body {
-        padding: 2rem;
-        background: var(--surface);
-        color: #e5e7eb;
-      }
-      h2 {
-        text-align: center;
-        margin-bottom: 1rem;
-      }
-      .layout {
-        display: grid;
-        grid-template-columns: 360px 1fr;
-        gap: 1.5rem;
-      }
-      .sidebar {
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 0.75rem;
-        max-height: 80vh;
-        overflow-y: auto;
-      }
-      .result-card {
-        margin-bottom: 1.5rem;
-        background: var(--panel);
-        border: 1px solid var(--border);
-        border-radius: 10px;
-        padding: 1rem;
-      }
-      .highlight {
-        background-color: #312e0f;
-        padding: 0.25rem;
-        border-radius: 0.25rem;
-      }
-      .meta {
-        font-size: 0.9rem;
-        color: var(--muted);
-      }
-      .facet-item {
-        cursor: pointer;
-        color: var(--primary);
-      }
-      .facet-item:hover {
-        color: var(--primary-hover);
-      }
-      details summary {
-        cursor: pointer;
-      }
-      .form-card {
-        background: #0f172a;
-        border: 1px solid #000000;
-        border-radius: 10px;
-        padding: 1rem;
-        margin-bottom: 1rem;
-      }
-    </style>
-  </head>
-  <body>
-    <main class="container">
-      <h2>Search OER / Elasticsearch</h2>
-
-      <div class="layout">
-        <aside class="sidebar">
-          <h5> Faculties / Programs / Subjects </h5>
-          {% if reference_tree %}
-            {% for faculty in reference_tree %}
-              <details>
-                <summary>{{ faculty.faculty_name }}</summary>
-                <ul style="list-style:none; padding-left:1rem;">
-                  {% for program in faculty.programs %}
-                    <li>
-                      <details>
-                        <summary class="facet-item">
-                          {{ program.program_name }} ({{ program.program_code }})
-                        </summary>
-                        {% if program.subjects %}
-                        <ul style="list-style:none; padding-left:1rem;">
-                          {% for subj in program.subjects %}
-                            <li class="facet-item"
-                              onclick="setSubject('{{ program.program_id }}','{{ subj.subject_id }}','{{ subj.subject_name_en or subj.subject_name }}')">
-                              {{ subj.subject_name }}{% if subj.subject_name_en %} / {{ subj.subject_name_en }}{% endif %}
-                            </li>
-                          {% endfor %}
-                        </ul>
-                        {% endif %}
-                      </details>
-                    </li>
-                  {% endfor %}
-                </ul>
-              </details>
-            {% endfor %}
-          {% else %}
-            <small>Không tìm thấy dữ liệu reference (faculties/programs/subjects).</small>
-          {% endif %}
-        </aside>
-
-        <section>
-          <div class="form-card">
-            <form method="get">
-              <div class="grid">
-                <label>
-                Keyword
-                  <input type="text" id="keyword_input" name="q" value="{{ query }}" placeholder="enter keyword..." />
-                </label>
-              </div>
-              <button type="submit">Search</button>
-              
-            </form>
-          </div>
-
-          <p>{{ total }} results</p>
-
-          {% for item in results %}
-          <article class="result-card">
-            <header>
-              <strong>
-                {% if item.url %}
-                <a href="{{ item.url }}" target="_blank" rel="noopener noreferrer"
-                  >{{ item.title or "Untitled" }}</a
-                >
-                {% else %}
-                {{ item.title or "Untitled" }}
-                {% endif %}
-              </strong>
-              <div class="meta">
-                Source: {{ item.source_system or "unknown" }}
-                {% if not item.is_textbook %}&nbsp;|&nbsp; Language: {{ item.language or "unknown" }}{% endif %}
-                &nbsp;|&nbsp; Score: {{ "%.2f"|format(item.score or 0) }}
-                {% if item.is_textbook %}
-                <br/>Publisher: {{ item.publisher or "N/A" }} {% if item.publish_year %} | Year: {{ item.publish_year }}{% endif %}
-                {% endif %}
-              </div>
-            </header>
-            {% if item.snippet %}
-            <div class="highlight">{{ item.snippet|safe }}</div>
-            {% endif %}
-
-            {% if not item.is_textbook and item.pdf_assets %}
-            <div class="pdf-section">
-              <strong>PDFs:</strong>
-              <ul>
-                {% for title, link, path in item.pdf_assets %}
-                    <li>
-                      {{ title or path }}
-                      {% if link %}
-                      (<a href="{{ link }}" target="_blank" rel="noopener noreferrer">mở/tải</a>)
-                      {% else %}
-                      <small>Không có link tải</small>
-                      {% endif %}
-                    </li>
-                {% endfor %}
-              </ul>
-            </div>
-            {% endif %}
-
-          </article>
-          {% endfor %}
-        </section>
-      </div>
-    </main>
-
-    <script>
-      function setSubject(programId, subjectId, subjectName) {
-        const kw = document.getElementById("keyword_input");
-        if (kw && subjectName) {
-          kw.value = subjectName;
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
-      }
-    </script>
-  </body>
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0 30px;
+        }
+        
+        .header h1 {
+            color: #1a73e8;
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .search-box input {
+            flex: 1;
+            padding: 14px 20px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .search-box input:focus {
+            border-color: #1a73e8;
+        }
+        
+        .search-box button {
+            padding: 14px 28px;
+            font-size: 16px;
+            background: #1a73e8;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .search-box button:hover {
+            background: #1557b0;
+        }
+        
+        .results-info {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        .result-item {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .result-item h3 {
+            margin-bottom: 8px;
+        }
+        
+        .result-item h3 a {
+            color: #1a0dab;
+            text-decoration: none;
+        }
+        
+        .result-item h3 a:hover {
+            text-decoration: underline;
+        }
+        
+        .result-item .url {
+            color: #006621;
+            font-size: 13px;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        
+        .result-item .description {
+            color: #545454;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        
+        .result-item .meta {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .result-item .subjects {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        
+        .result-item .subject-tag {
+            background: #e8f0fe;
+            color: #1a73e8;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        mark {
+            background: #fff3cd;
+            padding: 0 2px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1> OER Search</h1>
+            <p>Tìm kiếm tài nguyên giáo dục mở</p>
+            <a href="/recommend" style="color: #34a853; text-decoration: none; font-size: 14px;">
+                 Xem gợi ý tài liệu theo lịch sử mượn sách →
+            </a>
+        </div>
+        
+        <form class="search-box" method="GET" action="/">
+            <input type="text" name="q" value="{{ query }}" 
+                   placeholder="Nhập từ khóa tìm kiếm..." autofocus>
+            <button type="submit">Tìm kiếm</button>
+        </form>
+        
+        {% if query %}
+            <div class="results-info">
+                Tìm thấy <strong>{{ total }}</strong> kết quả cho "{{ query }}"
+            </div>
+            
+            {% if results %}
+                {% for item in results %}
+                <div class="result-item">
+                    <h3>
+                        <a href="{{ item.url }}" target="_blank">
+                            {% if item.highlight.title %}
+                                {{ item.highlight.title[0] | safe }}
+                            {% else %}
+                                {{ item.title }}
+                            {% endif %}
+                        </a>
+                    </h3>
+                    <div class="url">{{ item.url }}</div>
+                    <div class="description">
+                        {% if item.highlight.description %}
+                            {{ item.highlight.description[0] | safe }}
+                        {% else %}
+                            {{ item.description[:300] }}{% if item.description|length > 300 %}...{% endif %}
+                        {% endif %}
+                    </div>
+                    <div class="meta">
+                        {% if item.source %}
+                            <span> {{ item.source }}</span>
+                        {% endif %}
+                        <span> {{ "%.1f"|format(item.score) }}</span>
+                    </div>
+                    {% if item.pdf_links %}
+                    <div class="pdf-links" style="margin-top: 10px;">
+                         PDF:
+                        {% for pdf in item.pdf_links[:3] %}
+                            <a href="{{ pdf.url }}" target="_blank" 
+                               style="display: inline-block; margin: 4px; padding: 4px 12px; 
+                                      background: #e8f5e9; color: #2e7d32; border-radius: 4px; 
+                                      text-decoration: none; font-size: 12px;">
+                                {{ pdf.name[:40] }}{% if pdf.name|length > 40 %}...{% endif %}
+                            </a>
+                        {% endfor %}
+                        {% if item.pdf_links|length > 3 %}
+                            <span style="font-size: 12px; color: #666;">+{{ item.pdf_links|length - 3 }} more</span>
+                        {% endif %}
+                    </div>
+                    {% endif %}
+                    {% if item.subjects %}
+                    <div class="subjects">
+                        {% for subj in item.subjects[:5] %}
+                            {% if subj %}
+                            <span class="subject-tag">{{ subj }}</span>
+                            {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="no-results">
+                    <p>Không tìm thấy kết quả phù hợp.</p>
+                    <p>Thử tìm kiếm với từ khóa khác.</p>
+                </div>
+            {% endif %}
+        {% endif %}
+    </div>
+</body>
 </html>

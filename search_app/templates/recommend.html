@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OER Recommendations</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0 30px;
+        }
+        
+        .header h1 {
+            color: #34a853;
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+        
+        .nav-link {
+            display: inline-block;
+            margin-bottom: 20px;
+            color: #1a73e8;
+            text-decoration: none;
+        }
+        
+        .nav-link:hover {
+            text-decoration: underline;
+        }
+        
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .search-box input {
+            flex: 1;
+            padding: 14px 20px;
+            font-size: 16px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        
+        .search-box input:focus {
+            border-color: #34a853;
+        }
+        
+        .search-box button {
+            padding: 14px 28px;
+            font-size: 16px;
+            background: #34a853;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .search-box button:hover {
+            background: #2d8f47;
+        }
+        
+        .topics-section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .topics-section h3 {
+            color: #333;
+            margin-bottom: 15px;
+        }
+        
+        .topic-tags {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .topic-tag {
+            background: #e6f4ea;
+            color: #34a853;
+            padding: 6px 14px;
+            border-radius: 16px;
+            font-size: 14px;
+        }
+        
+        .topic-tag .count {
+            background: #34a853;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 10px;
+            margin-left: 6px;
+            font-size: 12px;
+        }
+        
+        .results-info {
+            color: #666;
+            margin-bottom: 20px;
+            font-size: 14px;
+        }
+        
+        .result-item {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-left: 4px solid #34a853;
+        }
+        
+        .result-item h3 {
+            margin-bottom: 8px;
+        }
+        
+        .result-item h3 a {
+            color: #1a0dab;
+            text-decoration: none;
+        }
+        
+        .result-item h3 a:hover {
+            text-decoration: underline;
+        }
+        
+        .result-item .url {
+            color: #006621;
+            font-size: 13px;
+            margin-bottom: 8px;
+            word-break: break-all;
+        }
+        
+        .result-item .description {
+            color: #545454;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 10px;
+        }
+        
+        .result-item .meta {
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            font-size: 12px;
+            color: #888;
+        }
+        
+        .result-item .subjects {
+            display: flex;
+            gap: 6px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        
+        .result-item .subject-tag {
+            background: #e8f0fe;
+            color: #1a73e8;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #666;
+        }
+        
+        .no-results input {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <a href="/" class="nav-link">← Quay lại Tìm kiếm</a>
+        
+        <div class="header">
+            <h1> Gợi ý tài liệu</h1>
+            <p>Dựa trên lịch sử mượn sách của bạn</p>
+        </div>
+        
+        <form class="search-box" method="GET" action="/recommend">
+            <input type="text" name="student_id" value="{{ student_id or '' }}" 
+                   placeholder="Nhập mã sinh viên ..." autofocus>
+            <button type="submit">Xem gợi ý</button>
+        </form>
+        
+        {% if student_id %}
+            {% if topics %}
+                <div class="topics-section">
+                    <h3> {{ student_name or student_id }}</h3>
+                    <h4 style="margin-top: 15px; color: #666;"> Chủ đề bạn quan tâm:</h4>
+                    <div class="topic-tags" style="margin-top: 10px;">
+                        {% for topic, count in topics.items() %}
+                        <span class="topic-tag">
+                            {{ topic }}
+                            <span class="count">{{ count }}</span>
+                        </span>
+                        {% endfor %}
+                    </div>
+                </div>
+                
+                <div class="results-info">
+                    Tìm thấy <strong>{{ total }}</strong> tài liệu OER phù hợp với bạn
+                </div>
+                
+                {% if results %}
+                    {% for item in results %}
+                    <div class="result-item">
+                        <h3>
+                            <a href="{{ item.url }}" target="_blank">{{ item.title }}</a>
+                        </h3>
+                        <div class="url">{{ item.url }}</div>
+                        <div class="description">
+                            {{ item.description[:300] }}{% if item.description|length > 300 %}...{% endif %}
+                        </div>
+                        <div class="meta">
+                            {% if item.source %}
+                                <span> {{ item.source }}</span>
+                            {% endif %}
+                            <span> {{ "%.1f"|format(item.score) }}</span>
+                        </div>
+                        {% if item.subjects %}
+                        <div class="subjects">
+                            {% for subj in item.subjects[:5] %}
+                                {% if subj %}
+                                <span class="subject-tag">{{ subj }}</span>
+                                {% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="no-results">
+                        <p>Không tìm thấy tài liệu phù hợp.</p>
+                    </div>
+                {% endif %}
+            {% else %}
+                <div class="no-results">
+                    <p>Không tìm thấy lịch sử mượn sách cho mã sinh viên <strong>{{ student_id }}</strong>.</p>
+                    <p>Hãy thử mã sinh viên khác (VD: 22142278).</p>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="no-results">
+                <p>Nhập mã sinh viên để xem gợi ý tài liệu OER.</p>
+                <p style="font-size: 13px; color: #999; margin-top: 10px;">VD: 22142278, 23142367, 22151292</p>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>

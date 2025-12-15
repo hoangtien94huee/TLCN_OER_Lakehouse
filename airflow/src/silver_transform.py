@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Set, Union
 import unicodedata
 import re
-import xml.etree.ElementTree as ET
 from uuid import uuid4
 
 try:
@@ -29,6 +28,20 @@ try:
     MINIO_AVAILABLE = True
 except ImportError:
     MINIO_AVAILABLE = False
+
+# Semantic matcher for subject matching
+try:
+    # Add src directory to path for imports
+    import sys
+    src_dir = "/opt/airflow/src"
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    from semantic_matcher import SemanticMatcher
+    SEMANTIC_MATCHER_AVAILABLE = True
+except ImportError as e:
+    print(f"Warning: Could not import SemanticMatcher: {e}")
+    SemanticMatcher = None
+    SEMANTIC_MATCHER_AVAILABLE = False
 
 # Spark imports
 try:
@@ -96,18 +109,36 @@ class SilverTransformer:
                 if not self.minio_client:
                     print("Warning: unable to initialize MinIO client; falling back to local reference files")
                     self.reference_storage = "local"
-                    self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
+                    self.reference_path = Path("/opt/airflow/reference")
             else:
                 print("Warning: REFERENCE_DATA_URI points to MinIO but minio package not installed; using local fallback")
-                self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
+                self.reference_path = Path("/opt/airflow/reference")
         elif reference_uri:
             self.reference_path = Path(reference_uri)
         else:
-            self.reference_path = Path(__file__).resolve().parents[2] / "data" / "reference"
+            self.reference_path = Path("/opt/airflow/reference")
 
         self._load_reference_data()
         self._prepare_subject_mappings()
         self._write_reference_dimensions()
+
+        # Initialize semantic matcher for subject matching
+        self.semantic_matcher = None
+        if SEMANTIC_MATCHER_AVAILABLE:
+            try:
+                reference_path = str(self.reference_path) if self.reference_path else "/opt/airflow/reference"
+                self.semantic_matcher = SemanticMatcher(
+                    reference_path=reference_path,
+                    threshold=0.45,
+                    top_k=3
+                )
+                self.semantic_matcher.initialize()
+                print(f"Semantic matcher initialized with model at {reference_path}")
+            except Exception as e:
+                print(f"Warning: Failed to initialize semantic matcher: {e}")
+                self.semantic_matcher = None
+        else:
+            print("Warning: Semantic matcher not available, falling back to keyword matching")
 
         self.output_schema = self._build_output_schema()
 
@@ -159,8 +190,6 @@ class SilverTransformer:
                 T.StructField("scraped_at", T.TimestampType(), True),
                 T.StructField("bronze_source_path", T.StringType(), True),
                 T.StructField("data_quality_score", T.DoubleType(), True),
-                T.StructField("dc_xml", T.StringType(), True),  # Temporary for batch save
-                T.StructField("dc_xml_path", T.StringType(), True),
                 T.StructField("ingested_at", T.TimestampType(), False),
             ]
         )
@@ -309,85 +338,57 @@ class SilverTransformer:
         description: Optional[str] = None,
     ) -> Tuple[List[Dict[str, Any]], List[int]]:
         """
-        Match subjects by searching English catalog names within title/description ONLY.
-        No metadata subjects/keywords - pure content-based matching.
-        """
-        if not self.reference_enabled:
-            return [], []
-
-        matched: Dict[int, Dict[str, Any]] = {}
-
-        # Match subjects from title/description content only
-        self._augment_matches_with_english_text(title, description, matched)
-
-        # Extract matched subjects and program IDs
-        matched_subjects = sorted(matched.values(), key=lambda item: item["similarity"], reverse=True)
-        program_ids = sorted({
-            pid 
-            for subject_id in matched 
-            for pid in self.programs_by_subject.get(subject_id, [])
-        })
+        Match subjects using semantic similarity (sentence embeddings) ONLY.
         
-        return matched_subjects, program_ids
-
-    def _augment_matches_with_english_text(
-        self,
-        title: Optional[str],
-        description: Optional[str],
-        matched: Dict[int, Dict[str, Any]],
-    ) -> None:
+        Uses SemanticMatcher with all-MiniLM-L6-v2 model for accurate matching.
+        This avoids false positives like "Learning Management System" → "Machine Learning".
+        
+        No fallback to keyword matching - semantic model is the only method.
+        
+        Returns:
+            Tuple of (matched_subjects, program_ids)
         """
-        Match subjects by searching English catalog names within title/description.
-        Requires ALL tokens of the subject name to be present in the text to avoid false positives.
-        """
-        if not self.reference_subjects_by_name_en:
-            return
-        text_parts = [part for part in (title, description) if part]
-        if not text_parts:
-            return
-        normalized_blob = self._normalize_text(" ".join(text_parts))
-        if not normalized_blob:
-            return
-
-        blob_with_padding = f" {normalized_blob} "
-        token_set = {token for token in normalized_blob.split() if token}
-        candidate_keys: Set[str] = set()
-        for token in token_set:
-            token_keys = self.reference_subjects_en_index.get(token)
-            if token_keys:
-                candidate_keys.update(token_keys)
-
-        for key in candidate_keys:
-            # Require ALL tokens of the subject to be present in the text
-            # This prevents "Data Mining" from matching "Data Structures" or "Mining Engineering"
-            subject_tokens = set(key.split())
-            if not subject_tokens.issubset(token_set):
-                continue
+        if not title:
+            return [], []
+        
+        # Use semantic matcher only
+        if not self.semantic_matcher:
+            print("Warning: Semantic matcher not available, no subject matching will be performed")
+            return [], []
+        
+        try:
+            matches = self.semantic_matcher.match(title, description)
             
-            # Also check that the full phrase appears in the text
-            if f" {key} " not in blob_with_padding:
-                continue
+            # Convert to expected format with matched_text field
+            matched_subjects = []
+            for m in matches:
+                matched_subjects.append({
+                    "subject_id": m.get("subject_id"),
+                    "subject_name": m.get("subject_name"),
+                    "subject_name_en": m.get("subject_name_en"),
+                    "subject_code": m.get("subject_code"),
+                    "similarity": m.get("similarity", 0.0),
+                    "matched_text": m.get("subject_name_en") or m.get("subject_name"),
+                })
             
-            record = self.reference_subjects_by_name_en.get(key)
-            if not record:
-                continue
-            subject_id = record.get("subject_id")
-            if not subject_id or subject_id in matched:
-                continue
-            matched[subject_id] = {
-                "subject_id": subject_id,
-                "subject_name": record.get("subject_name"),
-                "subject_name_en": record.get("subject_name_en"),
-                "subject_code": record.get("subject_code"),
-                "similarity": 0.9,
-                "matched_text": record.get("subject_name_en") or record.get("subject_name"),
-            }
+            # Get program IDs from matched subjects
+            program_ids = sorted({
+                pid 
+                for subj in matched_subjects 
+                for pid in self.programs_by_subject.get(subj.get("subject_id"), [])
+            })
+            
+            return matched_subjects, program_ids
+            
+        except Exception as e:
+            print(f"Semantic matching failed: {e}")
+            return [], []
 
     def _create_spark_session(self) -> SparkSession:
         # Use local JARs instead of downloading from Maven
         jars_dir = "/opt/airflow/jars"
         local_jars = ",".join([
-            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.4.2.jar",
+            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
             f"{jars_dir}/hadoop-aws-3.3.4.jar",
             f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
         ])
@@ -397,7 +398,7 @@ class SilverTransformer:
         
         session = (
             SparkSession.builder.appName("OER-Silver-Dublin-Core")
-            .master(os.getenv("SPARK_MASTER", "local[2]"))  # Limit to 2 cores to reduce memory pressure
+            .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))  # Use Spark cluster
             .config("spark.jars", local_jars)  # Load JARs into classpath
             .config("spark.driver.extraClassPath", local_jars)  # Add to driver classpath
             .config("spark.executor.extraClassPath", local_jars)  # Add to executor classpath
@@ -423,6 +424,16 @@ class SilverTransformer:
         return session
 
     def run(self) -> None:
+        # Clear any cached data from previous runs to prevent cross-contamination
+        # This is critical when multiple tasks run in parallel on the same Spark cluster
+        if self.spark:
+            try:
+                self.spark.catalog.clearCache()
+                print("[Cache] Cleared Spark catalog cache to ensure fresh data load")
+            except Exception as e:
+                print(f"[Cache] Warning: Could not clear cache (Spark may be restarting): {e}")
+                # Continue execution - cache clearing is nice-to-have, not critical
+        
         bronze_df = self._load_bronze_payloads()
         if bronze_df is None or bronze_df.rdd.isEmpty():
             print("No bronze payloads found for silver transformation")
@@ -433,9 +444,6 @@ class SilverTransformer:
             print("Bronze payloads could not be normalized, skipping write")
             return
 
-        # Batch save DC XMLs before writing fact table
-        self._batch_save_dc_xmls(normalized_df)
-
         self._write_tables(normalized_df)
 
     def _load_bronze_payloads(self) -> Optional[DataFrame]:
@@ -444,6 +452,8 @@ class SilverTransformer:
             print("No bronze input paths were resolved")
             return None
 
+        print(f"[Bronze] Loading data from paths: {candidate_paths}")
+        
         try:
             df = (
                 self.spark.read.option("recursiveFileLookup", "true")
@@ -451,10 +461,17 @@ class SilverTransformer:
                 .json(candidate_paths)
                 .withColumn("bronze_source_path", F.input_file_name())
             )
-            print(f"Loaded bronze dataset with {df.count()} raw records")
+            record_count = df.count()
+            print(f"[Bronze] Loaded {record_count} raw records from {len(candidate_paths)} path(s)")
+            
+            # Show sample of source paths for verification
+            if record_count > 0:
+                source_files = df.select("bronze_source_path").distinct().limit(3).collect()
+                print(f"[Bronze] Sample source files: {[row.bronze_source_path for row in source_files]}")
+            
             return df
         except Exception as exc:
-            print(f"Failed to load bronze payloads: {exc}")
+            print(f"[Bronze] Failed to load bronze payloads: {exc}")
             return None
 
     def _resolve_bronze_paths(self) -> List[str]:
@@ -464,7 +481,9 @@ class SilverTransformer:
         """
         hint = os.getenv("BRONZE_INPUT")
         if hint:
-            return [value.strip() for value in hint.split(",") if value.strip()]
+            paths = [value.strip() for value in hint.split(",") if value.strip()]
+            print(f"[Paths] Using BRONZE_INPUT env var: {paths}")
+            return paths
 
         # OER sources only
         oer_sources = ["mit_ocw", "openstax", "otl"]
@@ -491,99 +510,300 @@ class SilverTransformer:
         return [f"{self.bronze_root}{source}/" for source in oer_sources]
 
     def _normalize_to_dublin_core(self, bronze_df: DataFrame) -> Optional[DataFrame]:
-        def transform_row(row_dict: Dict[str, Any]) -> Optional[Row]:
-            trimmed = {k: row_dict.get(k) for k in row_dict}
-            metadata = self._normalize_record(trimmed)
-            if not metadata:
+        # Pre-compute subject matches before Spark operations to avoid serialization issues
+        total_count = bronze_df.count()
+        
+        # Process in batches to avoid OOM
+        batch_size = 300  # Process 300 records at a time
+        subject_matches_cache = {}
+        
+        if self.semantic_matcher:
+            print(f" Starting semantic matching for {total_count} records (batch size: {batch_size})...")
+            print(f" Using model: all-MiniLM-L6-v2 (threshold=0.45, top_k=3)")
+            
+            matched_count = 0
+            total_subjects_matched = 0
+            processed_count = 0
+            
+            # Collect ALL records once (they're needed for matching anyway)
+            print(f"  Collecting {total_count} records for semantic matching...")
+            all_records = bronze_df.select("title", "description").collect()
+            print(f"  Collected {len(all_records)} records successfully")
+            
+            # Process in batches to show progress and avoid memory spikes
+            for batch_start in range(0, len(all_records), batch_size):
+                batch_end = min(batch_start + batch_size, len(all_records))
+                batch_records = all_records[batch_start:batch_end]
+                batch_num = (batch_start // batch_size) + 1
+                
+                print(f"  Processing batch {batch_num}: records {batch_start+1}-{batch_end}")
+                
+                for row in batch_records:
+                    title = row.title if hasattr(row, 'title') else None
+                    description = row.description if hasattr(row, 'description') else None
+                    if title:
+                        cache_key = f"{title}|{description or ''}"
+                        
+                        # Skip if already in cache (duplicate titles)
+                        if cache_key in subject_matches_cache:
+                            continue
+                            
+                        try:
+                            matches = self.semantic_matcher.match(title, description)
+                            matched_subjects = []
+                            for m in matches:
+                                matched_subjects.append({
+                                    "subject_id": m.get("subject_id"),
+                                    "subject_name": m.get("subject_name"),
+                                    "subject_name_en": m.get("subject_name_en"),
+                                    "subject_code": m.get("subject_code"),
+                                    "similarity": m.get("similarity", 0.0),
+                                    "matched_text": m.get("subject_name_en") or m.get("subject_name"),
+                                })
+                            program_ids = sorted({
+                                pid 
+                                for subj in matched_subjects 
+                                for pid in self.programs_by_subject.get(subj.get("subject_id"), [])
+                            })
+                            subject_matches_cache[cache_key] = (matched_subjects, program_ids)
+                            
+                            if matched_subjects:
+                                matched_count += 1
+                                total_subjects_matched += len(matched_subjects)
+                                
+                        except Exception as e:
+                            print(f" Error matching subjects for '{title[:50]}': {e}")
+                            subject_matches_cache[cache_key] = ([], [])
+                
+                processed_count = batch_end
+                progress_pct = (processed_count / total_count) * 100
+                print(f"  Batch complete. Progress: {processed_count}/{total_count} ({progress_pct:.1f}%) - Total matched: {matched_count}")
+            
+            # Final summary
+            match_rate = (matched_count / total_count * 100) if total_count > 0 else 0
+            avg_subjects = (total_subjects_matched / matched_count) if matched_count > 0 else 0
+            print(f" Semantic matching completed:")
+            print(f"   - Total resources: {total_count}")
+            print(f"   - Resources with matches: {matched_count} ({match_rate:.1f}%)")
+            print(f"   - Total subjects matched: {total_subjects_matched}")
+            print(f"   - Average subjects per resource: {avg_subjects:.2f}")
+        else:
+            print("  Semantic matcher not available, all resources will have empty matched_subjects")
+                        
+        # Broadcast the cache to all executors
+        subject_matches_broadcast = self.spark.sparkContext.broadcast(subject_matches_cache)
+        
+        # Create a standalone mapper function that doesn't reference self or semantic_matcher
+        # This function will be serialized and sent to executors
+        def process_record_standalone(row_dict: Dict[str, Any], subject_cache: Dict) -> Optional[Dict[str, Any]]:
+            """Standalone function for executor - no class references, no external imports"""
+            import hashlib
+            from datetime import datetime
+            from typing import Optional, Dict, Any, List, Set
+            import unicodedata
+            import re
+            
+            # Helper functions (inlined to avoid serialization issues)
+            def ensure_str(value):
+                if value is None:
+                    return None
+                if isinstance(value, str):
+                    return value.strip() or None
+                return str(value).strip() or None
+            
+            def ensure_title(record):
+                candidates = [
+                    record.get("title"),
+                    record.get("course_title"),
+                    record.get("book_title"),
+                    record.get("resource_title"),
+                ]
+                for c in candidates:
+                    if c and isinstance(c, str) and c.strip():
+                        return c.strip()
                 return None
-            return Row(**metadata)
-
-        normalized_rdd = bronze_df.rdd.map(lambda row: transform_row(row.asDict(recursive=True))).filter(
-            lambda item: item is not None
-        )
-
+            
+            def clean_string_list(value):
+                if value is None:
+                    return []
+                if isinstance(value, str):
+                    return [value.strip()] if value.strip() else []
+                if isinstance(value, (list, tuple)):
+                    return [ensure_str(x) for x in value if ensure_str(x)]
+                return []
+            
+            def detect_source_system(record):
+                for key in ["source_system", "source", "provider"]:
+                    val = record.get(key)
+                    if val and isinstance(val, str):
+                        return val.strip().lower()
+                bronze_path = record.get("bronze_source_path", "")
+                for known in ["mit_ocw", "openstax", "otl", "oer_commons"]:
+                    if known in bronze_path.lower():
+                        return known
+                return "unknown"
+            
+            def select_identifier(record, source_system):
+                candidates = [
+                    record.get("resource_id"),
+                    record.get("course_id"),
+                    record.get("id"),
+                    record.get("uid"),
+                ]
+                for c in candidates:
+                    if c and isinstance(c, (str, int)):
+                        return f"{source_system}_{c}"
+                title = ensure_title(record)
+                if title:
+                    safe = re.sub(r"[^a-z0-9]+", "_", title.lower()[:50])
+                    return f"{source_system}_{safe}"
+                return None
+            
+            def hash_identifier(resource_id):
+                if not resource_id:
+                    return None
+                normalized = unicodedata.normalize("NFKD", str(resource_id))
+                return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+            
+            def ensure_language(value):
+                if not value:
+                    return "en"
+                val_str = str(value).strip().lower()
+                if val_str in ["en", "eng", "english"]:
+                    return "en"
+                if val_str in ["vi", "vie", "vietnamese"]:
+                    return "vi"
+                return val_str[:2] if val_str else "en"
+            
+            def derive_publisher(record, source_system):
+                pub = record.get("publisher")
+                if pub and isinstance(pub, str) and pub.strip():
+                    return pub.strip()
+                source_map = {
+                    "mit_ocw": "MIT OpenCourseWare",
+                    "openstax": "OpenStax",
+                    "otl": "Open Textbook Library",
+                }
+                return source_map.get(source_system, "Unknown")
+            
+            def derive_license(record):
+                lic = record.get("license")
+                if lic and isinstance(lic, str):
+                    lic_lower = lic.lower()
+                    if "cc" in lic_lower or "creative commons" in lic_lower:
+                        return (lic.strip(), None)
+                    if lic_lower.startswith("http"):
+                        return ("Creative Commons", lic.strip())
+                return ("Unknown", None)
+            
+            def parse_datetime(value):
+                if value is None:
+                    return None
+                from datetime import datetime
+                if isinstance(value, datetime):
+                    return value
+                if isinstance(value, (int, float)):
+                    try:
+                        return datetime(int(value), 1, 1)
+                    except:
+                        return None
+                if isinstance(value, str):
+                    for fmt in ["%Y-%m-%d", "%Y/%m/%d", "%Y", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d %H:%M:%S"]:
+                        try:
+                            return datetime.strptime(value.strip(), fmt)
+                        except:
+                            continue
+                return None
+            
+            def compute_quality_score(title, description, creators, publisher_name, language, license_name, source_url):
+                """Compute quality score on 0-1 scale."""
+                score = 0.0
+                if title:
+                    score += 0.15
+                if description and len(description) > 50:
+                    score += 0.20
+                if creators:
+                    score += 0.15
+                if publisher_name and publisher_name != "Unknown":
+                    score += 0.10
+                if language and language != "unknown":
+                    score += 0.05
+                if license_name and license_name != "Unknown":
+                    score += 0.15
+                if source_url:
+                    score += 0.20
+                return round(min(score, 1.0), 2)
+            
+            # Main processing logic
+            source_system = detect_source_system(row_dict)
+            resource_id = select_identifier(row_dict, source_system)
+            if not resource_id:
+                return None
+            
+            now = datetime.utcnow()
+            source_url = ensure_str(row_dict.get("url") or row_dict.get("link"))
+            title = ensure_title(row_dict)
+            description = ensure_str(row_dict.get("description"))
+            creators = clean_string_list(row_dict.get("instructors") or row_dict.get("authors") or row_dict.get("creators"))
+            
+            # Get subject matches from cache (pre-computed on driver)
+            cache_key = f"{title}|{description or ''}"
+            matched_subjects, matched_program_ids_list = subject_cache.get(cache_key, ([], []))
+            program_id_set: Set[int] = set(matched_program_ids_list)
+            
+            language = ensure_language(row_dict.get("language"))
+            publisher_name = derive_publisher(row_dict, source_system)
+            license_name, license_url = derive_license(row_dict)
+            
+            publication_date = parse_datetime(row_dict.get("publication_date") or row_dict.get("year"))
+            scraped_at = parse_datetime(row_dict.get("scraped_at"))
+            last_updated_at = parse_datetime(row_dict.get("last_updated_at") or row_dict.get("updated_at") or scraped_at)
+            bronze_source_path = ensure_str(row_dict.get("bronze_source_path"))
+            
+            data_quality_score = compute_quality_score(
+                title=title,
+                description=description,
+                creators=creators,
+                publisher_name=publisher_name,
+                language=language,
+                license_name=license_name,
+                source_url=source_url,
+            )
+            
+            metadata: Dict[str, Any] = {
+                "resource_id": resource_id,
+                "resource_uid": hash_identifier(resource_id),
+                "source_system": source_system,
+                "source_url": source_url,
+                "title": title,
+                "description": description,
+                "matched_subjects": matched_subjects,
+                "program_ids": sorted(program_id_set),
+                "creator_names": creators,
+                "publisher_name": publisher_name,
+                "language": language,
+                "license_name": license_name,
+                "license_url": license_url,
+                "publication_date": publication_date,
+                "last_updated_at": last_updated_at,
+                "scraped_at": scraped_at,
+                "bronze_source_path": bronze_source_path,
+                "data_quality_score": data_quality_score,
+                "ingested_at": now,
+            }
+            return metadata
+        
+        # Map using the standalone function with broadcasted cache
+        normalized_rdd = bronze_df.rdd.map(
+            lambda row: process_record_standalone(row.asDict(recursive=True), subject_matches_broadcast.value)
+        ).filter(lambda item: item is not None)
+        
         if normalized_rdd.isEmpty():
             return None
-
-        return self.spark.createDataFrame(normalized_rdd, schema=self.output_schema)
-
-    def _normalize_record(self, record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        source_system = self._detect_source_system(record)
-        resource_id = self._select_identifier(record, source_system)
-        if not resource_id:
-            return None
-
-        now = datetime.utcnow()
-        source_url = self._ensure_str(record.get("url") or record.get("link"))
-        title = self._ensure_title(record)
-        description = self._ensure_str(record.get("description"))
-        creators = self._clean_string_list(record.get("instructors") or record.get("authors") or record.get("creators"))
-
-        # Match subjects from title/description ONLY (no metadata subjects/keywords)
-        matched_subjects, matched_program_ids_list = self._match_subjects(
-            title,
-            description,
-        )
-        program_id_set: Set[int] = set(matched_program_ids_list)
-        language = self._ensure_language(record.get("language"))
-        publisher_name = self._derive_publisher(record, source_system)
-        license_name, license_url = self._derive_license(record)
-
-        publication_date = self._parse_datetime(record.get("publication_date") or record.get("year"))
-        scraped_at = self._parse_datetime(record.get("scraped_at"))
-        last_updated_at = self._parse_datetime(record.get("last_updated_at") or record.get("updated_at") or scraped_at)
-        bronze_source_path = self._ensure_str(record.get("bronze_source_path"))
-
-        data_quality_score = self._compute_quality_score(
-            title=title,
-            description=description,
-            creators=creators,
-            publisher_name=publisher_name,
-            language=language,
-            license_name=license_name,
-            source_url=source_url,
-        )
-
-        # Build Dublin Core XML and save to S3/MinIO
-        dc_subjects = []
-        dc_xml = self._build_dublin_core_xml(
-            identifier=resource_id,
-            title=title,
-            description=description,
-            creators=creators,
-            subjects=dc_subjects,
-            publisher=publisher_name,
-            language=language,
-            rights=license_name,
-            source=source_system,
-            url=source_url,
-        )
-        dc_xml_path = f"s3a://{self.bucket}/silver/dc_xml/{resource_id}.xml"
-
-        metadata: Dict[str, Any] = {
-            "resource_id": resource_id,
-            "resource_uid": self._hash_identifier(resource_id),
-            "source_system": source_system,
-            "source_url": source_url,
-            "title": title,
-            "description": description,
-            "matched_subjects": matched_subjects,
-            "program_ids": sorted(program_id_set),
-            "creator_names": creators,
-            "publisher_name": publisher_name,
-            "language": language,
-            "license_name": license_name,
-            "license_url": license_url,
-            "publication_date": publication_date,
-            "last_updated_at": last_updated_at,
-            "scraped_at": scraped_at,
-            "bronze_source_path": bronze_source_path,
-            "data_quality_score": data_quality_score,
-            "dc_xml": dc_xml,  # Store XML content temporarily for batch save
-            "dc_xml_path": dc_xml_path,
-            "ingested_at": now,
-        }
-        return metadata
+        
+        # Convert to Rows for DataFrame creation
+        normalized_rdd_rows = normalized_rdd.map(lambda d: Row(**d))
+        return self.spark.createDataFrame(normalized_rdd_rows, schema=self.output_schema)
 
     def _write_tables(self, df: DataFrame) -> None:
         if not self.spark:
@@ -611,7 +831,6 @@ class SilverTransformer:
             "last_updated_at",
             "publication_date",
             "data_quality_score",
-            "dc_xml_path",
             "ingested_at",
         )
 
@@ -918,90 +1137,6 @@ class SilverTransformer:
         except Exception:
             return None
 
-    def _build_dublin_core_xml(
-        self,
-        *,
-        identifier: str,
-        title: Optional[str],
-        description: Optional[str],
-        creators: List[str],
-        subjects: List[str],
-        publisher: Optional[str],
-        language: Optional[str],
-        rights: Optional[str],
-        source: Optional[str],
-        url: Optional[str],
-    ) -> str:
-        ns = {
-            "xmlns:oai_dc": "http://www.openarchives.org/OAI/2.0/oai_dc/",
-            "xmlns:dc": "http://purl.org/dc/elements/1.1/",
-            "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-            "xsi:schemaLocation": "http://www.openarchives.org/OAI/2.0/oai_dc/ "
-            "http://www.openarchives.org/OAI/2.0/oai_dc.xsd",
-        }
-        root = ET.Element("oai_dc:dc", ns)
-
-        def add_element(tag: str, value: Optional[str]) -> None:
-            if value:
-                ET.SubElement(root, f"dc:{tag}").text = value
-
-        add_element("identifier", identifier)
-        if url and url != identifier:
-            add_element("identifier", url)
-        add_element("title", title)
-        add_element("description", description)
-        for creator in creators:
-            add_element("creator", creator)
-        for subject in subjects:
-            add_element("subject", subject)
-        add_element("publisher", publisher)
-        add_element("language", language)
-        add_element("rights", rights)
-        add_element("source", source)
-
-        return ET.tostring(root, encoding="utf-8").decode("utf-8")
-
-    def _batch_save_dc_xmls(self, df: DataFrame) -> None:
-        """Batch save Dublin Core XMLs using foreachPartition to avoid serialization issues."""
-        def save_partition(rows):
-            """Save XMLs for a partition (runs on executor)."""
-            try:
-                # Create MinIO client per partition (avoid serialization)
-                from minio import Minio
-                import os
-                from io import BytesIO
-                
-                endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000").replace("http://", "").replace("https://", "")
-                access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-                secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-                bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
-                secure = os.getenv("MINIO_SECURE", "0").lower() in {"1", "true", "yes"}
-                
-                client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
-                
-                for row in rows:
-                    resource_id = row.get("resource_id")
-                    dc_xml = row.get("dc_xml")
-                    
-                    if not resource_id or not dc_xml:
-                        continue
-                    
-                    object_name = f"silver/dc_xml/{resource_id}.xml"
-                    xml_bytes = dc_xml.encode('utf-8')
-                    
-                    client.put_object(
-                        bucket_name=bucket,
-                        object_name=object_name,
-                        data=BytesIO(xml_bytes),
-                        length=len(xml_bytes),
-                        content_type='application/xml'
-                    )
-            except Exception as exc:
-                # Silent fail: don't break the job if XML save fails
-                pass
-        
-        # Select only needed columns and save
-        df.select("resource_id", "dc_xml").rdd.foreachPartition(lambda rows: save_partition([row.asDict() for row in rows]))
 
 def re_split_words(text: str) -> List[str]:
     import re

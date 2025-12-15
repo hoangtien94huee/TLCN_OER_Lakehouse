@@ -219,69 +219,104 @@ def get_user_topics(student_id: str) -> Dict[str, int]:
 
 
 def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_topics: int = 3) -> List[Dict[str, Any]]:
+    """Get recommendations with DIVERSIFIED results across all top topics.
+    
+    Instead of just boosting by topic frequency (which causes all results to come from 
+    the highest-count topic), this fetches results separately for each topic and 
+    interleaves them to ensure representation from all user interests.
+    """
     if not topic_counts:
         return []
     
-    # Only use top N topics for faster query
+    # Only use top N topics
     sorted_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)
     top_topics = sorted_topics[:top_n_topics]
     
-    # Build simpler query with only top topics
-    should_clauses = []
-    for topic, count in top_topics:
-        boost_val = min(count, 5) * 2
-        should_clauses.append({
-            "multi_match": {
-                "query": topic,
-                "fields": ["title^2", "matched_subjects.subject_name^3"],
-                "type": "best_fields"
-            }
-        })
+    if not top_topics:
+        return []
     
-    es_query = {
-        "size": limit,
-        "_source": ["title", "description", "source_url", "source_system", "matched_subjects", "resource_id"],
-        "query": {
-            "bool": {
-                "should": should_clauses,
-                "minimum_should_match": 1
+    # Calculate how many results to fetch per topic (fetch extra for deduplication)
+    per_topic_limit = max(4, (limit // len(top_topics)) + 2)
+    
+    # Fetch results separately for each topic
+    topic_results: Dict[str, List[Dict[str, Any]]] = {}
+    
+    for topic, count in top_topics:
+        es_query = {
+            "size": per_topic_limit,
+            "_source": ["title", "description", "source_url", "source_system", "matched_subjects", "resource_id"],
+            "query": {
+                "multi_match": {
+                    "query": topic,
+                    "fields": ["title^2", "matched_subjects.subject_name^3", "description"],
+                    "type": "best_fields"
+                }
             }
         }
-    }
+        
+        try:
+            resp = requests.post(
+                f"{ES_HOST}/{ES_INDEX}/_search",
+                json=es_query,
+                timeout=5
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            
+            results = []
+            for hit in data.get("hits", {}).get("hits", []):
+                source = hit.get("_source", {})
+                subjects = [s.get("subject_name", "") for s in source.get("matched_subjects", []) if isinstance(s, dict)]
+                
+                results.append({
+                    "resource_id": source.get("resource_id", ""),
+                    "title": source.get("title", "Untitled"),
+                    "description": source.get("description", "")[:200] if source.get("description") else "",
+                    "url": source.get("source_url", "#"),
+                    "source": source.get("source_system", ""),
+                    "subjects": subjects[:5],
+                    "score": hit.get("_score", 0),
+                    "matched_topics": [topic],  # Tag with the topic this was fetched for
+                })
+            
+            topic_results[topic] = results
+            
+        except Exception as e:
+            print(f"Recommendation error for topic '{topic}': {e}")
+            topic_results[topic] = []
     
-    try:
-        resp = requests.post(
-            f"{ES_HOST}/{ES_INDEX}/_search",
-            json=es_query,
-            timeout=5  # Shorter timeout for faster fail
-        )
-        resp.raise_for_status()
-        data = resp.json()
+    # Interleave results from all topics (round-robin) to ensure diversity
+    final_results = []
+    seen_ids = set()
+    topic_iterators = {topic: iter(results) for topic, results in topic_results.items()}
+    topic_order = [t[0] for t in top_topics]  # Maintain priority order
+    
+    while len(final_results) < limit:
+        added_any = False
         
-        results = []
-        topic_names = [t[0] for t in top_topics]
-        for hit in data.get("hits", {}).get("hits", []):
-            source = hit.get("_source", {})
-            subjects = [s.get("subject_name", "") for s in source.get("matched_subjects", []) if isinstance(s, dict)]
-            
-            # Find which top topics this resource matches
-            matched_topics = [t for t in topic_names if any(t.lower() in s.lower() for s in subjects)]
-            
-            results.append({
-                "resource_id": source.get("resource_id", ""),
-                "title": source.get("title", "Untitled"),
-                "description": source.get("description", "")[:200] if source.get("description") else "",
-                "url": source.get("source_url", "#"),
-                "source": source.get("source_system", ""),
-                "subjects": subjects[:5],  # Limit subjects for smaller response
-                "score": hit.get("_score", 0),
-                "matched_topics": matched_topics,
-            })
+        for topic in topic_order:
+            if len(final_results) >= limit:
+                break
+                
+            try:
+                result = next(topic_iterators[topic])
+                resource_id = result.get("resource_id", "")
+                
+                # Skip duplicates (same resource might match multiple topics)
+                if resource_id and resource_id not in seen_ids:
+                    seen_ids.add(resource_id)
+                    final_results.append(result)
+                    added_any = True
+                    
+            except StopIteration:
+                # This topic has no more results
+                continue
         
-        return results
-    except Exception as e:
-        print(f"Recommendation error: {e}")
-        return []
+        # If no topic added any result, we're done
+        if not added_any:
+            break
+    
+    return final_results
 
 
 def validate_student(student_id: str, password: str) -> Optional[str]:

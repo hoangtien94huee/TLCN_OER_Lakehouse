@@ -1,4 +1,4 @@
-# 📚 OER Lakehouse - Hệ thống Quản lý Tài nguyên Giáo dục Mở
+# OER Lakehouse - Hệ thống Quản lý Tài nguyên Giáo dục Mở
 
 <div align="center">
 
@@ -9,37 +9,35 @@
 
 **Nền tảng tổng hợp, tìm kiếm và gợi ý Tài nguyên Giáo dục Mở thông minh**
 
-[Tính năng](#-tính-năng-chính) •
-[Kiến trúc](#-kiến-trúc-hệ-thống) •
-[Cài đặt](#-hướng-dẫn-cài-đặt) •
-[Sử dụng](#-hướng-dẫn-sử-dụng)
+[Tính năng](#tính-năng-chính) •
+[Kiến trúc](#kiến-trúc-hệ-thống) •
+[Cài đặt](#hướng-dẫn-cài-đặt) •
+[Sử dụng](#hướng-dẫn-sử-dụng)
 
 </div>
 
----
 
-## 📖 Giới thiệu
+## Giới thiệu
 
 **OER Lakehouse** là giải pháp toàn diện để giải quyết bài toán phân mảnh tài liệu giáo dục mở. Hệ thống tự động thu thập, xử lý và tổ chức tài liệu từ nhiều nguồn (MIT OCW, OpenStax, Open Textbook Library), kết hợp với **DSpace 9** để quản lý kho lưu trữ số và cung cấp khả năng tìm kiếm thông minh cấp độ trang PDF.
 
 ### Vấn đề giải quyết
 
-- 📚 **Phân mảnh dữ liệu**: Tài liệu OER nằm rải rác trên nhiều nền tảng
-- 🔍 **Khó tìm kiếm**: Không thể tìm kiếm nội dung bên trong PDF
-- 🎯 **Thiếu gợi ý**: Không có hệ thống recommend phù hợp với chương trình đào tạo
-- 📊 **Không thống nhất**: Metadata không đồng nhất giữa các nguồn
+- **Phân mảnh dữ liệu**: Tài liệu OER nằm rải rác trên nhiều nền tảng
+- **Khó tìm kiếm**: Không thể tìm kiếm nội dung bên trong PDF
+- **Thiếu gợi ý**: Không có hệ thống recommend phù hợp với chương trình đào tạo
+- **Không thống nhất**: Metadata không đồng nhất giữa các nguồn
 
----
 
-## 🚀 Tính năng chính
+## Tính năng chính
 
-### 1. 📥 Thu thập tự động (Web Scraping)
+### 1. Thu thập tự động (Web Scraping)
 
 - Tự động crawl từ **MIT OpenCourseWare**, **OpenStax**, **Open Textbook Library**
 - Tải PDF và trích xuất metadata
 - Lên lịch chạy định kỳ với Apache Airflow
 
-### 2. 🏗️ Kiến trúc Data Lakehouse (Medallion Architecture)
+### 2. Kiến trúc Data Lakehouse (Medallion Architecture)
 
 | Layer      | Mô tả                          | Format         |
 | ---------- | ------------------------------ | -------------- |
@@ -47,26 +45,26 @@
 | **Silver** | Dữ liệu đã làm sạch, chuẩn hóa | Apache Iceberg |
 | **Gold**   | Star Schema cho analytics      | Apache Iceberg |
 
-### 3. 🔍 Tìm kiếm thông minh (Deep PDF Search)
+### 3. Tìm kiếm thông minh (Deep PDF Search)
 
 - **Nested PDF Indexing**: Index nội dung từng trang PDF riêng biệt
 - **Smart Header/Footer Removal**: Tự động loại bỏ header/footer lặp lại
 - **Gaussian Decay Scoring**: Ưu tiên tài liệu mới hơn
 - **Highlight Snippets**: Hiển thị ngữ cảnh xung quanh từ khóa
 
-### 4. 🎯 Hệ thống Gợi ý (Recommendation Engine)
+### 4. Hệ thống Gợi ý (Recommendation Engine)
 
 - **Content-based Filtering**: Gợi ý dựa trên nội dung tương tự
 - **Semantic Matching**: Mapping tài liệu với môn học theo chương trình đào tạo
 - **Personalized Recommendations**: Gợi ý theo ngành/khoa của sinh viên
 
-### 5. 📦 Tích hợp DSpace 9
+### 5. Tích hợp DSpace 9
 
 - **SAF Import**: Tự động import tài liệu vào DSpace
 - **REST API Integration**: Đồng bộ metadata với DSpace
 - **Angular Frontend**: Giao diện DSpace Angular với custom theme
 
-### 6. ⭐ Rating & Review
+### 6. Rating & Review
 
 - Đánh giá và bình luận tài liệu
 - Liên kết với tài khoản DSpace (eperson)
@@ -74,64 +72,12 @@
 
 ---
 
-## 🏛️ Kiến trúc Hệ thống
-
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           DATA SOURCES                                   │
-│  ┌───────────┐  ┌───────────┐  ┌───────────┐                           │
-│  │  MIT OCW  │  │ OpenStax  │  │    OTL    │                           │
-│  └─────┬─────┘  └─────┬─────┘  └─────┬─────┘                           │
-└────────┼──────────────┼──────────────┼──────────────────────────────────┘
-         │              │              │
-         ▼              ▼              ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        APACHE AIRFLOW                                    │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐         │
-│  │ Scraper DAGs    │  │ ETL DAGs        │  │ Sync DAGs       │         │
-│  │ (Daily)         │  │ (Bronze→Gold)   │  │ (ES, DSpace)    │         │
-│  └────────┬────────┘  └────────┬────────┘  └────────┬────────┘         │
-└───────────┼────────────────────┼────────────────────┼───────────────────┘
-            │                    │                    │
-            ▼                    ▼                    ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                         DATA LAKEHOUSE                                   │
-│  ┌─────────────────────────────────────────────────────────────────┐   │
-│  │                         MinIO (S3)                               │   │
-│  │  ┌─────────┐      ┌─────────┐      ┌─────────┐                  │   │
-│  │  │ BRONZE  │ ───► │ SILVER  │ ───► │  GOLD   │                  │   │
-│  │  │ (Raw)   │      │(Cleaned)│      │(Star)   │                  │   │
-│  │  └─────────┘      └─────────┘      └─────────┘                  │   │
-│  │       Apache Iceberg Table Format                                │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-│            │                                     │                       │
-│  ┌─────────▼─────────┐             ┌────────────▼────────────┐         │
-│  │   Apache Spark    │             │      PostgreSQL         │         │
-│  │   (Processing)    │             │   (Metadata + Reviews)  │         │
-│  └───────────────────┘             └─────────────────────────┘         │
-└─────────────────────────────────────────────────────────────────────────┘
-            │                                     │
-            ▼                                     ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          SEARCH & DISCOVERY                              │
-│  ┌───────────────────┐                    ┌───────────────────┐         │
-│  │   Elasticsearch   │◄──────────────────►│   FastAPI App     │         │
-│  │   (Full-text)     │                    │   (Search API)    │         │
-│  └───────────────────┘                    └─────────┬─────────┘         │
-│                                                     │                    │
-│  ┌───────────────────────────────────────────────────────────────┐     │
-│  │                      DSpace 9                                  │     │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐            │     │
-│  │  │   Backend   │  │    Solr     │  │   Angular   │            │     │
-│  │  │  (REST API) │  │  (Search)   │  │  (Frontend) │            │     │
-│  │  └─────────────┘  └─────────────┘  └─────────────┘            │     │
-│  └───────────────────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+## Sơ đồ Kiến trúc Hệ thống
+![Sơ đồ luồng dữ liệu](image/structure.png)
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Component          | Technology     | Version |
 | ------------------ | -------------- | ------- |
@@ -148,7 +94,7 @@
 
 ---
 
-## 📂 Cấu trúc Dự án
+## Cấu trúc Dự án
 
 ```
 TLCN_OER_Lakehouse/
@@ -211,7 +157,7 @@ TLCN_OER_Lakehouse/
 
 ---
 
-## ⚡ Hướng dẫn Cài đặt
+## Hướng dẫn Cài đặt
 
 ### Yêu cầu hệ thống
 
@@ -259,7 +205,7 @@ Chờ khoảng 2-3 phút để các services khởi động hoàn tất.
 
 ---
 
-## 🌐 Truy cập Hệ thống
+## Truy cập Hệ thống
 
 | Service            | URL                          | Credentials                   |
 | ------------------ | ---------------------------- | ----------------------------- |
@@ -274,7 +220,7 @@ Chờ khoảng 2-3 phút để các services khởi động hoàn tất.
 
 ---
 
-## 📖 Hướng dẫn Sử dụng
+## Hướng dẫn Sử dụng
 
 ### 1. Chạy Scraper thu thập dữ liệu
 
@@ -314,7 +260,7 @@ Chạy DAG `dspace_saf_import_dag` để:
 
 ---
 
-## 🔧 Chạy DSpace Angular (Development)
+## Chạy DSpace Angular (Development)
 
 DSpace Angular chạy riêng để tiết kiệm tài nguyên:
 
@@ -338,7 +284,7 @@ yarn start:dev
 
 ---
 
-## 📊 API Endpoints
+## API Endpoints
 
 ### Search API (`/api`)
 
@@ -360,7 +306,7 @@ yarn start:dev
 
 ---
 
-## 🔄 Airflow DAGs
+## Airflow DAGs
 
 | DAG                       | Schedule      | Mô tả                       |
 | ------------------------- | ------------- | --------------------------- |
@@ -374,7 +320,7 @@ yarn start:dev
 
 ---
 
-## 🗄️ Database Schema
+## Database Schema
 
 ### PostgreSQL Tables
 
@@ -414,7 +360,7 @@ oer_review_helpful  -- Helpful votes
 
 ---
 
-## 🐳 Docker Services
+## Docker Services
 
 ```bash
 # Xem trạng thái
@@ -435,7 +381,7 @@ docker-compose --profile analytics up -d
 
 ---
 
-## 🔍 Troubleshooting
+## Troubleshooting
 
 ### Lỗi thường gặp
 
@@ -461,7 +407,7 @@ docker-compose up -d --build
 
 ---
 
-## 📈 Metrics & Monitoring
+## Metrics & Monitoring
 
 - **Spark UI**: http://localhost:8081 - Monitor Spark jobs
 - **Airflow**: http://localhost:8080 - DAG runs, task logs
@@ -469,7 +415,7 @@ docker-compose up -d --build
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 1. Fork repository
 2. Tạo feature branch (`git checkout -b feature/AmazingFeature`)
@@ -479,19 +425,19 @@ docker-compose up -d --build
 
 ---
 
-## 📄 License
+## License
 
 MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 
 ---
 
-## 👥 Tác giả
+## Tác giả
 
 - **Nguyễn Ngọc Huy** - _Developer_ - HCMUTE
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - [MIT OpenCourseWare](https://ocw.mit.edu/)
 - [OpenStax](https://openstax.org/)
@@ -504,8 +450,8 @@ MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 
 <div align="center">
 
-**⭐ Star this repository if you find it helpful! ⭐**
+**Star this repository if you find it helpful!**
 
-Made with ❤️ for Open Education
+Made with care for Open Education
 
 </div>

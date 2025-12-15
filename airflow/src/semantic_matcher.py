@@ -32,8 +32,6 @@ def get_model():
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
-        # all-MiniLM-L6-v2: Best accuracy (88%) for OER-Subject matching
-        # Smaller but better false positive rejection
         _model = SentenceTransformer('all-MiniLM-L6-v2')
         logger.info("Loaded all-MiniLM-L6-v2 model")
     return _model
@@ -247,7 +245,7 @@ if __name__ == "__main__":
         ("Introduction to AI and Expert Systems", None, "Artificial Intelligence", None),
     ]
     
-    print("\n" + "="*70)
+    print("\n" + "="*70)    
     print("SEMANTIC MATCHING TEST - Checking accuracy")
     print("="*70)
     

@@ -1,0 +1,165 @@
+.item-reviews-section {
+  border-top: 1px solid #dee2e6;
+  padding-top: 1.5rem;
+
+  .reviews-header {
+    h3 {
+      font-size: 1.5rem;
+      color: #333;
+    }
+  }
+
+  .reviews-stats {
+    background: linear-gradient(135deg, #fafafa 0%, #f5f5f5 100%);
+    border: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+
+    .display-4 {
+      font-size: 3rem;
+    }
+
+    .stars-display {
+      font-size: 1.2rem;
+    }
+
+    .rating-bars {
+      .progress {
+        background-color: #e9ecef;
+        border-radius: 4px;
+      }
+
+      .progress-bar {
+        border-radius: 4px;
+        transition: width 0.3s ease;
+      }
+    }
+  }
+
+  .review-form {
+    border: 2px solid #007bff;
+    border-radius: 8px;
+
+    .card-header {
+      background: #007bff;
+      color: white;
+      border-radius: 6px 6px 0 0;
+    }
+
+    .star-rating-input {
+      display: flex;
+      align-items: center;
+
+      i {
+        cursor: pointer;
+        transition: transform 0.2s ease, color 0.2s ease;
+        margin-right: 4px;
+      }
+
+      i:hover {
+        transform: scale(1.2);
+      }
+    }
+
+    textarea {
+      resize: vertical;
+      min-height: 100px;
+    }
+  }
+
+  .review-item {
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    transition: box-shadow 0.2s ease;
+
+    &:hover {
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .reviewer-name {
+      color: #333;
+    }
+
+    .review-date {
+      font-size: 0.85rem;
+    }
+
+    .review-rating {
+      font-size: 0.9rem;
+
+      .fa-star {
+        margin-right: 2px;
+      }
+    }
+
+    .review-comment {
+      color: #555;
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .review-actions {
+      button {
+        font-size: 0.85rem;
+      }
+
+      button:hover:not(:disabled) {
+        background-color: #f8f9fa;
+      }
+    }
+  }
+
+  .pagination {
+    .page-link {
+      color: #007bff;
+      border-radius: 4px;
+      margin: 0 2px;
+
+      &:hover {
+        background-color: #e9ecef;
+      }
+    }
+
+    .page-item.active .page-link {
+      background-color: #007bff;
+      border-color: #007bff;
+    }
+
+    .page-item.disabled .page-link {
+      color: #6c757d;
+    }
+  }
+}
+
+// Cursor pointer utility
+.cursor-pointer {
+  cursor: pointer;
+}
+
+// Star colors
+.text-warning {
+  color: #ffc107 !important;
+}
+
+// Responsive adjustments
+@media (max-width: 768px) {
+  .item-reviews-section {
+    .reviews-stats {
+      .display-4 {
+        font-size: 2rem;
+      }
+
+      .col-md-4 {
+        border-right: none !important;
+        border-bottom: 1px solid #dee2e6;
+        padding-bottom: 1rem;
+        margin-bottom: 1rem;
+      }
+    }
+
+    .review-form {
+      .star-rating-input i {
+        font-size: 1.5rem !important;
+      }
+    }
+  }
+}

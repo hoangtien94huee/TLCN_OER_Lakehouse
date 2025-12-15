@@ -341,13 +341,10 @@ services:
       dspace__P__server__P__url: http://localhost:8180/server
       dspace__P__ui__P__url: http://localhost:4000
       dspace__P__name: 'OER Repository - DSpace'
-      # Database connection - using shared postgres
       db__P__url: 'jdbc:postgresql://postgres:5432/dspace'
       db__P__username: dspace
       db__P__password: dspace
-      # Solr connection
       solr__P__server: http://dspacesolr:8983/solr
-      # Trust requests from Docker network
       proxies__P__trusted__P__ipranges: '172.0.0'
       LOGGING_CONFIG: /dspace/config/log4j2-container.xml
     depends_on:

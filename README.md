@@ -430,11 +430,3 @@ MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 - [Elasticsearch](https://www.elastic.co/)
 
 ---
-
-<div align="center">
-
-**Star this repository if you find it helpful!**
-
-Made with care for Open Education
-
-</div>

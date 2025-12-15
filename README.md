@@ -1,6 +1,6 @@
 # OER Data Lakehouse & Intelligent Search Platform
 
-## 📖 Giới thiệu Dự án
+## Giới thiệu Dự án
 
 **OER Data Lakehouse & Intelligent Search Platform** là một giải pháp công nghệ toàn diện nhằm giải quyết bài toán phân mảnh và khó tiếp cận của Tài nguyên Giáo dục Mở (Open Educational Resources - OER). Trong bối cảnh tài liệu học thuật nằm rải rác trên nhiều nền tảng khác nhau (MIT OCW, OpenStax, OTL...), việc tìm kiếm và tổng hợp kiến thức trở nên khó khăn đối với giảng viên và sinh viên.
 
@@ -8,7 +8,7 @@ Dự án này xây dựng một **Data Lakehouse** tập trung, có khả năng 
 
 ---
 
-## 🚀 Tính năng & Điểm nổi bật
+## Tính năng & Điểm nổi bật
 
 ### 1. Kiến trúc Data Lakehouse Hiện đại (Scalable Architecture)
 Hệ thống được xây dựng dựa trên kiến trúc **Medallion (Bronze/Silver/Gold)** chuẩn mực trong công nghiệp dữ liệu:
@@ -34,15 +34,14 @@ Toàn bộ quy trình xử lý dữ liệu được tự động hóa hoàn toà
 
 ---
 
-## 🏗️ Kiến trúc Hệ thống Chi tiết
+## Kiến trúc Hệ thống Chi tiết
 
 Sơ đồ luồng dữ liệu (Data Flow) của hệ thống:
 
-![Sơ đồ luồng dữ liệu](path/to/your/image.png)
+![Sơ đồ luồng dữ liệu](image/structure.png)
 
----
 
-## 🛠️ Công nghệ & Công cụ (Tech Stack)
+## Công nghệ & Công cụ (Tech Stack)
 
 Dự án sử dụng bộ công nghệ hiện đại (Modern Data Stack):
 
@@ -59,7 +58,7 @@ Dự án sử dụng bộ công nghệ hiện đại (Modern Data Stack):
 
 ---
 
-## 📂 Cấu trúc Thư mục Dự án
+## Cấu trúc Thư mục Dự án
 
 ```
 TLCN_OER_Lakehouse/
@@ -85,7 +84,7 @@ TLCN_OER_Lakehouse/
 
 ---
 
-## ⚡ Hướng dẫn Cài đặt & Triển khai
+## Hướng dẫn Cài đặt & Triển khai
 
 ### Yêu cầu hệ thống
 *   **Hệ điều hành**: Linux (Ubuntu/CentOS) hoặc Windows (WSL2), macOS.
@@ -123,7 +122,7 @@ TLCN_OER_Lakehouse/
 
 ---
 
-## 🔍 Phân tích Kỹ thuật Chuyên sâu
+## Phân tích Kỹ thuật Chuyên sâu
 
 ### 1. Thuật toán Xử lý PDF (Smart PDF Processing)
 Để giải quyết vấn đề "rác" dữ liệu trong PDF (header/footer lặp lại), hệ thống áp dụng thuật toán:
@@ -151,15 +150,3 @@ $$ Score = (Relevance \times Boost) + (Recency \times 1.5) + (NestedMatch \times
 *   **Recency**: Sử dụng hàm **Gaussian Decay** để giảm dần điểm của các tài liệu quá cũ (ví dụ: tài liệu 10 năm trước sẽ bị giảm điểm so với tài liệu năm nay).
 *   **NestedMatch**: Cộng điểm thưởng lớn nếu từ khóa xuất hiện trong nội dung chi tiết của PDF, đảm bảo người dùng tìm được tài liệu có nội dung thực sự liên quan.
 
----
-
-## 👨‍💻 Thông tin Tác giả
-
-Dự án này là sản phẩm của quá trình nghiên cứu và phát triển trong khuôn khổ **Khóa luận Tốt nghiệp**.
-
-*   **Sinh viên thực hiện**: [Tên Của Bạn]
-*   **Giảng viên hướng dẫn**: [Tên GVHD]
-*   **Liên hệ**: [Email của bạn] | [LinkedIn của bạn]
-
----
-*© 2024 OER Lakehouse Project. All rights reserved.*

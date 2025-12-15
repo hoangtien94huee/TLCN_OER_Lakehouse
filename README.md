@@ -1,22 +1,5 @@
 # OER Lakehouse - Hệ thống Quản lý Tài nguyên Giáo dục Mở
 
-<div align="center">
-
-![OER Lakehouse](https://img.shields.io/badge/OER-Lakehouse-blue?style=for-the-badge)
-![DSpace](https://img.shields.io/badge/DSpace-9.x-green?style=for-the-badge)
-![Spark](https://img.shields.io/badge/Apache%20Spark-3.5-orange?style=for-the-badge)
-![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.15-yellow?style=for-the-badge)
-
-**Nền tảng tổng hợp, tìm kiếm và gợi ý Tài nguyên Giáo dục Mở thông minh**
-
-[Tính năng](#tính-năng-chính) •
-[Kiến trúc](#kiến-trúc-hệ-thống) •
-[Cài đặt](#hướng-dẫn-cài-đặt) •
-[Sử dụng](#hướng-dẫn-sử-dụng)
-
-</div>
-
-
 ## Giới thiệu
 
 **OER Lakehouse** là giải pháp toàn diện để giải quyết bài toán phân mảnh tài liệu giáo dục mở. Hệ thống tự động thu thập, xử lý và tổ chức tài liệu từ nhiều nguồn (MIT OCW, OpenStax, Open Textbook Library), kết hợp với **DSpace 9** để quản lý kho lưu trữ số và cung cấp khả năng tìm kiếm thông minh cấp độ trang PDF.

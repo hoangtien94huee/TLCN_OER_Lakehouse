@@ -398,29 +398,6 @@ docker-compose up -d --build
 
 ---
 
-## Contributing
-
-1. Fork repository
-2. Tạo feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Tạo Pull Request
-
----
-
-## License
-
-MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
-
----
-
-## Tác giả
-
-- **Nguyễn Ngọc Huy** - _Developer_ - HCMUTE
-
----
-
-## Acknowledgments
 
 - [MIT OpenCourseWare](https://ocw.mit.edu/)
 - [OpenStax](https://openstax.org/)
@@ -430,11 +407,3 @@ MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 - [Elasticsearch](https://www.elastic.co/)
 
 ---
-
-<div align="center">
-
-**Star this repository if you find it helpful!**
-
-Made with care for Open Education
-
-</div>

@@ -121,18 +121,53 @@ def get_user_data() -> Optional[pd.DataFrame]:
 
 
 def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
-    """Search OER resources in Elasticsearch."""
+    """Search OER resources in Elasticsearch with PDF chunk search."""
     if not query:
         return []
     
     es_query = {
         "size": RESULT_SIZE,
         "query": {
-            "multi_match": {
-                "query": query,
-                "fields": ["title^3", "description^2", "search_text"],
-                "type": "best_fields",
-                "fuzziness": "AUTO"
+            "bool": {
+                "should": [
+                    # Search in main fields
+                    {
+                        "multi_match": {
+                            "query": query,
+                            "fields": ["title^3", "description^2", "search_text"],
+                            "type": "best_fields",
+                            "fuzziness": "AUTO"
+                        }
+                    },
+                    # Search in PDF chunks (nested)
+                    {
+                        "nested": {
+                            "path": "pdf_chunks",
+                            "query": {
+                                "match": {
+                                    "pdf_chunks.text": {
+                                        "query": query,
+                                        "fuzziness": "AUTO"
+                                    }
+                                }
+                            },
+                            "score_mode": "max",
+                            "inner_hits": {
+                                "size": 3,  # Return top 3 matching chunks
+                                "highlight": {
+                                    "fields": {
+                                        "pdf_chunks.text": {
+                                            "fragment_size": 150,
+                                            "number_of_fragments": 1,
+                                            "pre_tags": ["<mark>"],
+                                            "post_tags": ["</mark>"]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
             }
         },
         "highlight": {
@@ -156,15 +191,94 @@ def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
         for hit in data.get("hits", {}).get("hits", []):
             source = hit.get("_source", {})
             highlight = hit.get("highlight", {})
+            inner_hits = hit.get("inner_hits", {})
+            
+            # Extract PDF chunks with snippets from inner_hits (if search matched PDF content)
+            pdf_snippets = []
+            if "pdf_chunks" in inner_hits:
+                for chunk_hit in inner_hits["pdf_chunks"].get("hits", {}).get("hits", [])[:3]:
+                    chunk_source = chunk_hit.get("_source", {})
+                    chunk_highlight = chunk_hit.get("highlight", {})
+                    
+                    # Get highlighted snippet or fallback to raw text
+                    snippet_text = None
+                    if "pdf_chunks.text" in chunk_highlight:
+                        snippet_text = chunk_highlight["pdf_chunks.text"][0]
+                    else:
+                        snippet_text = chunk_source.get("text", "")[:150] + "..."
+                    
+                    if snippet_text:
+                        pdf_path = chunk_source.get("file_uri")
+                        url = generate_presigned_url(pdf_path) if pdf_path else None
+                        
+                        pdf_snippets.append({
+                            "file": chunk_source.get("file", "PDF"),
+                            "page": chunk_source.get("page"),
+                            "snippet": snippet_text,
+                            "url": url
+                        })
             
             # Generate presigned URLs for PDF files
+            # Ưu tiên dùng pdf_files_with_pages (có page number), fallback sang pdf_files cũ
             pdf_links = []
-            for pdf_path in source.get("pdf_files", []):
-                url = generate_presigned_url(pdf_path)
-                if url:
-                    # Extract filename from path
-                    filename = pdf_path.split("/")[-1] if pdf_path else "PDF"
-                    pdf_links.append({"name": filename, "url": url})
+            pdf_links_limit = 5  # Limit số PDF links trả về (UI sẽ hiển thị top 2)
+            
+            # If we have PDF snippets from search, use those first
+            if pdf_snippets:
+                # Use snippets as primary PDF links (they have context)
+                for snippet in pdf_snippets[:pdf_links_limit]:
+                    if snippet.get("url"):
+                        pdf_links.append({
+                            "name": snippet["file"],
+                            "url": snippet["url"],
+                            "page": snippet.get("page"),
+                            "snippet": snippet.get("snippet")
+                        })
+            
+            # Also add other PDF files (without snippets) if we have space
+            if len(pdf_links) < pdf_links_limit:
+                pdf_files_with_pages = source.get("pdf_files_with_pages", [])
+                if pdf_files_with_pages:
+                    for pdf_item in pdf_files_with_pages[:pdf_links_limit - len(pdf_links)]:
+                        if isinstance(pdf_item, dict):
+                            pdf_path = pdf_item.get("path")
+                            page = pdf_item.get("page")
+                            name = pdf_item.get("name")
+                            
+                            url = generate_presigned_url(pdf_path) if pdf_path else None
+                            if url:
+                                filename = name or (pdf_path.split("/")[-1] if pdf_path else "PDF")
+                                link = {"name": filename, "url": url}
+                                if page is not None:
+                                    link["page"] = page
+                                pdf_links.append(link)
+                else:
+                    # Fallback: legacy pdf_files format (list of strings or objects)
+                    pdf_files = source.get("pdf_files", [])
+                    for pdf_item in pdf_files[:pdf_links_limit - len(pdf_links)]:
+                        pdf_path = None
+                        page = None
+
+                        # Nếu ES lưu dạng object: {"path": "...", "page": 5, ...}
+                        if isinstance(pdf_item, dict):
+                            pdf_path = (
+                                pdf_item.get("path")
+                                or pdf_item.get("file")
+                                or pdf_item.get("url")
+                            )
+                            page = pdf_item.get("page")
+                        else:
+                            # Dạng cũ: chỉ là string path
+                            pdf_path = pdf_item
+
+                        url = generate_presigned_url(pdf_path) if pdf_path else None
+                        if url:
+                            # Extract filename from path
+                            filename = pdf_path.split("/")[-1] if pdf_path else "PDF"
+                            link = {"name": filename, "url": url}
+                            if page is not None:
+                                link["page"] = page
+                            pdf_links.append(link)
             
             results.append({
                 "title": source.get("title", "Untitled"),

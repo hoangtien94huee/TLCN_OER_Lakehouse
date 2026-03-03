@@ -319,6 +319,7 @@ class OERElasticsearchIndexer:
 
         # Build nested pdf_chunks structure
         pdf_chunks: List[Dict[str, Any]] = []
+        pdf_files_with_pages: List[Dict[str, Any]] = []
         titles = []
         files = []
 
@@ -329,10 +330,20 @@ class OERElasticsearchIndexer:
             # Add each page as a separate chunk (for nested search)
             for page_num, page_text in pages:
                 if page_text:  # Only add non-empty pages
+                    # Store full text for search, but truncate for indexing
+                    truncated_text = page_text[:self.max_pdf_page_chars]
+                    
                     pdf_chunks.append({
-                        "text": page_text[:self.max_pdf_page_chars],  # Truncate to limit
+                        "text": truncated_text,  # Truncate to limit
                         "page": page_num,
-                        "file": file_title
+                        "file": file_title,
+                        "file_uri": file_uri  # Keep URI for generating links later
+                    })
+                    # Also build pdf_files with page info for UI display
+                    pdf_files_with_pages.append({
+                        "path": file_uri,
+                        "name": file_title,
+                        "page": page_num
                     })
 
         # Create summary pdf_text for backward compatibility (optional)
@@ -341,7 +352,8 @@ class OERElasticsearchIndexer:
         return {
             "pdf_text": pdf_text_summary,  # Compact summary for legacy field
             "pdf_titles": titles,
-            "pdf_files": files,
+            "pdf_files": files,  # Keep legacy format for backward compatibility
+            "pdf_files_with_pages": pdf_files_with_pages,  # New format with page numbers
             "pdf_chunks": pdf_chunks,  # Main nested structure for page-level search
         }
 
@@ -486,6 +498,58 @@ class OERElasticsearchIndexer:
         
         return cleaned_pages
 
+    def _extract_real_page_number(self, text: str) -> Optional[int]:
+        """Try to extract actual page number from PDF text content.
+        
+        Common patterns:
+        - Footer: "Page 15", "15", "- 15 -"
+        - Header: "Chapter 2 | Page 15"
+        """
+        import re
+        
+        # Split into lines to check first/last lines (common page number locations)
+        lines = text.strip().split('\n')
+        if not lines:
+            return None
+        
+        # Check last 2 lines (footer) and first 2 lines (header)
+        check_lines = []
+        if len(lines) >= 1:
+            check_lines.append(lines[-1])  # Last line
+        if len(lines) >= 2:
+            check_lines.append(lines[-2])  # Second to last
+            check_lines.append(lines[0])   # First line
+        if len(lines) >= 3:
+            check_lines.append(lines[1])   # Second line
+        
+        # Patterns to match page numbers
+        patterns = [
+            r'(?:page|p\.?|pg\.?)\s*[:\-]?\s*(\d+)',  # "Page 15", "P: 15"
+            r'^\s*-?\s*(\d+)\s*-?\s*$',  # "- 15 -" or just "15" on its own line
+            r'(?:trang|tr\.?)\s*[:\-]?\s*(\d+)',  # Vietnamese: "Trang 15"
+            r'\|\s*(\d+)\s*$',  # "Chapter | 15"
+            r'^\s*(\d+)\s*\|',  # "15 | Chapter"
+        ]
+        
+        for line in check_lines:
+            line_clean = line.strip()
+            # Skip very long lines (unlikely to contain just page number)
+            if len(line_clean) > 50:
+                continue
+                
+            for pattern in patterns:
+                match = re.search(pattern, line_clean, re.IGNORECASE)
+                if match:
+                    try:
+                        page_num = int(match.group(1))
+                        # Sanity check: page number should be reasonable (1-9999)
+                        if 1 <= page_num <= 9999:
+                            return page_num
+                    except (ValueError, IndexError):
+                        continue
+        
+        return None
+
     def _clean_text(self, text: Optional[str], max_chars: int) -> Optional[str]:
         """Normalize whitespace and trim long PDF text."""
         if not text:
@@ -540,9 +604,14 @@ class OERElasticsearchIndexer:
         # Step 1: Remove header/footer patterns across all pages
         cleaned_pages = self._remove_header_footer(raw_pages)
 
-        # Step 2: Clean each page individually (page numbers, whitespace, truncate)
+        # Step 2: Extract real page numbers and clean text
         final_pages = []
-        for page_num, page_text in cleaned_pages:
+        for idx_page_num, page_text in cleaned_pages:
+            # Try to extract real page number from content
+            real_page_num = self._extract_real_page_number(page_text)
+            # Use real page number if found, otherwise use index-based number
+            page_num = real_page_num if real_page_num else idx_page_num
+            
             clean = self._clean_text(page_text, self.max_pdf_page_chars)
             if clean:
                 final_pages.append((page_num, clean))
@@ -585,6 +654,9 @@ class OERElasticsearchIndexer:
 
         if bundle.get("pdf_files"):
             document["pdf_files"] = bundle["pdf_files"]
+
+        if bundle.get("pdf_files_with_pages"):
+            document["pdf_files_with_pages"] = bundle["pdf_files_with_pages"]
 
         if bundle.get("pdf_chunks"):
             document["pdf_chunks"] = bundle["pdf_chunks"]
@@ -790,7 +862,17 @@ class OERElasticsearchIndexer:
                         # PDF content fields
                         "pdf_text": {"type": "text", "analyzer": "english"},  # Nội dung PDF
                         "pdf_titles": {"type": "keyword"},
-                        "pdf_files": {"type": "keyword"},
+                        "pdf_files": {"type": "keyword"},  # Legacy format (s3a:// paths only)
+                        
+                        # PDF files with page info (for UI display)
+                        "pdf_files_with_pages": {
+                            "type": "nested",
+                            "properties": {
+                                "path": {"type": "keyword"},
+                                "name": {"type": "keyword"},
+                                "page": {"type": "integer"}
+                            }
+                        },
                         
                         # Nested PDF chunks for page-level search
                         "pdf_chunks": {
@@ -798,7 +880,8 @@ class OERElasticsearchIndexer:
                             "properties": {
                                 "text": {"type": "text", "analyzer": "english"},
                                 "page": {"type": "integer"},
-                                "file": {"type": "keyword"}
+                                "file": {"type": "keyword"},
+                                "file_uri": {"type": "keyword"}
                             }
                         }
                     }

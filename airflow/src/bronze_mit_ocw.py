@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
 """
 MIT OCW Scraper - Bronze Layer
-Scrapes course metadata from MIT OpenCourseWare.
+Scrapes course metadata AND PDF resources from MIT OpenCourseWare.
+
+PDF Storage structure in MinIO:
+  bronze/mit_ocw/pdfs/{course-slug}/lecture-notes/Lecture_01_Introduction.pdf
+  bronze/mit_ocw/pdfs/{course-slug}/assignments/Problem_Set_01_Questions.pdf
+  bronze/mit_ocw/pdfs/{course-slug}/exams/Quiz_01.pdf
+  bronze/mit_ocw/pdfs/{course-slug}/recitations/Recitation_01.pdf
+  bronze/mit_ocw/pdfs/{course-slug}/other/Syllabus.pdf
 """
 
 import os
@@ -10,8 +17,9 @@ import time
 import hashlib
 import requests
 import re
+import io
 from datetime import datetime
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 from urllib.parse import urljoin, urlparse
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -33,8 +41,26 @@ except ImportError:
 class MITOCWScraper:
     """MIT OCW scraper for bronze layer - course metadata only"""
     
-    def __init__(self, delay=2, output_dir="scraped_data/mit_ocw", 
-                 batch_size=25, max_documents=None, **kwargs):
+    # PDF type classification keywords → (folder_name, priority)
+    # priority: lower = more valuable for chatbot (lecture notes = 0, exams = 2, etc.)
+    _PDF_TYPE_RULES: List[Tuple[List[str], str, int]] = [
+        (['lecture', 'lec'],                          'lecture-notes',  0),
+        (['recitation', 'rec'],                       'recitations',    1),
+        (['problem set', 'pset', 'assignment', 'hw'], 'assignments',    2),
+        (['exam', 'quiz', 'final', 'midterm', 'test'],'exams',          3),
+        (['solution', 'sol', 'answer', 'key'],        'solutions',      4),
+        (['syllabus'],                                 'other',          5),
+        (['reading', 'note'],                          'lecture-notes',  0),
+    ]
+
+    def __init__(self, delay=2, output_dir="scraped_data/mit_ocw",
+                 batch_size=25, max_documents=None,
+                 download_pdfs=True, max_pdfs_per_course=30,
+                 pdf_types=None, **kwargs):
+        # Default: chỉ lấy lecture notes (bài giảng) cho chatbot Q&A
+        # Truyền pdf_types=['lecture-notes','assignments'] nếu muốn mở rộng
+        if pdf_types is None:
+            pdf_types = ['lecture-notes']
         self.base_url = "https://ocw.mit.edu"
         self.source = "mit_ocw"
         self.delay = delay
@@ -42,23 +68,31 @@ class MITOCWScraper:
         self.batch_size = batch_size
         self.max_documents = max_documents
         self.driver = None
-        
+
+        # PDF config
+        self.download_pdfs = download_pdfs
+        self.max_pdfs_per_course = max_pdfs_per_course
+        # Which types to keep: None = all; e.g. ['lecture-notes', 'assignments']
+        self.pdf_types_filter: Optional[Set[str]] = set(pdf_types) if pdf_types else None
+
         # HTTP Session
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
         })
-        
+
         # Setup
         self._setup_minio()
         self._setup_selenium()
-        
+
         # Load existing courses for deduplication
         self.existing_course_ids = self._load_existing_course_ids()
         if self.existing_course_ids:
             print(f"[MIT OCW] Loaded {len(self.existing_course_ids)} existing courses")
-        
-        print(f"[MIT OCW] Scraper initialized - Max docs: {self.max_documents}")
+
+        print(f"[MIT OCW] Scraper initialized - Max docs: {self.max_documents}, "
+              f"Download PDFs: {self.download_pdfs}, "
+              f"PDF types: {list(self.pdf_types_filter) if self.pdf_types_filter else 'all'}")
     
     def _setup_minio(self):
         """Setup MinIO client"""
@@ -152,7 +186,8 @@ class MITOCWScraper:
                 if course_data:
                     documents.append(course_data)
                     self.existing_course_ids.add(course_data['id'])
-                    print(f"  ✓ {course_data['title'][:50]}...")
+                    pdf_count = course_data.get('pdf_count', 0)
+                    print(f"  ✓ {course_data['title'][:50]}... | PDFs: {pdf_count}")
                 
                 time.sleep(self.delay)
             
@@ -247,14 +282,28 @@ class MITOCWScraper:
     # =========================================================================
     
     def _scrape_course(self, url: str) -> Optional[Dict[str, Any]]:
-        """Scrape individual course metadata"""
+        """Scrape individual course metadata + download PDFs"""
         try:
             soup = self._get_page(url)
             if not soup:
                 return None
-            
-            return self._extract_course_info(soup, url)
-            
+
+            course_data = self._extract_course_info(soup, url)
+
+            # Download PDFs after metadata extraction
+            if self.download_pdfs and self.minio_client:
+                course_slug = self._extract_course_slug(url)
+                pdf_results = self._download_course_pdfs(url, course_slug)
+                course_data['pdf_count'] = pdf_results['downloaded']
+                course_data['pdf_paths'] = pdf_results['paths']
+                course_data['pdf_types_found'] = pdf_results['types_found']
+            else:
+                course_data['pdf_count'] = 0
+                course_data['pdf_paths'] = []
+                course_data['pdf_types_found'] = []
+
+            return course_data
+
         except Exception as e:
             print(f"  ✗ Error: {e}")
             return None
@@ -278,14 +327,268 @@ class MITOCWScraper:
                     return None
     
     # =========================================================================
+    # PDF DOWNLOAD
+    # =========================================================================
+
+    def _extract_course_slug(self, course_url: str) -> str:
+        """Extract clean course slug from URL for folder naming.
+        e.g. https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/
+             → 6-006-introduction-to-algorithms-spring-2020
+        """
+        path = urlparse(course_url).path.rstrip('/')
+        return path.split('/courses/')[-1].split('/')[0] or 'unknown'
+
+    def _classify_pdf(self, link_text: str, href: str) -> Tuple[str, int]:
+        """Return (folder_name, priority) based on link text / filename."""
+        combined = f"{link_text} {href}".lower()
+        for keywords, folder, priority in self._PDF_TYPE_RULES:
+            if any(kw in combined for kw in keywords):
+                return folder, priority
+        return 'other', 99
+
+    def _sanitize_filename(self, name: str) -> str:
+        """Convert a human-readable label to a safe filename."""
+        # Remove characters that are unsafe in filenames
+        name = re.sub(r'[\\/:*?"<>|]', '', name)
+        # Collapse whitespace → underscore
+        name = re.sub(r'\s+', '_', name.strip())
+        # Remove duplicate underscores
+        name = re.sub(r'_+', '_', name)
+        return name[:120]  # cap length
+
+    def _collect_pdf_links(self, course_url: str) -> List[Dict[str, Any]]:
+        """
+        Collect all PDF links for a course by scanning:
+          1. /pages/resource-index/  (comprehensive table)
+          2. /pages/lecture-notes/   (if resource-index missing)
+          3. /pages/assignments/
+          4. /pages/exams/
+          5. Course home page itself
+
+        Returns list of dicts: {url, label, folder, priority}
+        """
+        base = course_url.rstrip('/')
+        scan_pages = [
+            f"{base}/pages/resource-index/",
+            f"{base}/pages/lecture-notes/",
+            f"{base}/pages/assignments/",
+            f"{base}/pages/exams/",
+            f"{base}/pages/readings/",
+            base + '/',
+        ]
+
+        seen_urls: Set[str] = set()
+        pdf_entries: List[Dict[str, Any]] = []
+
+        for page_url in scan_pages:
+            try:
+                soup = self._get_page(page_url)
+                if not soup:
+                    continue
+
+                for a_tag in soup.find_all('a', href=True):
+                    href = a_tag['href']
+                    # Keep only direct .pdf links or /resources/ resource pages
+                    is_pdf_direct = href.lower().endswith('.pdf')
+                    is_resource_page = '/resources/' in href and not href.endswith('/')
+
+                    if not (is_pdf_direct or is_resource_page):
+                        continue
+
+                    # Resolve to absolute URL
+                    abs_url = urljoin(self.base_url, href)
+                    if abs_url in seen_urls:
+                        continue
+                    seen_urls.add(abs_url)
+
+                    label = a_tag.get_text(strip=True) or Path(urlparse(abs_url).path).stem
+                    # Strip trailing "notes (PDF)", "(PDF)" etc. from label
+                    label = re.sub(r'\s*\(pdf\)\s*$', '', label, flags=re.I).strip()
+                    label = re.sub(r'\s+notes\s*$', '', label, flags=re.I).strip()
+                    label = label or Path(urlparse(abs_url).path).stem
+
+                    folder, priority = self._classify_pdf(label, abs_url)
+
+                    pdf_entries.append({
+                        'url': abs_url,
+                        'label': label,
+                        'folder': folder,
+                        'priority': priority,
+                        'is_resource_page': is_resource_page,
+                    })
+
+                # Resource-index usually has everything; stop early if found enough
+                if '/resource-index/' in page_url and len(pdf_entries) > 5:
+                    break
+
+            except Exception as e:
+                print(f"  [PDF] Scan error on {page_url}: {e}")
+
+        # Sort: lecture-notes first, then others; within same folder keep order
+        pdf_entries.sort(key=lambda x: (x['priority'], x['label']))
+        return pdf_entries
+
+    def _resolve_pdf_url(self, entry: Dict[str, Any]) -> Optional[str]:
+        """If entry is a /resources/ page, resolve it to the actual .pdf download URL."""
+        if not entry.get('is_resource_page'):
+            return entry['url']
+
+        try:
+            soup = self._get_page(entry['url'])
+            if not soup:
+                return None
+            # The resource page has a "Download file" link pointing to the actual PDF
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag['href']
+                if href.lower().endswith('.pdf'):
+                    return urljoin(self.base_url, href)
+        except Exception:
+            pass
+        return None
+
+    def _download_course_pdfs(self, course_url: str, course_slug: str) -> Dict[str, Any]:
+        """
+        Download all PDFs for a course and upload to MinIO.
+
+        MinIO path structure:
+          bronze/mit_ocw/pdfs/{course_slug}/{folder}/{label}.pdf
+
+        Returns:
+          {'downloaded': int, 'paths': [minio_path, ...], 'types_found': [folder, ...]}
+        """
+        result = {'downloaded': 0, 'paths': [], 'types_found': []}
+
+        if not self.minio_client:
+            return result
+
+        # Check if PDFs already downloaded for this course
+        existing_prefix = f"bronze/mit_ocw/pdfs/{course_slug}/"
+        try:
+            existing = list(self.minio_client.list_objects(
+                self.minio_bucket, prefix=existing_prefix, recursive=True
+            ))
+            if existing:
+                existing_paths = [o.object_name for o in existing]
+                types_found = list({p.split('/')[4] for p in existing_paths
+                                    if len(p.split('/')) > 4})
+                print(f"  [PDF] Already have {len(existing_paths)} PDFs for {course_slug}, skipping")
+                result['downloaded'] = len(existing_paths)
+                result['paths'] = existing_paths
+                result['types_found'] = types_found
+                return result
+        except Exception:
+            pass
+
+        # Collect PDF links from course pages
+        pdf_entries = self._collect_pdf_links(course_url)
+        print(f"  [PDF] Found {len(pdf_entries)} PDF links")
+
+        if not pdf_entries:
+            return result
+
+        # Apply type filter
+        if self.pdf_types_filter:
+            pdf_entries = [e for e in pdf_entries if e['folder'] in self.pdf_types_filter]
+
+        # Limit per course
+        pdf_entries = pdf_entries[:self.max_pdfs_per_course]
+
+        # Track filename collisions per folder
+        used_names: Dict[str, Set[str]] = {}
+        types_seen: Set[str] = set()
+
+        for entry in pdf_entries:
+            try:
+                # Resolve actual PDF URL (handle resource pages)
+                pdf_url = self._resolve_pdf_url(entry)
+                if not pdf_url:
+                    continue
+
+                # Build a clean, human-readable filename
+                label = self._sanitize_filename(entry['label'])
+                folder = entry['folder']
+                if not label:
+                    label = Path(urlparse(pdf_url).path).stem
+                    label = self._sanitize_filename(label)
+
+                # Handle duplicates within same folder by appending counter
+                used_names.setdefault(folder, set())
+                base_label = label
+                counter = 1
+                while label in used_names[folder]:
+                    label = f"{base_label}_{counter}"
+                    counter += 1
+                used_names[folder].add(label)
+
+                minio_path = f"bronze/mit_ocw/pdfs/{course_slug}/{folder}/{label}.pdf"
+
+                # Skip if already exists in MinIO
+                try:
+                    self.minio_client.stat_object(self.minio_bucket, minio_path)
+                    result['paths'].append(minio_path)
+                    types_seen.add(folder)
+                    result['downloaded'] += 1
+                    continue
+                except Exception:
+                    pass  # Doesn't exist, proceed to download
+
+                # Download PDF bytes
+                pdf_bytes = self._fetch_pdf(pdf_url)
+                if not pdf_bytes:
+                    continue
+
+                # Upload to MinIO
+                self.minio_client.put_object(
+                    self.minio_bucket,
+                    minio_path,
+                    io.BytesIO(pdf_bytes),
+                    length=len(pdf_bytes),
+                    content_type='application/pdf',
+                )
+
+                result['paths'].append(minio_path)
+                types_seen.add(folder)
+                result['downloaded'] += 1
+                print(f"  [PDF] ✓ {folder}/{label}.pdf")
+
+                time.sleep(0.5)
+
+            except Exception as e:
+                print(f"  [PDF] ✗ {entry.get('label', '?')}: {e}")
+
+        result['types_found'] = list(types_seen)
+        print(f"  [PDF] Course {course_slug}: {result['downloaded']} PDFs uploaded "
+              f"({', '.join(types_seen) or 'none'})")
+        return result
+
+    def _fetch_pdf(self, url: str, max_retries: int = 3) -> Optional[bytes]:
+        """Download PDF bytes with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                resp = self.session.get(url, timeout=60, stream=True)
+                resp.raise_for_status()
+                content_type = resp.headers.get('Content-Type', '')
+                if 'pdf' not in content_type.lower() and not url.lower().endswith('.pdf'):
+                    # Not a PDF - skip silently
+                    return None
+                return resp.content
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"  [PDF] Download failed {url}: {e}")
+        return None
+
+    # =========================================================================
     # DATA EXTRACTION
     # =========================================================================
-    
+
     def _extract_course_info(self, soup: BeautifulSoup, url: str) -> Dict[str, Any]:
         """Extract course metadata"""
         course_number = self._extract_course_number(url)
         _, year = self._extract_semester_year(course_number, soup)
         
+        license_name, license_url = self._extract_license(soup)
         return {
             'id': self._create_document_id(url),
             'title': self._extract_title(soup),
@@ -295,9 +598,34 @@ class MITOCWScraper:
             'year': year if year != 'Unknown' else None,
             'source': self.source,
             'language': 'en',
+            'license': license_name,
+            'license_url': license_url,
             'scraped_at': datetime.now().isoformat()
         }
     
+    def _extract_license(self, soup: BeautifulSoup) -> Tuple[Optional[str], Optional[str]]:
+        """Extract license by finding any creativecommons.org link on the page.
+        Returns (license_name, license_url), e.g. ('CC BY-NC-SA 4.0', 'https://...')
+        """
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
+            if 'creativecommons.org/licenses/' in href or 'creativecommons.org/publicdomain/' in href:
+                return self._cc_url_to_name(href), href.rstrip('/')
+        return None, None
+
+    def _cc_url_to_name(self, url: str) -> str:
+        """Convert a creativecommons.org URL to a short human-readable name.
+        e.g. https://creativecommons.org/licenses/by-nc-sa/4.0/ → 'CC BY-NC-SA 4.0'
+        """
+        url = url.rstrip('/')
+        m = re.search(r'creativecommons\.org/licenses/([^/]+)/([^/]+)', url)
+        if m:
+            return f"CC {m.group(1).upper()} {m.group(2)}"
+        m = re.search(r'creativecommons\.org/publicdomain/([^/]+)/([^/]+)', url)
+        if m:
+            return f"CC0 {m.group(2)}"
+        return 'Creative Commons'
+
     def _extract_title(self, soup: BeautifulSoup) -> str:
         """Extract course title"""
         for selector in ['h1', 'title']:

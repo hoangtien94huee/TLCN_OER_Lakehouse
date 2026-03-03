@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import json
 import logging
+import re
 import warnings
 from datetime import date, datetime
 from io import BytesIO
@@ -294,11 +295,27 @@ class OERElasticsearchIndexer:
             if record:
                 course_id = record.get("course_id") or record.get("course_number")
                 if not course_id and record.get("url"):
-                    slug = record["url"].rstrip("/").split("/")[-1]
-                    course_id = slug
+                    # Extract clean slug from URL
+                    # e.g. https://ocw.mit.edu/courses/6-006-intro-spring-2020/ → 6-006-intro-spring-2020
+                    url_path = record["url"].rstrip("/")
+                    m = re.search(r'/courses/([^/]+)', url_path)
+                    course_id = m.group(1) if m else url_path.split("/")[-1]
             if not course_id:
                 return None
             prefix = f"bronze/mit_ocw/pdfs/{course_id}/"
+            pdf_entries = self._collect_pdf_entries(prefix)
+        elif system in {"openstax", "open stax"}:
+            # OpenStax: bronze/openstax/pdfs/{book-slug}/{Title}.pdf
+            book_slug = None
+            if record:
+                url = record.get("url", "")
+                m = re.search(r'/books/([^/]+)', url)
+                if m:
+                    book_slug = m.group(1)
+            if not book_slug:
+                # Fall back to resource_id prefix scan
+                book_slug = resource_id
+            prefix = f"bronze/openstax/pdfs/{book_slug}/"
             pdf_entries = self._collect_pdf_entries(prefix)
         elif system in {"otl", "open textbook library"}:
             normalized_id = resource_id.strip()
@@ -505,8 +522,6 @@ class OERElasticsearchIndexer:
         - Footer: "Page 15", "15", "- 15 -"
         - Header: "Chapter 2 | Page 15"
         """
-        import re
-        
         # Split into lines to check first/last lines (common page number locations)
         lines = text.strip().split('\n')
         if not lines:

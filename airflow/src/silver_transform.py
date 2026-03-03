@@ -688,12 +688,16 @@ class SilverTransformer:
             
             def derive_license(record):
                 lic = record.get("license")
+                # Prefer explicit license_url from bronze if available
+                explicit_url = record.get("license_url")
                 if lic and isinstance(lic, str):
                     lic_lower = lic.lower()
                     if "cc" in lic_lower or "creative commons" in lic_lower:
-                        return (lic.strip(), None)
+                        return (lic.strip(), explicit_url or None)
                     if lic_lower.startswith("http"):
                         return ("Creative Commons", lic.strip())
+                    # Plain text license with optional explicit URL
+                    return (lic.strip(), explicit_url or None)
                 return ("Unknown", None)
             
             def parse_datetime(value):

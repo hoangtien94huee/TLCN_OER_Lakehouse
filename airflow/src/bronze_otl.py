@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 Open Textbook Library Scraper - Bronze Layer
-Scrapes textbook metadata from open.umn.edu/opentextbooks
+Scrapes textbook metadata AND PDF resources from open.umn.edu/opentextbooks
+
+PDF Storage structure in MinIO:
+  bronze/otl/pdfs/{book-slug}/textbook/Book_Title.pdf
+  bronze/otl/pdfs/{book-slug}/ancillary/Instructor_Guide.pdf
+  bronze/otl/pdfs/{book-slug}/ancillary/Student_Solutions.pdf
 """
 
 import os
@@ -10,9 +15,11 @@ import time
 import hashlib
 import requests
 import re
+import io
 from datetime import datetime
-from typing import List, Dict, Any, Set, Optional
-from urllib.parse import urljoin
+from typing import List, Dict, Any, Set, Optional, Tuple
+from urllib.parse import urljoin, urlparse
+from pathlib import Path
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -37,9 +44,19 @@ except ImportError:
 
 
 class OTLScraper:
-    """Open Textbook Library scraper for bronze layer - textbook metadata only"""
+    """Open Textbook Library scraper for bronze layer - textbook metadata + PDFs"""
     
     BASE_URL = "https://open.umn.edu"
+    
+    # PDF type classification keywords → (folder_name, priority)
+    # priority: lower = more valuable for chatbot (textbook = 0, ancillary = 1)
+    _PDF_TYPE_RULES: List[Tuple[List[str], str, int]] = [
+        (['textbook', 'book', 'full text', 'complete'],  'textbook',   0),
+        (['instructor', 'teaching', 'teacher'],          'ancillary',  1),
+        (['student', 'solution', 'answer'],              'ancillary',  2),
+        (['guide', 'manual', 'supplement'],              'ancillary',  3),
+        (['slide', 'presentation', 'powerpoint'],        'ancillary',  4),
+    ]
     
     # Default subjects fallback
     DEFAULT_SUBJECTS = [
@@ -56,7 +73,14 @@ class OTLScraper:
     
     def __init__(self, delay: float = 0.5, max_documents: int = None,
                  parallel: bool = True, max_workers: int = 4,
-                 output_dir: str = "/opt/airflow/scraped_data/otl"):
+                 output_dir: str = "/opt/airflow/scraped_data/otl",
+                 download_pdfs: bool = True, max_pdfs_per_book: int = 10,
+                 pdf_types: Optional[List[str]] = None, **kwargs):
+        # Default: lấy textbook chính cho chatbot Q&A
+        # Truyền pdf_types=['textbook','ancillary'] nếu muốn lấy thêm tài liệu phụ
+        if pdf_types is None:
+            pdf_types = ['textbook']
+        
         self.source = "otl"
         self.delay = delay
         self.max_documents = max_documents or int(os.getenv('MAX_DOCUMENTS', '999999'))
@@ -64,6 +88,12 @@ class OTLScraper:
         self.max_workers = max_workers
         self.output_dir = output_dir
         self.driver = None
+        
+        # PDF config
+        self.download_pdfs = download_pdfs
+        self.max_pdfs_per_book = max_pdfs_per_book
+        # Which types to keep: None = all; e.g. ['textbook', 'ancillary']
+        self.pdf_types_filter: Optional[Set[str]] = set(pdf_types) if pdf_types else None
         
         # HTTP Session
         self.session = requests.Session()
@@ -86,7 +116,9 @@ class OTLScraper:
         self.total_scraped = 0
         
         mode = "PARALLEL" if parallel else "SEQUENTIAL"
-        print(f"[OTL] Scraper initialized - {mode} mode, Max docs: {self.max_documents}")
+        print(f"[OTL] Scraper initialized - {mode} mode, Max docs: {self.max_documents}, "
+              f"Download PDFs: {self.download_pdfs}, "
+              f"PDF types: {list(self.pdf_types_filter) if self.pdf_types_filter else 'all'}")
         print(f"[OTL] Subjects: {len(self.subjects)}")
     
     def _setup_minio(self):
@@ -369,7 +401,7 @@ class OTLScraper:
     # =========================================================================
     
     def _scrape_book(self, driver, url: str, subject_name: str) -> Optional[Dict[str, Any]]:
-        """Scrape individual book metadata"""
+        """Scrape individual book metadata + download PDFs"""
         try:
             driver.get(url)
             WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
@@ -379,7 +411,7 @@ class OTLScraper:
             
             title = self._extract_title(soup)
             
-            return {
+            book_data = {
                 'id': self._create_document_id(url),
                 'title': title,
                 'description': self._extract_description(soup),
@@ -389,6 +421,20 @@ class OTLScraper:
                 'source': 'Open Textbook Library',
                 'scraped_at': datetime.now().isoformat()
             }
+            
+            # Download PDFs after metadata extraction
+            if self.download_pdfs and self.minio_client:
+                book_slug = self._extract_book_slug(url)
+                pdf_results = self._download_book_pdfs(soup, url, book_slug)
+                book_data['pdf_count'] = pdf_results['downloaded']
+                book_data['pdf_paths'] = pdf_results['paths']
+                book_data['pdf_types_found'] = pdf_results['types_found']
+            else:
+                book_data['pdf_count'] = 0
+                book_data['pdf_paths'] = []
+                book_data['pdf_types_found'] = []
+            
+            return book_data
             
         except Exception as e:
             print(f"  ✗ Error scraping {url}: {e}")
@@ -438,6 +484,227 @@ class OTLScraper:
                     authors.append(val)
         
         return authors[:10]
+    
+    # =========================================================================
+    # PDF DOWNLOAD
+    # =========================================================================
+
+    def _extract_book_slug(self, book_url: str) -> str:
+        """Extract clean book slug from URL for folder naming.
+        e.g. https://open.umn.edu/opentextbooks/textbooks/123
+             → textbooks-123
+        """
+        path = urlparse(book_url).path.rstrip('/')
+        # Extract the last parts of the path
+        parts = [p for p in path.split('/') if p]
+        if len(parts) >= 2:
+            return f"{parts[-2]}-{parts[-1]}"
+        elif len(parts) == 1:
+            return parts[0]
+        return 'unknown'
+
+    def _classify_pdf(self, link_text: str, href: str) -> Tuple[str, int]:
+        """Return (folder_name, priority) based on link text / filename."""
+        combined = f"{link_text} {href}".lower()
+        for keywords, folder, priority in self._PDF_TYPE_RULES:
+            if any(kw in combined for kw in keywords):
+                return folder, priority
+        return 'ancillary', 99
+
+    def _sanitize_filename(self, name: str) -> str:
+        """Convert a human-readable label to a safe filename."""
+        # Remove characters that are unsafe in filenames
+        name = re.sub(r'[\\/:*?"<>|]', '', name)
+        # Collapse whitespace → underscore
+        name = re.sub(r'\s+', '_', name.strip())
+        # Remove duplicate underscores
+        name = re.sub(r'_+', '_', name)
+        return name[:120]  # cap length
+
+    def _collect_pdf_links(self, soup: BeautifulSoup, book_url: str) -> List[Dict[str, Any]]:
+        """Collect all PDF links for a book from its page.
+        
+        OTL books typically have:
+        - "View on the Web" or "Download PDF" links
+        - Multiple formats (PDF, EPUB, etc.)
+        - Ancillary resources section
+        
+        Returns list of dicts: {url, label, folder, priority}
+        """
+        seen_urls: Set[str] = set()
+        pdf_entries: List[Dict[str, Any]] = []
+
+        # Look for PDF download links
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
+            
+            # Only keep PDF links
+            if not href.lower().endswith('.pdf'):
+                continue
+            
+            # Resolve to absolute URL
+            abs_url = urljoin(self.BASE_URL, href)
+            if abs_url in seen_urls:
+                continue
+            seen_urls.add(abs_url)
+
+            # Extract label from link text or nearby text
+            label = a_tag.get_text(strip=True)
+            
+            # Try to get more context from parent elements
+            if not label or len(label) < 3:
+                parent = a_tag.find_parent(['li', 'div', 'p'])
+                if parent:
+                    label = parent.get_text(strip=True)
+            
+            # Clean label
+            label = re.sub(r'\s*\(pdf\)\s*$', '', label, flags=re.I).strip()
+            label = re.sub(r'\s*download\s*$', '', label, flags=re.I).strip()
+            
+            if not label:
+                label = Path(urlparse(abs_url).path).stem
+            
+            folder, priority = self._classify_pdf(label, abs_url)
+
+            pdf_entries.append({
+                'url': abs_url,
+                'label': label,
+                'folder': folder,
+                'priority': priority,
+            })
+
+        # Sort: textbook first, then ancillary materials
+        pdf_entries.sort(key=lambda x: (x['priority'], x['label']))
+        return pdf_entries
+
+    def _download_book_pdfs(self, soup: BeautifulSoup, book_url: str, book_slug: str) -> Dict[str, Any]:
+        """Download all PDFs for a book and upload to MinIO.
+
+        MinIO path structure:
+          bronze/otl/pdfs/{book_slug}/{folder}/{label}.pdf
+
+        Returns:
+          {'downloaded': int, 'paths': [minio_path, ...], 'types_found': [folder, ...]}
+        """
+        result = {'downloaded': 0, 'paths': [], 'types_found': []}
+
+        if not self.minio_client:
+            return result
+
+        # Check if PDFs already downloaded for this book
+        existing_prefix = f"bronze/otl/pdfs/{book_slug}/"
+        try:
+            existing = list(self.minio_client.list_objects(
+                self.minio_bucket, prefix=existing_prefix, recursive=True
+            ))
+            if existing:
+                existing_paths = [o.object_name for o in existing]
+                types_found = list({p.split('/')[4] for p in existing_paths
+                                    if len(p.split('/')) > 4})
+                print(f"  [PDF] Already have {len(existing_paths)} PDFs for {book_slug}, skipping")
+                result['downloaded'] = len(existing_paths)
+                result['paths'] = existing_paths
+                result['types_found'] = types_found
+                return result
+        except Exception:
+            pass
+
+        # Collect PDF links from book page
+        pdf_entries = self._collect_pdf_links(soup, book_url)
+        print(f"  [PDF] Found {len(pdf_entries)} PDF links")
+
+        if not pdf_entries:
+            return result
+
+        # Apply type filter
+        if self.pdf_types_filter:
+            pdf_entries = [e for e in pdf_entries if e['folder'] in self.pdf_types_filter]
+
+        # Limit per book
+        pdf_entries = pdf_entries[:self.max_pdfs_per_book]
+
+        # Track filename collisions per folder
+        used_names: Dict[str, Set[str]] = {}
+        types_seen: Set[str] = set()
+
+        for entry in pdf_entries:
+            try:
+                pdf_url = entry['url']
+                
+                # Build a clean, human-readable filename
+                label = self._sanitize_filename(entry['label'])
+                folder = entry['folder']
+                if not label:
+                    label = Path(urlparse(pdf_url).path).stem
+                    label = self._sanitize_filename(label)
+
+                # Handle duplicates within same folder by appending counter
+                used_names.setdefault(folder, set())
+                base_label = label
+                counter = 1
+                while label in used_names[folder]:
+                    label = f"{base_label}_{counter}"
+                    counter += 1
+                used_names[folder].add(label)
+
+                minio_path = f"bronze/otl/pdfs/{book_slug}/{folder}/{label}.pdf"
+
+                # Skip if already exists in MinIO
+                try:
+                    self.minio_client.stat_object(self.minio_bucket, minio_path)
+                    result['paths'].append(minio_path)
+                    types_seen.add(folder)
+                    result['downloaded'] += 1
+                    continue
+                except Exception:
+                    pass  # Doesn't exist, proceed to download
+
+                # Download PDF bytes
+                pdf_bytes = self._fetch_pdf(pdf_url)
+                if not pdf_bytes:
+                    continue
+
+                # Upload to MinIO
+                self.minio_client.put_object(
+                    self.minio_bucket,
+                    minio_path,
+                    io.BytesIO(pdf_bytes),
+                    length=len(pdf_bytes),
+                    content_type='application/pdf',
+                )
+
+                result['paths'].append(minio_path)
+                types_seen.add(folder)
+                result['downloaded'] += 1
+                print(f"  [PDF] ✓ {folder}/{label}.pdf")
+
+                time.sleep(0.5)
+
+            except Exception as e:
+                print(f"  [PDF] ✗ {entry.get('label', '?')}: {e}")
+
+        result['types_found'] = list(types_seen)
+        print(f"  [PDF] Book {book_slug}: {result['downloaded']} PDFs uploaded "
+              f"({', '.join(types_seen) or 'none'})")
+        return result
+
+    def _fetch_pdf(self, url: str, max_retries: int = 3) -> Optional[bytes]:
+        """Download PDF bytes with retry logic."""
+        for attempt in range(max_retries):
+            try:
+                resp = self.session.get(url, timeout=60, stream=True)
+                resp.raise_for_status()
+                content_type = resp.headers.get('Content-Type', '')
+                if 'pdf' not in content_type.lower() and not url.lower().endswith('.pdf'):
+                    # Not a PDF - skip silently
+                    return None
+                return resp.content
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"  [PDF] Download failed {url}: {e}")
+        return None
     
     # =========================================================================
     # STORAGE & DEDUPLICATION

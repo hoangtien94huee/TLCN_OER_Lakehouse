@@ -318,15 +318,32 @@ class OERElasticsearchIndexer:
             prefix = f"bronze/openstax/pdfs/{book_slug}/"
             pdf_entries = self._collect_pdf_entries(prefix)
         elif system in {"otl", "open textbook library"}:
-            normalized_id = resource_id.strip()
-            # Remove "open textbook library_" or "otl_" prefix if present
-            if normalized_id.startswith("open textbook library_"):
-                normalized_id = normalized_id.replace("open textbook library_", "")
-            elif normalized_id.startswith("otl_"):
-                normalized_id = normalized_id.replace("otl_", "")
+            # OTL: bronze/otl/pdfs/{book_slug}/textbook/Book.pdf
+            book_slug = None
+            if record:
+                url = record.get("url", "")
+                # Extract book slug from URL: https://open.umn.edu/opentextbooks/textbooks/123 → textbooks-123
+                if "/opentextbooks/textbooks/" in url:
+                    url_path = url.rstrip("/")
+                    parts = [p for p in url_path.split("/") if p]
+                    if len(parts) >= 2:
+                        book_slug = f"{parts[-2]}-{parts[-1]}"
+                    elif len(parts) == 1:
+                        book_slug = parts[0]
             
-            # List all PDFs in OTL folder and find ones starting with the hash
-            prefix = f"bronze/otl/otl-pdfs/{normalized_id}"
+            # Fallback: try using resource_id as book_slug
+            if not book_slug:
+                book_slug = resource_id.strip()
+                # Remove source prefix if present
+                if book_slug.startswith("open textbook library_"):
+                    book_slug = book_slug.replace("open textbook library_", "")
+                elif book_slug.startswith("otl_"):
+                    book_slug = book_slug.replace("otl_", "")
+            
+            if not book_slug:
+                return None
+            
+            prefix = f"bronze/otl/pdfs/{book_slug}/"
             pdf_entries = self._collect_pdf_entries(prefix)
         else:
             return None

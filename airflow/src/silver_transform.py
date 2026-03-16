@@ -189,6 +189,7 @@ class SilverTransformer:
                 T.StructField("last_updated_at", T.TimestampType(), True),
                 T.StructField("scraped_at", T.TimestampType(), True),
                 T.StructField("bronze_source_path", T.StringType(), True),
+                T.StructField("pdf_paths", T.ArrayType(T.StringType()), True),  # MinIO paths to PDF files
                 T.StructField("data_quality_score", T.DoubleType(), True),
                 T.StructField("ingested_at", T.TimestampType(), False),
             ]
@@ -792,6 +793,7 @@ class SilverTransformer:
                 "last_updated_at": last_updated_at,
                 "scraped_at": scraped_at,
                 "bronze_source_path": bronze_source_path,
+                "pdf_paths": clean_string_list(row_dict.get("pdf_paths") or []),
                 "data_quality_score": data_quality_score,
                 "ingested_at": now,
             }
@@ -895,6 +897,19 @@ class SilverTransformer:
             self.spark.catalog.dropTempView(temp_view)
             print(f" Created {table_name} with {row_count} records")
         else:
+            # Schema evolution: add any new columns from incoming df that don't exist in target
+            # Iceberg supports ADD COLUMN natively — safe to run even if column exists
+            try:
+                existing_cols = set(self.spark.table(table_name).columns)
+                incoming_cols = set(df.columns)
+                new_cols = incoming_cols - existing_cols
+                for col_name in new_cols:
+                    col_type = dict(df.dtypes).get(col_name, "string")
+                    print(f"  [Schema] Adding new column '{col_name}' ({col_type}) to {table_name}")
+                    self.spark.sql(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}")
+            except Exception as e:
+                print(f"  [Schema] Column evolution warning: {e}")
+
             # Use MERGE for incremental updates (upsert based on merge_key)
             # This preserves existing records and only updates/inserts changed ones
             temp_view = f"temp_{uuid4().hex}"

@@ -1,0 +1,124 @@
+<div class="ask-page container py-4">
+
+  <!-- Header -->
+  <div class="ask-header mb-4 text-center">
+    <h1 class="ask-title">
+      <span class="ask-icon">🤖</span>
+      {{ 'ask.page.title' | translate }}
+    </h1>
+    <p class="ask-subtitle text-muted">{{ 'ask.page.subtitle' | translate }}</p>
+  </div>
+
+  <!-- Chat window -->
+  <div class="chat-wrapper">
+    <div class="chat-container" #chatContainer>
+
+      <!-- Empty state -->
+      @if (messages.length === 0) {
+        <div class="empty-state">
+          <div class="empty-icon">💬</div>
+          <p class="empty-title">{{ 'ask.page.empty.title' | translate }}</p>
+          <p class="empty-hint text-muted">{{ 'ask.page.empty.hint' | translate }}</p>
+          <div class="example-questions mt-3">
+            @for (ex of exampleQuestions; track ex) {
+              <button
+                class="btn btn-outline-secondary btn-sm me-2 mb-2 example-btn"
+                (click)="question = ex; sendQuestion()">
+                {{ ex }}
+              </button>
+            }
+          </div>
+        </div>
+      }
+
+      <!-- Messages -->
+      @for (msg of messages; track $index) {
+        <div class="message-row" [class.user-row]="msg.role === 'user'" [class.assistant-row]="msg.role === 'assistant'">
+
+          <!-- Avatar -->
+          <div class="avatar">
+            @if (msg.role === 'user') { <span>👤</span> }
+            @else { <span>🤖</span> }
+          </div>
+
+          <!-- Bubble -->
+          <div class="bubble" [class.user-bubble]="msg.role === 'user'"
+               [class.assistant-bubble]="msg.role === 'assistant'"
+               [class.error-bubble]="msg.error">
+
+            <!-- Loading spinner -->
+            @if (msg.loading) {
+              <div class="loading-dots">
+                <span></span><span></span><span></span>
+              </div>
+            }
+
+            <!-- Text content -->
+            @if (!msg.loading) {
+              <div class="message-text">{{ msg.text }}</div>
+            }
+
+            <!-- Sources -->
+            @if (!msg.loading && msg.sources && msg.sources.length > 0) {
+              <div class="sources mt-3">
+                <div class="sources-title">
+                  <span class="sources-icon">📚</span>
+                  {{ 'ask.page.sources' | translate }}
+                </div>
+                @for (src of msg.sources; track src.url) {
+                  <a [href]="src.url" target="_blank" rel="noopener" class="source-item">
+                    <span class="source-title">{{ src.title }}</span>
+                    @if (src.page) {
+                      <span class="source-page badge">tr. {{ src.page }}</span>
+                    }
+                    @if (src.snippet) {
+                      <div class="source-snippet text-muted">{{ src.snippet }}</div>
+                    }
+                  </a>
+                }
+              </div>
+            }
+          </div>
+
+        </div>
+      }
+
+    </div><!-- /chat-container -->
+
+    <!-- Input area -->
+    <div class="input-area">
+      <div class="input-row">
+        <textarea
+          class="form-control question-input"
+          [(ngModel)]="question"
+          (keydown)="onEnterKey($event)"
+          [placeholder]="'ask.page.input.placeholder' | translate"
+          rows="2"
+          [disabled]="isLoading"
+          maxlength="1000">
+        </textarea>
+        <button
+          class="btn btn-primary send-btn"
+          (click)="sendQuestion()"
+          [disabled]="!canSend"
+          [title]="'ask.page.send' | translate">
+          @if (isLoading) {
+            <span class="spinner-border spinner-border-sm" role="status"></span>
+          } @else {
+            <span>➤</span>
+          }
+        </button>
+      </div>
+      <div class="input-footer d-flex justify-content-between align-items-center">
+        <small class="text-muted">{{ 'ask.page.input.hint' | translate }}</small>
+        @if (messages.length > 0) {
+          <button class="btn btn-link btn-sm text-muted p-0" (click)="clearChat()">
+            🗑 {{ 'ask.page.clear' | translate }}
+          </button>
+        }
+      </div>
+    </div>
+
+  </div><!-- /chat-wrapper -->
+
+</div>

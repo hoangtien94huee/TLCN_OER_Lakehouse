@@ -7,3 +7,7 @@ minio==7.2.0
 python-multipart==0.0.6
 pydantic>=2.0.0
 psycopg2-binary==2.9.9
+# Multilingual embedding model for cross-lingual retrieval (VI+EN → same vector space)
+sentence-transformers==5.2.3
+transformers==4.44.2
+numpy>=1.24.0

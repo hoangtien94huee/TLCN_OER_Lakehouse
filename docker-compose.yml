@@ -39,8 +39,11 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Airflow Scraper
+  # Airflow Scraper — chỉ cần khi chạy ETL pipeline
+  # Khởi động: docker compose --profile etl up -d
   oer-scraper:
+    profiles:
+      - etl
     build:
       context: ./airflow
       dockerfile: Dockerfile
@@ -63,6 +66,7 @@ services:
       - ./data/iceberg-jars:/opt/airflow/jars:ro  
       - ./data/reference:/opt/airflow/reference:ro
       - saf_import:/opt/airflow/saf_export
+      - ./data/exports:/opt/airflow/exports
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -101,8 +105,8 @@ services:
       - SPARK_EXECUTOR_MEMORY=512m
       - SPARK_DRIVER_MAXRESULTSIZE=256m
       - SPARK_SHUFFLE_PARTITIONS=2
-      # Optional: download and upload PDFs for OTL
-      - OTL_DOWNLOAD_PDFS=0
+      # Optional: download and upload PDFs for OTL (set 0 to skip)
+      - OTL_DOWNLOAD_PDFS=1
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
       # Elasticsearch sync configuration
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
@@ -117,9 +121,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 3G
-        reservations:
           memory: 2G
+        reservations:
+          memory: 1G
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -128,10 +132,16 @@ services:
       retries: 3
       start_period: 60s
 
-  # Spark Master - Cluster mode
+  # Spark Master — chỉ cần khi chạy ETL pipeline
   spark-master:
+    profiles:
+      - etl
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-master
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     environment:
       - SPARK_MODE=master
       - PYSPARK_PYTHON=python3
@@ -164,10 +174,16 @@ services:
       retries: 3
       start_period: 30s
 
-  # Spark Worker
+  # Spark Worker — chỉ cần khi chạy ETL pipeline
   spark-worker:
+    profiles:
+      - etl
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-worker
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     environment:
       - SPARK_MODE=worker
       - PYSPARK_PYTHON=python3
@@ -233,7 +249,7 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - ES_JAVA_OPTS=-Xms512m -Xmx1g
     ports:
       - "9200:9200"
       - "9300:9300"
@@ -242,13 +258,36 @@ services:
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 1536M
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=30s"]
       interval: 30s
       timeout: 10s
       retries: 5
     restart: unless-stopped
+
+  # Ollama — local LLM, chỉ cần khi dùng LLM_PROVIDER=ollama
+  # Khởi động: docker compose --profile llm up -d
+  ollama:
+    profiles:
+      - llm
+    image: ollama/ollama:latest
+    container_name: oer-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
 
   search-web:
     build:
@@ -257,6 +296,14 @@ services:
     environment:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=oer_resources
+      # LLM Provider: gemini | groq | ollama
+      - LLM_PROVIDER=groq
+      - GEMINI_API_KEY=${GOOGLE_API_KEY}
+      - GEMINI_MODEL=gemini-2.0-flash
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=llama-3.3-70b-versatile
+      - OLLAMA_HOST=http://ollama:11434
+      - OLLAMA_MODEL=llama3.2:1b
       - POSTGRES_HOST=postgres
       - POSTGRES_PORT=5432
       - POSTGRES_DB=dspace
@@ -291,7 +338,7 @@ services:
     container_name: dspacesolr
     image: dspace/dspace-solr:dspace-9_x
     environment:
-      - SOLR_JAVA_MEM=-Xms512m -Xmx768m
+      - SOLR_JAVA_MEM=-Xms256m -Xmx512m
     ports:
       - "8983:8983"
     volumes:
@@ -299,7 +346,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 768M
     user: root
     entrypoint:
       - /bin/bash
@@ -341,7 +388,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1024M
     environment:
       # DSpace configuration via environment variables
       dspace__P__dir: /dspace
@@ -404,3 +451,4 @@ volumes:
   dspace_assetstore:
   dspace_solr_data:
   saf_import:
+  ollama_data:

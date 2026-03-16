@@ -3581,6 +3581,23 @@
 
   "menu.section.statistics_task": "Statistics Task",
 
+  "menu.section.ask": "Hỏi đáp AI",
+
+  "ask.page.title": "Hỏi đáp học liệu mở (OER)",
+  "ask.page.subtitle": "Đặt câu hỏi về nội dung học tập — AI sẽ tìm và tổng hợp câu trả lời từ kho tài liệu mở.",
+  "ask.page.empty.title": "Bắt đầu đặt câu hỏi",
+  "ask.page.empty.hint": "Nhập câu hỏi của bạn vào ô bên dưới rồi nhấn Enter hoặc nút gửi.",
+  "ask.page.examples": [
+    "Đạo hàm là gì và cách tính đạo hàm?",
+    "Giải thích định lý Bayes bằng ví dụ thực tế",
+    "Cấu trúc dữ liệu nào phù hợp cho bài toán tìm kiếm?",
+  ],
+  "ask.page.sources": "Tài liệu tham khảo",
+  "ask.page.input.placeholder": "Nhập câu hỏi của bạn... (Enter để gửi, Shift+Enter để xuống dòng)",
+  "ask.page.input.hint": "Dùng Shift + Enter để xuống dòng",
+  "ask.page.send": "Gửi câu hỏi",
+  "ask.page.clear": "Xóa lịch sử",
+
   "menu.section.toggle.access_control": "Toggle Access Control section",
 
   "menu.section.toggle.reports": "Toggle Reports section",

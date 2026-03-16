@@ -76,6 +76,12 @@ export const APP_ROUTES: Route[] = [
         },
       },
       {
+        path: 'ask',
+        loadChildren: () => import('./ask-page/ask-page-routes')
+          .then((m) => m.ROUTES),
+        canActivate: [endUserAgreementCurrentUserGuard],
+      },
+      {
         path: 'community-list',
         loadChildren: () => import('./community-list-page/community-list-page-routes')
           .then((m) => m.ROUTES),

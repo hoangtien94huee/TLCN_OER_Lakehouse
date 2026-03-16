@@ -4,11 +4,8 @@ Includes Search and Recommendations with PDF support.
 """
 
 import os
-import time
-import pandas as pd
 from typing import Any, Dict, List, Optional, Tuple
 from datetime import timedelta
-from functools import lru_cache
 
 import requests
 from fastapi import FastAPI, Query, Request, Form, Response, HTTPException, Body
@@ -24,7 +21,15 @@ from reviews import get_review_store, ReviewStore
 ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200").rstrip("/")
 ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
 RESULT_SIZE = int(os.getenv("SEARCH_RESULT_SIZE", "20"))
-USER_DATA_PATH = os.getenv("USER_DATA_PATH", "/opt/airflow/database/user_final.csv")
+
+# LLM config for RAG Q&A  (LLM_PROVIDER=gemini | groq | ollama)
+LLM_PROVIDER   = os.getenv("LLM_PROVIDER", "gemini")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
+GEMINI_MODEL   = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
+GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
+GROQ_MODEL     = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "llama3.2")
 
 # MinIO config for PDF access
 MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "minio:9000")
@@ -54,17 +59,7 @@ app.add_middleware(
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Cache user data
-_user_df: Optional[pd.DataFrame] = None
 _minio_client: Optional[Minio] = None
-
-# Cache for recommendations: {student_id: (timestamp, results)}
-_recommend_cache: Dict[str, Tuple[float, Dict]] = {}
-RECOMMEND_CACHE_TTL = 300  # 5 minutes
-
-# Cache for user topics: {student_id: (timestamp, topics)}
-_topics_cache: Dict[str, Tuple[float, Dict[str, int]]] = {}
-TOPICS_CACHE_TTL = 600  # 10 minutes
 
 
 def get_minio_client() -> Optional[Minio]:
@@ -105,19 +100,6 @@ def generate_presigned_url(path: str) -> Optional[str]:
         print(f"Presigned URL error: {e}")
     
     return None
-
-
-def get_user_data() -> Optional[pd.DataFrame]:
-    """Load and cache user borrowing history."""
-    global _user_df
-    if _user_df is None:
-        try:
-            _user_df = pd.read_csv(USER_DATA_PATH)
-            print(f"Loaded {len(_user_df)} user records")
-        except Exception as e:
-            print(f"Could not load user data: {e}")
-            _user_df = pd.DataFrame()
-    return _user_df
 
 
 def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
@@ -300,166 +282,50 @@ def search_elasticsearch(query: str) -> List[Dict[str, Any]]:
         return []
 
 
-def get_user_topics(student_id: str) -> Dict[str, int]:
-    """Get topics and frequency for a user from borrowing history.
-    Uses cache to avoid repeated CSV parsing.
-    
-    Args:
-        student_id: Mã sinh viên (VD: 22142278, 23142367)
-    """
-    global _topics_cache
-    
-    # Check cache first
-    if student_id in _topics_cache:
-        cached_time, cached_topics = _topics_cache[student_id]
-        if time.time() - cached_time < TOPICS_CACHE_TTL:
-            return cached_topics
-    
-    df = get_user_data()
-    if df is None or df.empty:
-        return {}
-    
-    # Tìm theo mã sinh viên (So_the)
-    user_history = df[df['So_the'].astype(str) == str(student_id)]
-    if user_history.empty:
-        return {}
-    
-    topic_counts = user_history['Chu_de'].dropna().value_counts().to_dict()
-    
-    # Cache result
-    _topics_cache[student_id] = (time.time(), topic_counts)
-    
-    return topic_counts
-
-
-def get_recommendations(topic_counts: Dict[str, int], limit: int = 10, top_n_topics: int = 3) -> List[Dict[str, Any]]:
-    """Get recommendations with DIVERSIFIED results across all top topics.
-    
-    Instead of just boosting by topic frequency (which causes all results to come from 
-    the highest-count topic), this fetches results separately for each topic and 
-    interleaves them to ensure representation from all user interests.
-    """
-    if not topic_counts:
-        return []
-    
-    # Only use top N topics
-    sorted_topics = sorted(topic_counts.items(), key=lambda x: x[1], reverse=True)
-    top_topics = sorted_topics[:top_n_topics]
-    
-    if not top_topics:
-        return []
-    
-    # Calculate how many results to fetch per topic (fetch extra for deduplication)
-    per_topic_limit = max(4, (limit // len(top_topics)) + 2)
-    
-    # Fetch results separately for each topic
-    topic_results: Dict[str, List[Dict[str, Any]]] = {}
-    
-    for topic, count in top_topics:
-        es_query = {
-            "size": per_topic_limit,
-            "_source": ["title", "description", "source_url", "source_system", "matched_subjects", "resource_id"],
-            "query": {
-                "multi_match": {
-                    "query": topic,
-                    "fields": ["title^2", "matched_subjects.subject_name^3", "description"],
-                    "type": "best_fields"
-                }
-            }
-        }
-        
-        try:
-            resp = requests.post(
-                f"{ES_HOST}/{ES_INDEX}/_search",
-                json=es_query,
-                timeout=5
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            
-            results = []
-            for hit in data.get("hits", {}).get("hits", []):
-                source = hit.get("_source", {})
-                subjects = [s.get("subject_name", "") for s in source.get("matched_subjects", []) if isinstance(s, dict)]
-                
-                results.append({
-                    "resource_id": source.get("resource_id", ""),
-                    "title": source.get("title", "Untitled"),
-                    "description": source.get("description", "")[:200] if source.get("description") else "",
-                    "url": source.get("source_url", "#"),
-                    "source": source.get("source_system", ""),
-                    "subjects": subjects[:5],
-                    "score": hit.get("_score", 0),
-                    "matched_topics": [topic],  # Tag with the topic this was fetched for
-                })
-            
-            topic_results[topic] = results
-            
-        except Exception as e:
-            print(f"Recommendation error for topic '{topic}': {e}")
-            topic_results[topic] = []
-    
-    # Interleave results from all topics (round-robin) to ensure diversity
-    final_results = []
-    seen_ids = set()
-    topic_iterators = {topic: iter(results) for topic, results in topic_results.items()}
-    topic_order = [t[0] for t in top_topics]  # Maintain priority order
-    
-    while len(final_results) < limit:
-        added_any = False
-        
-        for topic in topic_order:
-            if len(final_results) >= limit:
-                break
-                
-            try:
-                result = next(topic_iterators[topic])
-                resource_id = result.get("resource_id", "")
-                
-                # Skip duplicates (same resource might match multiple topics)
-                if resource_id and resource_id not in seen_ids:
-                    seen_ids.add(resource_id)
-                    final_results.append(result)
-                    added_any = True
-                    
-            except StopIteration:
-                # This topic has no more results
-                continue
-        
-        # If no topic added any result, we're done
-        if not added_any:
-            break
-    
-    return final_results
-
-
 def validate_student(student_id: str, password: str) -> Optional[str]:
-    """Validate student login. Returns student name if valid, None otherwise."""
-    if student_id != password:
+    """Validate student login. Accepts any non-empty student ID."""
+    if not student_id or not student_id.strip():
         return None
-    
-    df = get_user_data()
-    if df is None or df.empty:
-        return None
-    
-    match = df[df['So_the'].astype(str) == str(student_id)]
-    if match.empty:
-        return None
-    
-    return match.iloc[0].get('Ho_ten', student_id)
+    return student_id.strip()
 
 
 def get_student_name(student_id: str) -> Optional[str]:
-    """Get student name by ID."""
-    df = get_user_data()
-    if df is None or df.empty:
-        return None
-    
-    match = df[df['So_the'].astype(str) == str(student_id)]
-    if match.empty:
-        return None
-    
-    return match.iloc[0].get('Ho_ten', '')
+    """Return student ID as display name."""
+    return student_id
+
+
+def get_popular_resources(limit: int = 10, source: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Get popular/high-quality OER resources sorted by data_quality_score."""
+    query: Dict[str, Any] = {
+        "size": limit,
+        "query": {"bool": {"must": [{"exists": {"field": "title"}}]}},
+        "sort": [
+            {"data_quality_score": {"order": "desc"}},
+            {"_score": {"order": "desc"}}
+        ]
+    }
+    if source:
+        query["query"]["bool"]["filter"] = [{"term": {"source_system.keyword": source}}]
+    try:
+        resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=query, timeout=10)
+        resp.raise_for_status()
+        results = []
+        for hit in resp.json().get("hits", {}).get("hits", []):
+            src = hit.get("_source", {})
+            subjects = [s.get("subject_name", "") for s in src.get("matched_subjects", []) if isinstance(s, dict)]
+            results.append({
+                "resource_id": src.get("resource_id", ""),
+                "title": src.get("title", "Untitled"),
+                "description": src.get("description", "")[:200],
+                "url": src.get("source_url", "#"),
+                "source": src.get("source_system", ""),
+                "subjects": subjects[:3],
+                "quality_score": src.get("data_quality_score", 0),
+            })
+        return results
+    except Exception as e:
+        print(f"Popular resources error: {e}")
+        return []
 
 
 # ============ ROUTES ============
@@ -495,7 +361,7 @@ async def login_submit(request: Request, username: str = Form(...), password: st
     if student_name is None:
         return templates.TemplateResponse("login.html", {
             "request": request,
-            "error": "Mã sinh viên không tồn tại hoặc mật khẩu không đúng.",
+            "error": "Vui lòng nhập mã sinh viên.",
             "username": username
         })
     
@@ -515,35 +381,27 @@ async def logout():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, q: Optional[str] = Query(None)):
-    """Main dashboard with search and recommendations."""
+    """Main dashboard with search."""
     student_id = request.cookies.get("student_id")
     if not student_id:
         return RedirectResponse(url="/login", status_code=302)
-    
-    # Get student info and topics
+
     student_name = get_student_name(student_id)
-    topics = get_user_topics(student_id)
-    
-    # Get top 2 topics for highlighting
-    sorted_topics = sorted(topics.items(), key=lambda x: x[1], reverse=True)
-    top_topics = [t[0] for t in sorted_topics[:2]]
-    
-    # Get recommendations (limit 10, prioritize top 2 topics)
-    recommendations = get_recommendations(topics, limit=10, top_n_topics=2)
-    
+
     # Search results if query provided
     search_results = []
     if q:
         search_results = search_elasticsearch(q)
-    
+
+    # Show popular resources when not searching
+    popular_resources = get_popular_resources(limit=10) if not q else []
+
     return templates.TemplateResponse("dashboard.html", {
         "request": request,
         "student_id": student_id,
         "student_name": student_name,
-        "topics": topics,
-        "top_topics": top_topics,
-        "recommendations": recommendations,
         "search_results": search_results,
+        "popular_resources": popular_resources,
         "query": q or ""
     })
 
@@ -561,45 +419,6 @@ async def api_search(q: str = Query(..., description="Search query")):
     }
 
 
-@app.get("/api/recommend/{student_id}")
-async def api_recommend(student_id: str, limit: int = Query(6, ge=1, le=20)):
-    """
-    Example: GET /api/recommend/22142278?limit=6
-    """
-    global _recommend_cache
-    
-    # Check cache first
-    cache_key = f"{student_id}:{limit}"
-    if cache_key in _recommend_cache:
-        cached_time, cached_result = _recommend_cache[cache_key]
-        if time.time() - cached_time < RECOMMEND_CACHE_TTL:
-            return cached_result
-    
-    topics = get_user_topics(student_id)
-    if not topics:
-        result = {
-            "student_id": student_id,
-            "topics": {},
-            "total": 0,
-            "results": [],
-            "message": "No borrowing history found for this student"
-        }
-        return result
-    
-    results = get_recommendations(topics, limit=limit)
-    result = {
-        "student_id": student_id,
-        "topics": dict(list(topics.items())[:5]),  # Only return top 5 topics
-        "total": len(results),
-        "results": results
-    }
-    
-    # Cache result
-    _recommend_cache[cache_key] = (time.time(), result)
-    
-    return result
-
-
 @app.get("/api/recommend/by-subject/{subject}")
 async def api_recommend_by_subject(
     subject: str,
@@ -611,7 +430,41 @@ async def api_recommend_by_subject(
     
     Example: GET /api/recommend/by-subject/General%20principles%20of%20mathematics?limit=5
     """
-    results = get_recommendations({subject: 1}, limit=limit)
+    results = get_popular_resources(limit=limit, source=None)
+    # Further filter by subject keyword via ES multi_match
+    try:
+        resp = requests.post(
+            f"{ES_HOST}/{ES_INDEX}/_search",
+            json={
+                "size": limit,
+                "_source": ["title", "description", "source_url", "source_system", "matched_subjects", "resource_id"],
+                "query": {
+                    "multi_match": {
+                        "query": subject,
+                        "fields": ["title^2", "matched_subjects.subject_name^3", "description"],
+                        "type": "best_fields"
+                    }
+                }
+            },
+            timeout=5
+        )
+        resp.raise_for_status()
+        results = []
+        for hit in resp.json().get("hits", {}).get("hits", []):
+            src = hit.get("_source", {})
+            subjects = [s.get("subject_name", "") for s in src.get("matched_subjects", []) if isinstance(s, dict)]
+            results.append({
+                "resource_id": src.get("resource_id", ""),
+                "title": src.get("title", "Untitled"),
+                "description": src.get("description", "")[:200],
+                "url": src.get("source_url", "#"),
+                "source": src.get("source_system", ""),
+                "subjects": subjects[:5],
+                "score": hit.get("_score", 0),
+            })
+    except Exception as e:
+        print(f"by-subject error: {e}")
+        results = []
     return {
         "subject": subject,
         "total": len(results),
@@ -801,6 +654,456 @@ async def api_popular_resources(
         return {"total": 0, "results": [], "error": str(e)}
 
 
+# ============ Q&A / RAG API ============
+
+class AskRequest(BaseModel):
+    question: str = Field(..., min_length=3, description="Question to ask about OER content")
+    top_k: int = Field(5, ge=1, le=10, description="Number of context chunks to retrieve")
+
+
+# --- Encoding fix for PDF text extracted with wrong codec (Latin-1 read as UTF-8) ---
+_ENCODING_MAP = [
+    ("â€œ", '"'), ("â€", '"'), ("â€™", "'"), ("â€˜", "'"),
+    ("â€¦", "..."), ("â€"", "—"), ("â€"", "–"),
+    ("Â·", "·"), ("Â©", "©"), ("Â®", "®"), ("Â°", "°"),
+    ("Â½", "½"), ("Â¼", "¼"), ("Â¾", "¾"),
+    ("â¢", "•"), ("â¢ ", "• "),
+    ("Ã©", "é"), ("Ã¨", "è"), ("Ã ", "à"), ("Ã¢", "â"),
+    ("Ã¯", "ï"), ("Ã®", "î"), ("Ã´", "ô"), ("Ã¹", "ù"),
+    ("Ã±", "ñ"), ("Ã¼", "ü"), ("Ã¶", "ö"), ("Ã¤", "ä"),
+    ("â ", " "),
+]
+
+def _fix_encoding(text: str) -> str:
+    """Fix mojibake characters from PDF Latin-1/Windows-1252 decoded as UTF-8."""
+    if not text:
+        return text
+    for bad, good in _ENCODING_MAP:
+        text = text.replace(bad, good)
+    return text
+
+
+# --- Multilingual Embedding Model (singleton, lazy-loaded) ---
+_EMBED_MODEL = None
+
+def _get_embedding_model():
+    """Lazy-load distiluse-base-multilingual-cased-v2 once, reuse forever.
+
+    Model specs: 512 dimensions, 50+ languages (VI + EN in same vector space),
+    ~135MB, CPU-friendly. No API calls required — runs fully local.
+    """
+    global _EMBED_MODEL
+    if _EMBED_MODEL is not None:
+        return _EMBED_MODEL
+    try:
+        from sentence_transformers import SentenceTransformer
+        print("[Embedding] Loading distiluse-base-multilingual-cased-v2 ...")
+        _EMBED_MODEL = SentenceTransformer("distiluse-base-multilingual-cased-v2")
+        print("[Embedding] Model ready")
+    except Exception as e:
+        print(f"[Embedding] Could not load model ({e}) — falling back to BM25 only")
+        _EMBED_MODEL = None
+    return _EMBED_MODEL
+
+
+def retrieve_context(question: str, top_k: int = 5) -> List[Dict[str, Any]]:
+    """Retrieve top-k relevant chunks using multilingual KNN + BM25 fallback.
+
+    Strategy:
+      1. KNN search on doc-level `embedding` field (handles VI↔EN cross-lingual)
+         → for each matched doc, re-rank its pdf_chunks by chunk embedding cosine sim
+      2. Fallback: BM25 multi_match on search_text/description (for docs without embeddings)
+    """
+    import numpy as np
+
+    chunks: List[Dict[str, Any]] = []
+    model = _get_embedding_model()
+
+    # ── Path 1: Multilingual KNN ──────────────────────────────────────────────
+    if model:
+        try:
+            query_vec = model.encode(question, normalize_embeddings=True)
+            query_list = query_vec.tolist()
+
+            knn_body = {
+                "size": top_k * 3,   # Fetch extra docs to extract best chunks
+                "_source": ["title", "source_url", "resource_id", "description", "pdf_chunks"],
+                "knn": {
+                    "field": "embedding",
+                    "query_vector": query_list,
+                    "k": top_k * 3,
+                    "num_candidates": max(200, top_k * 40),
+                    # Only search docs that have actual PDF chunks indexed
+                    "filter": {
+                        "nested": {
+                            "path": "pdf_chunks",
+                            "query": {"exists": {"field": "pdf_chunks.text"}}
+                        }
+                    }
+                }
+            }
+            resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=knn_body, timeout=15)
+            resp.raise_for_status()
+
+            for hit in resp.json().get("hits", {}).get("hits", []):
+                if len(chunks) >= top_k:
+                    break
+                src = hit.get("_source", {})
+                doc_chunks = src.get("pdf_chunks") or []
+
+                if doc_chunks:
+                    # Re-rank chunks by cosine similarity with query vector
+                    scored: List[tuple] = []
+                    for ch in doc_chunks:
+                        ch_emb = ch.get("embedding")
+                        if ch_emb:
+                            score = float(np.dot(query_vec, np.array(ch_emb)))
+                        else:
+                            score = 0.0  # No chunk embedding — rank below any real match
+                        scored.append((score, ch))
+                    scored.sort(key=lambda x: x[0], reverse=True)
+
+                    # Take top-3 best chunks per doc for richer context
+                    for _, ch in scored[:3]:
+                        if len(chunks) >= top_k:
+                            break
+                        if ch.get("text"):
+                            chunks.append({
+                                "text": _fix_encoding(ch["text"]),
+                                "title": src.get("title", ""),
+                                "source_url": src.get("source_url", "#"),
+                                "resource_id": src.get("resource_id", ""),
+                                "file": ch.get("file", ""),
+                                "page": ch.get("page"),
+                            })
+                else:
+                    # Doc matched but no chunks → use description as context
+                    desc = src.get("description", "")
+                    if desc:
+                        chunks.append({
+                            "text": _fix_encoding(desc[:800]),
+                            "title": src.get("title", ""),
+                            "source_url": src.get("source_url", "#"),
+                            "resource_id": src.get("resource_id", ""),
+                            "file": "",
+                            "page": None,
+                        })
+
+            if chunks:
+                print(f"[RAG] KNN retrieved {len(chunks)} chunks for: '{question[:60]}'")
+
+        except Exception as e:
+            print(f"[RAG] KNN failed ({e}), falling back to BM25")
+
+    # ── Path 2: BM25 fallback (no model, or KNN returned nothing) ─────────────
+    if not chunks:
+        # Try pdf_chunks nested BM25 first
+        chunk_query = {
+            "size": 5,
+            "_source": ["title", "source_url", "resource_id"],
+            "query": {
+                "nested": {
+                    "path": "pdf_chunks",
+                    "query": {"match": {"pdf_chunks.text": {"query": question, "fuzziness": "AUTO"}}},
+                    "score_mode": "max",
+                    "inner_hits": {
+                        "size": top_k,
+                        "_source": ["pdf_chunks.text", "pdf_chunks.file", "pdf_chunks.page"],
+                        "highlight": {
+                            "fields": {"pdf_chunks.text": {"fragment_size": 600, "number_of_fragments": 1}}
+                        }
+                    }
+                }
+            }
+        }
+        try:
+            resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=chunk_query, timeout=10)
+            resp.raise_for_status()
+            for hit in resp.json().get("hits", {}).get("hits", []):
+                src = hit.get("_source", {})
+                inner_hits = (
+                    hit.get("inner_hits", {}).get("pdf_chunks", {}).get("hits", {}).get("hits", [])
+                )
+                for ch in inner_hits:
+                    ch_src = ch.get("_source", {})
+                    ch_hl = ch.get("highlight", {})
+                    text = (
+                        ch_hl.get("pdf_chunks.text", [""])[0]
+                        if ch_hl.get("pdf_chunks.text")
+                        else ch_src.get("text", "")
+                    )
+                    if text:
+                        chunks.append({
+                            "text": text,
+                            "title": src.get("title", ""),
+                            "source_url": src.get("source_url", "#"),
+                            "resource_id": src.get("resource_id", ""),
+                            "file": ch_src.get("file", ""),
+                            "page": ch_src.get("page"),
+                        })
+        except Exception as e:
+            print(f"[RAG] BM25 chunk retrieval error: {e}")
+
+        # Final fallback: description-based multi_match
+        if not chunks:
+            text_query = {
+                "size": 5,
+                "_source": ["title", "source_url", "resource_id", "description"],
+                "query": {
+                    "multi_match": {
+                        "query": question,
+                        "fields": ["title^3", "description^2", "search_text"],
+                        "type": "best_fields",
+                        "fuzziness": "AUTO"
+                    }
+                }
+            }
+            try:
+                resp2 = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=text_query, timeout=10)
+                resp2.raise_for_status()
+                for hit in resp2.json().get("hits", {}).get("hits", []):
+                    src = hit.get("_source", {})
+                    desc = src.get("description", "")
+                    if desc:
+                        chunks.append({
+                            "text": desc[:800],
+                            "title": src.get("title", ""),
+                            "source_url": src.get("source_url", "#"),
+                            "resource_id": src.get("resource_id", ""),
+                            "file": "",
+                            "page": None,
+                        })
+            except Exception as e:
+                print(f"[RAG] Description fallback error: {e}")
+
+        if chunks:
+            print(f"[RAG] BM25 retrieved {len(chunks)} chunks for: '{question[:60]}'")
+
+    return chunks[:top_k]
+
+
+_VIETNAMESE_CHARS = set("àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ"
+                        "ÀÁÂÃÈÉÊÌÍÒÓÔÕÙÚÝĂĐƠƯẠẢẤẦẨẪẬẮẰẲẴẶẸẺẼẾỀỂỄỆỈỊỌỎỐỒỔỖỘỚỜỞỠỢỤỦỨỪỬỮỰỲỴỶỸ")
+
+
+def _detect_language(text: str) -> str:
+    """Return 'vi' if text contains Vietnamese characters, else 'en'."""
+    for ch in text:
+        if ch in _VIETNAMESE_CHARS:
+            return "vi"
+    return "en"
+
+
+def _build_rag_prompt(question: str, chunks: List[Dict[str, Any]]) -> str:
+    """Build the RAG prompt from question + retrieved context chunks.
+
+    Automatically matches the response language to the question language,
+    and includes page-level citations for each context chunk.
+    """
+    lang = _detect_language(question)
+
+    context_parts = []
+    for i, c in enumerate(chunks, 1):
+        title = c.get("title", "Tài liệu không rõ tên")
+        page = c.get("page")
+        file_name = c.get("file", "")
+        text = c.get("text", "")
+
+        if lang == "vi":
+            cite = f"[Nguồn {i}: {title}"
+            if page:
+                cite += f", trang {page}"
+            if file_name:
+                cite += f" ({file_name})"
+            cite += "]"
+        else:
+            cite = f"[Source {i}: {title}"
+            if page:
+                cite += f", page {page}"
+            if file_name:
+                cite += f" ({file_name})"
+            cite += "]"
+
+        context_parts.append(f"{cite}\n{text}")
+
+    context = "\n\n".join(context_parts)
+
+    if lang == "vi":
+        return (
+            "Bạn là trợ lý học tập thông minh của hệ thống thư viện học liệu mở (OER).\n"
+            "Hãy trả lời câu hỏi CHỈ dựa trên các đoạn tài liệu được cung cấp bên dưới — "
+            "không suy luận thêm thông tin ngoài tài liệu.\n"
+            "Trả lời bằng TIẾNG VIỆT vì câu hỏi được đặt bằng tiếng Việt.\n"
+            "Khi trích dẫn thông tin, ghi rõ nguồn theo dạng [Nguồn X, trang Y].\n"
+            "Nếu tài liệu không đủ để trả lời, hãy nêu rõ và tóm tắt nội dung liên quan nhất.\n\n"
+            f"--- TÀI LIỆU THAM KHẢO ---\n{context}\n--- HẾT TÀI LIỆU ---\n\n"
+            f"Câu hỏi: {question}\n\n"
+            "Trả lời (bằng tiếng Việt, có trích dẫn nguồn):"
+        )
+    else:
+        return (
+            "You are an intelligent learning assistant for an Open Educational Resources (OER) library.\n"
+            "Answer the question ONLY based on the document excerpts provided below — "
+            "do not infer or add information beyond what is in the sources.\n"
+            "Respond in ENGLISH because the question is in English.\n"
+            "When citing information, reference the source as [Source X, page Y].\n"
+            "If the documents are insufficient to answer, say so clearly and summarize the most relevant content.\n\n"
+            f"--- REFERENCE DOCUMENTS ---\n{context}\n--- END OF DOCUMENTS ---\n\n"
+            f"Question: {question}\n\n"
+            "Answer (in English, with source citations):"
+        )
+
+
+def _generate_with_gemini(prompt: str) -> str:
+    """Call Google Gemini REST API to generate an answer."""
+    if not GEMINI_API_KEY:
+        return "Chưa cấu hình GEMINI_API_KEY. Vui lòng thêm biến môi trường GEMINI_API_KEY."
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {
+            "temperature": 0.3,
+            "maxOutputTokens": 1024,
+        }
+    }
+    try:
+        resp = requests.post(url, json=payload, timeout=60)
+        resp.raise_for_status()
+        candidates = resp.json().get("candidates", [])
+        if candidates:
+            return candidates[0]["content"]["parts"][0]["text"].strip()
+        return "Không thể tạo câu trả lời lúc này."
+    except requests.exceptions.Timeout:
+        return "Gemini API phản hồi quá lâu. Vui lòng thử lại sau ít phút."
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else ""
+        if status == 429:
+            return "Đã vượt quá giới hạn API. Vui lòng thử lại sau."
+        print(f"[RAG] Gemini HTTP error {status}: {e}")
+        return "Lỗi khi gọi Gemini API. Vui lòng thử lại sau."
+    except Exception as e:
+        print(f"[RAG] Gemini error: {e}")
+        return "Đã xảy ra lỗi khi gọi Gemini. Vui lòng thử lại sau."
+
+
+def _generate_with_ollama(prompt: str) -> str:
+    """Call local Ollama API to generate an answer."""
+    try:
+        resp = requests.post(
+            f"{OLLAMA_HOST}/api/generate",
+            json={
+                "model": OLLAMA_MODEL,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.3, "num_predict": 1024}
+            },
+            timeout=120
+        )
+        resp.raise_for_status()
+        return resp.json().get("response", "Không thể tạo câu trả lời lúc này.").strip()
+    except requests.exceptions.Timeout:
+        return "Hệ thống AI đang xử lý quá lâu. Vui lòng thử lại sau ít phút."
+    except requests.exceptions.ConnectionError:
+        return "Không thể kết nối đến Ollama. Vui lòng đảm bảo dịch vụ đang chạy."
+    except Exception as e:
+        print(f"[RAG] Ollama error: {e}")
+        return "Đã xảy ra lỗi khi gọi Ollama. Vui lòng thử lại sau."
+
+
+def _generate_with_groq(prompt: str) -> str:
+    """Call Groq API (OpenAI-compatible) to generate an answer."""
+    if not GROQ_API_KEY:
+        return "Chưa cấu hình GROQ_API_KEY. Vui lòng thêm biến môi trường GROQ_API_KEY."
+    url = "https://api.groq.com/openai/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.3,
+        "max_tokens": 1024,
+    }
+    try:
+        resp = requests.post(url, json=payload, headers=headers, timeout=60)
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except requests.exceptions.Timeout:
+        return "Groq API phản hồi quá lâu. Vui lòng thử lại sau ít phút."
+    except requests.exceptions.HTTPError as e:
+        status = e.response.status_code if e.response is not None else ""
+        if status == 429:
+            return "Đã vượt quá giới hạn Groq API. Vui lòng thử lại sau."
+        print(f"[RAG] Groq HTTP error {status}: {e}")
+        return "Lỗi khi gọi Groq API. Vui lòng thử lại sau."
+    except Exception as e:
+        print(f"[RAG] Groq error: {e}")
+        return "Đã xảy ra lỗi khi gọi Groq. Vui lòng thử lại sau."
+
+
+def generate_answer(question: str, chunks: List[Dict[str, Any]]) -> str:
+    """Generate an answer via Gemini (default) or Ollama, using retrieved RAG context."""
+    if not chunks:
+        return (
+            "Xin lỗi, tôi không tìm thấy tài liệu nào liên quan đến câu hỏi của bạn "
+            "trong kho học liệu mở. Hãy thử diễn đạt câu hỏi theo cách khác."
+        )
+    prompt = _build_rag_prompt(question, chunks)
+    provider = LLM_PROVIDER.lower()
+    if provider == "groq":
+        return _generate_with_groq(prompt)
+    if provider == "ollama":
+        return _generate_with_ollama(prompt)
+    return _generate_with_gemini(prompt)
+
+
+@app.post("/api/ask")
+async def ask_question(request: AskRequest):
+    """RAG-based Q&A: retrieve relevant PDF chunks from ES, generate answer via Gemini (or Ollama).
+
+    Set LLM_PROVIDER=gemini (default) or LLM_PROVIDER=ollama.
+
+    Example:
+    POST /api/ask
+    { "question": "Đạo hàm là gì và cách tính đạo hàm hàm số mũ?" }
+    """
+    question = request.question.strip()
+    if not question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    # retrieve_context internally translates to English for BM25 search;
+    # generate_answer receives the ORIGINAL Vietnamese question so LLM answers in Vietnamese.
+    chunks = retrieve_context(question, top_k=request.top_k)
+    answer = generate_answer(question, chunks)
+
+    # Deduplicate sources by resource_id
+    sources: List[Dict[str, Any]] = []
+    seen: set = set()
+    for c in chunks:
+        rid = c.get("resource_id", "") or c.get("source_url", "")
+        if rid and rid not in seen:
+            seen.add(rid)
+            snippet = c["text"]
+            sources.append({
+                "title": c["title"],
+                "url": c["source_url"],
+                "file": c.get("file", ""),
+                "page": c.get("page"),
+                "snippet": snippet[:250] + "..." if len(snippet) > 250 else snippet,
+            })
+
+    return {
+        "question": question,
+        "answer": answer,
+        "sources": sources,
+        "context_count": len(chunks),
+    }
+
+
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint for monitoring."""
@@ -811,13 +1114,9 @@ async def health_check():
     except:
         pass
     
-    user_data_ok = get_user_data() is not None and not get_user_data().empty
-    
     return {
         "status": "healthy" if es_ok else "degraded",
         "elasticsearch": "connected" if es_ok else "disconnected",
-        "user_data": "loaded" if user_data_ok else "not_loaded",
-        "user_records": len(get_user_data()) if user_data_ok else 0
     }
 
 

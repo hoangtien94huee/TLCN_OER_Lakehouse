@@ -96,6 +96,10 @@ class OERElasticsearchIndexer:
             verify_certs=self.es_host.startswith("https"),
         )
 
+        # Embedding dims (must match the model used in Colab/Kaggle)
+        # distiluse-base-multilingual-cased-v2 = 512d
+        self.embed_dims = int(os.getenv("EMBED_DIMS", "512"))
+
         # Cấu hình PDF indexing (có index nội dung PDF hay không)
         self.index_pdf_content = os.getenv("ELASTICSEARCH_INDEX_PDF_CONTENT", "1").lower() in {
             "1",
@@ -232,13 +236,31 @@ class OERElasticsearchIndexer:
 
         # Download Bronze JSON file từ MinIO
         response = None
+        payload = []
         try:
             response = self.minio_client.get_object(bucket, object_name)
             raw_bytes = response.read()
             payload = json.loads(raw_bytes.decode("utf-8"))
         except Exception as exc:
             print(f"[Warning] Unable to read bronze file {bronze_path}: {exc}")
-            payload = []
+            # ── Fallback: scan directory for latest JSON of same source ──
+            # Handles stale Gold parquet that references a deleted Bronze file.
+            dir_prefix = "/".join(object_name.split("/")[:-1]) + "/"
+            try:
+                siblings = sorted(
+                    [o.object_name for o in self.minio_client.list_objects(bucket, prefix=dir_prefix, recursive=False)
+                     if o.object_name.endswith(".json")]
+                )
+                if siblings:
+                    fallback = siblings[-1]  # Most recent by name (timestamp-sorted)
+                    if fallback != object_name:
+                        print(f"[Info] Falling back to Bronze file: {fallback}")
+                        fb_resp = self.minio_client.get_object(bucket, fallback)
+                        raw_bytes = fb_resp.read()
+                        fb_resp.close()
+                        payload = json.loads(raw_bytes.decode("utf-8"))
+            except Exception as fb_exc:
+                print(f"[Warning] Fallback Bronze scan also failed: {fb_exc}")
         finally:
             if response is not None:
                 try:
@@ -259,6 +281,12 @@ class OERElasticsearchIndexer:
                     value = record.get(key)
                     if value:
                         identifiers.append(str(value))
+                # Also index by URL slug (e.g. MIT OCW course slug from URL)
+                url_val = record.get("url", "")
+                if url_val:
+                    slug_m = re.search(r'/courses/([^/?#]+)', str(url_val))
+                    if slug_m:
+                        identifiers.append(slug_m.group(1))
                 if not identifiers:
                     continue
                 for identifier in identifiers:
@@ -274,7 +302,20 @@ class OERElasticsearchIndexer:
         records = self._load_bronze_records(bronze_path)
         if not records:
             return None
+        # Direct lookup
         rec = records.get(resource_id) or records.get(str(resource_id).strip())
+        if rec:
+            return rec
+        # Strip known source system prefixes from Gold resource_id before retry
+        # Gold format: "mit_ocw_{slug}", "openstax_{hash}", "open textbook library_{hash}"
+        _SOURCE_PREFIXES = ("mit_ocw_", "openstax_", "open textbook library_", "otl_")
+        bare_id = str(resource_id)
+        for pfx in _SOURCE_PREFIXES:
+            if bare_id.lower().startswith(pfx):
+                bare_id = bare_id[len(pfx):]
+                break
+        if bare_id != str(resource_id):
+            rec = records.get(bare_id)
         return rec
 
     def _bundle_from_minio(
@@ -289,47 +330,68 @@ class OERElasticsearchIndexer:
         system = str(source_system).lower()
         pdf_entries: List[Tuple[str, str, str]] = []
 
-        if system in {"mit_ocw", "mit ocw"}:
-            course_id = None
-            # Try to get course_id from bronze record first
-            if record:
-                course_id = record.get("course_id") or record.get("course_number")
-                if not course_id and record.get("url"):
-                    # Extract clean slug from URL
-                    # e.g. https://ocw.mit.edu/courses/6-006-intro-spring-2020/ → 6-006-intro-spring-2020
-                    url_path = record["url"].rstrip("/")
-                    m = re.search(r'/courses/([^/]+)', url_path)
-                    course_id = m.group(1) if m else url_path.split("/")[-1]
-            if not course_id:
+        # ── Primary: use exact pdf_paths recorded by the scraper at upload time ──
+        # Faster (no list_objects call) and more reliable (no URL→slug parsing).
+        # Falls back to prefix scan for old records that pre-date pdf_paths field.
+        known_paths: List[str] = []
+        if record:
+            # pdf_paths (list) — used by MIT OCW, OpenStax scrapers
+            raw = record.get("pdf_paths")
+            if isinstance(raw, list) and raw:
+                known_paths = [p for p in raw if p]
+            # pdf_path (singular string / s3a URI) — used by OTL scraper
+            if not known_paths:
+                singular = record.get("pdf_path")
+                if singular and isinstance(singular, str):
+                    known_paths = [singular]
+
+        if known_paths:
+            pdf_entries = self._collect_pdf_entries_from_paths(known_paths)
+            # If the stored paths yielded nothing (upload failures, moved files)
+            # fall through to prefix scan below so we still have a chance.
+
+        # ── Fallback: prefix scan (backward-compat for pre-pdf_paths records) ──
+        if not pdf_entries:
+            if system in {"mit_ocw", "mit ocw"}:
+                course_id = None
+                if record:
+                    course_id = record.get("course_id") or record.get("course_number")
+                    if not course_id and record.get("url"):
+                        url_path = record["url"].rstrip("/")
+                        m = re.search(r'/courses/([^/]+)', url_path)
+                        course_id = m.group(1) if m else url_path.split("/")[-1]
+                # Derive course slug directly from Gold resource_id (format: "mit_ocw_{slug}")
+                # This handles records whose Bronze JSON no longer exists.
+                if not course_id and resource_id:
+                    for pfx in ("mit_ocw_", "mit ocw_"):
+                        if str(resource_id).lower().startswith(pfx):
+                            course_id = resource_id[len(pfx):]
+                            break
+                if not course_id:
+                    return None
+                prefix = f"bronze/mit_ocw/pdfs/{course_id}/"
+                pdf_entries = self._collect_pdf_entries(prefix)
+            elif system in {"openstax", "open stax"}:
+                book_slug = None
+                if record:
+                    url = record.get("url", "")
+                    m = re.search(r'/books/([^/]+)', url)
+                    if m:
+                        book_slug = m.group(1)
+                if not book_slug:
+                    book_slug = resource_id
+                prefix = f"bronze/openstax/pdfs/{book_slug}/"
+                pdf_entries = self._collect_pdf_entries(prefix)
+            elif system in {"otl", "open textbook library"}:
+                normalized_id = resource_id.strip()
+                if normalized_id.startswith("open textbook library_"):
+                    normalized_id = normalized_id.replace("open textbook library_", "")
+                elif normalized_id.startswith("otl_"):
+                    normalized_id = normalized_id.replace("otl_", "")
+                prefix = f"bronze/otl/otl-pdfs/{normalized_id}"
+                pdf_entries = self._collect_pdf_entries(prefix)
+            else:
                 return None
-            prefix = f"bronze/mit_ocw/pdfs/{course_id}/"
-            pdf_entries = self._collect_pdf_entries(prefix)
-        elif system in {"openstax", "open stax"}:
-            # OpenStax: bronze/openstax/pdfs/{book-slug}/{Title}.pdf
-            book_slug = None
-            if record:
-                url = record.get("url", "")
-                m = re.search(r'/books/([^/]+)', url)
-                if m:
-                    book_slug = m.group(1)
-            if not book_slug:
-                # Fall back to resource_id prefix scan
-                book_slug = resource_id
-            prefix = f"bronze/openstax/pdfs/{book_slug}/"
-            pdf_entries = self._collect_pdf_entries(prefix)
-        elif system in {"otl", "open textbook library"}:
-            normalized_id = resource_id.strip()
-            # Remove "open textbook library_" or "otl_" prefix if present
-            if normalized_id.startswith("open textbook library_"):
-                normalized_id = normalized_id.replace("open textbook library_", "")
-            elif normalized_id.startswith("otl_"):
-                normalized_id = normalized_id.replace("otl_", "")
-            
-            # List all PDFs in OTL folder and find ones starting with the hash
-            prefix = f"bronze/otl/otl-pdfs/{normalized_id}"
-            pdf_entries = self._collect_pdf_entries(prefix)
-        else:
-            return None
 
         if not pdf_entries:
             return None
@@ -349,13 +411,17 @@ class OERElasticsearchIndexer:
                 if page_text:  # Only add non-empty pages
                     # Store full text for search, but truncate for indexing
                     truncated_text = page_text[:self.max_pdf_page_chars]
-                    
-                    pdf_chunks.append({
-                        "text": truncated_text,  # Truncate to limit
+
+                    chunk: Dict[str, Any] = {
+                        "text": truncated_text,
                         "page": page_num,
                         "file": file_title,
-                        "file_uri": file_uri  # Keep URI for generating links later
-                    })
+                        "file_uri": file_uri
+                    }
+                    # NOTE: chunk embedding is computed offline (Colab/Kaggle)
+                    # and imported separately via import_embeddings.py
+
+                    pdf_chunks.append(chunk)
                     # Also build pdf_files with page info for UI display
                     pdf_files_with_pages.append({
                         "path": file_uri,
@@ -394,6 +460,38 @@ class OERElasticsearchIndexer:
             file_title = PurePosixPath(object_name).name
             file_uri = f"s3a://{self.bucket}/{object_name}"
             # Keep first page text as summary (for backward compatibility in titles list)
+            first_text = pages[0][1] if pages else ""
+            entries.append((file_title, file_uri, first_text, pages))
+            if len(entries) >= self.max_pdf_texts:
+                break
+        return entries
+
+    def _collect_pdf_entries_from_paths(
+        self, pdf_paths: List[str]
+    ) -> List[Tuple[str, str, str, List[Tuple[int, str]]]]:
+        """Build PDF entries directly from a list of known MinIO object paths.
+
+        More reliable and faster than prefix scan:
+        - No list_objects network call
+        - Exact paths recorded by the scraper at upload time
+        """
+        entries: List[Tuple[str, str, str, List[Tuple[int, str]]]] = []
+        for raw_path in pdf_paths:
+            if not raw_path:
+                continue
+            # Normalise: strip leading bucket prefix if accidentally included
+            # e.g.  "s3a://oer-lakehouse/bronze/..." or just "bronze/..."
+            object_name = raw_path
+            for scheme in (f"s3a://{self.bucket}/", f"s3://{self.bucket}/"):
+                if object_name.startswith(scheme):
+                    object_name = object_name[len(scheme):]
+                    break
+
+            pages = self._get_pdf_pages(object_name)
+            if not pages:
+                continue
+            file_title = PurePosixPath(object_name).name
+            file_uri = f"s3a://{self.bucket}/{object_name}"
             first_text = pages[0][1] if pages else ""
             entries.append((file_title, file_uri, first_text, pages))
             if len(entries) >= self.max_pdf_texts:
@@ -896,8 +994,22 @@ class OERElasticsearchIndexer:
                                 "text": {"type": "text", "analyzer": "english"},
                                 "page": {"type": "integer"},
                                 "file": {"type": "keyword"},
-                                "file_uri": {"type": "keyword"}
+                                "file_uri": {"type": "keyword"},
+                                # Chunk-level embedding (computed offline via Colab/Kaggle)
+                                "embedding": {
+                                    "type": "dense_vector",
+                                    "dims": self.embed_dims,
+                                    "index": False  # Not indexed — re-ranked client-side
+                                }
                             }
+                        },
+                        # Doc-level embedding (computed offline via Colab/Kaggle)
+                        # Used for KNN retrieval — handles VI/EN cross-lingual queries
+                        "embedding": {
+                            "type": "dense_vector",
+                            "dims": self.embed_dims,
+                            "index": True,
+                            "similarity": "cosine"
                         }
                     }
                 }
@@ -954,7 +1066,10 @@ class OERElasticsearchIndexer:
                 pdf_error_count += 1
                 if pdf_error_count <= 3:
                     print(f"[Warning] PDF augment error for {doc.get('resource_id')}: {exc}")
-            
+
+            # NOTE: doc-level embedding is computed offline (Colab/Kaggle)
+            # and imported via import_embeddings.py
+
             doc_id = doc.get("resource_key") or doc.get("resource_id")
             yield {"_index": self.index_name, "_id": doc_id, "_source": doc}
         
@@ -996,8 +1111,81 @@ class OERElasticsearchIndexer:
         
         # Bước 5: Bulk index documents vào Elasticsearch
         self._bulk_index(docs)
+
+        # Bước 6: Export texts for offline embedding (Colab/Kaggle)
+        export_path = os.getenv(
+            "ELASTICSEARCH_EXPORT_PATH",
+            "/opt/airflow/exports/oer_texts_for_embedding.jsonl",
+        )
+        self._export_texts_for_embedding(export_path)
         
         print("Gold -> Elasticsearch sync complete")
+
+    def _export_texts_for_embedding(self, output_path: str) -> None:
+        """Export lightweight JSONL with texts to embed on Colab/Kaggle.
+
+        Each line: {"_id": "...", "doc_text": "...", "chunks": [{"idx":0, "text":"..."}]}
+
+        This file is ~10-50x smaller than full docs because it only contains
+        the text fields needed for embedding (no PDF binary, no metadata).
+        Upload this to Colab/Kaggle → run embedding notebook → download result.
+        """
+        print(f"[Export] Writing texts for embedding → {output_path}")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+
+        # Read all indexed docs from ES (just the text fields we need)
+        scroll_body = {
+            "size": 500,
+            "_source": ["title", "description", "pdf_chunks.text"],
+            "query": {"match_all": {}}
+        }
+
+        count = 0
+        with open(output_path, "w", encoding="utf-8") as fh:
+            resp = self.es.search(index=self.index_name, body=scroll_body, scroll="5m")
+            scroll_id = resp.get("_scroll_id")
+
+            while True:
+                hits = resp.get("hits", {}).get("hits", [])
+                if not hits:
+                    break
+
+                for hit in hits:
+                    src = hit.get("_source", {})
+                    doc_id = hit["_id"]
+
+                    # Doc-level text: title + description (for doc embedding)
+                    title = src.get("title", "")
+                    desc = (src.get("description") or "")[:800]
+                    doc_text = f"{title}. {desc}".strip()
+
+                    # Chunk texts (for chunk embeddings)
+                    chunks = []
+                    for i, ch in enumerate(src.get("pdf_chunks") or []):
+                        text = (ch.get("text") or "")[:2000]
+                        if text:
+                            chunks.append({"idx": i, "text": text})
+
+                    record = {
+                        "_id": doc_id,
+                        "doc_text": doc_text,
+                        "chunks": chunks,
+                    }
+                    fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    count += 1
+
+                resp = self.es.scroll(scroll_id=scroll_id, scroll="5m")
+
+            # Clean up scroll
+            try:
+                self.es.clear_scroll(scroll_id=scroll_id)
+            except Exception:
+                pass
+
+        size_mb = os.path.getsize(output_path) / (1024 * 1024)
+        print(f"[Export] Done — {count} records, {size_mb:.1f} MB → {output_path}")
+        print(f"[Export] Upload this file to Colab/Kaggle and run the embedding notebook.")
+        print(f"[Export] Then run: python import_embeddings.py <enriched_file.jsonl>")
 
 
 def main() -> None:

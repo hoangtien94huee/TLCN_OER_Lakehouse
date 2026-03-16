@@ -228,6 +228,14 @@ def verify_elasticsearch_index(**context):
     properties = mapping[index_name]['mappings'].get('properties', {})
     print(f"  Fields: {len(properties)}")
     
+    # Verify embedding field (512d dense_vector)
+    emb_field = properties.get('embedding', {})
+    if emb_field.get('type') == 'dense_vector':
+        dims = emb_field.get('dims', 0)
+        print(f"  Embedding field: dense_vector dims={dims} ✓")
+    else:
+        print(f"  WARNING: 'embedding' dense_vector field missing from mapping!")
+    
     # Sample search to verify
     result = es.search(
         index=index_name,
@@ -274,19 +282,34 @@ def verify_elasticsearch_index(**context):
     pdf_docs = pdf_query['hits']['total']['value']
     print(f"  Documents with PDF content: {pdf_docs:,}")
     
+    # Count docs with embedding vectors
+    embed_query = es.search(
+        index=index_name,
+        body={
+            "size": 0,
+            "query": {
+                "exists": {"field": "embedding"}
+            }
+        }
+    )
+    embed_docs = embed_query['hits']['total']['value']
+    print(f"  Documents with embedding vectors: {embed_docs:,}")
+    
     # Summary
     print()
     print("=" * 50)
     print(f" Elasticsearch Index Verification PASSED")
     print(f"  Total: {doc_count:,} documents indexed")
     print(f"  PDF Content: {pdf_docs:,} documents ({pdf_docs*100/doc_count:.1f}%)")
+    print(f"  Embedding vectors: {embed_docs:,} documents ({embed_docs*100/doc_count:.1f}%)")
     print("=" * 50)
     
     return {
         'index': index_name,
         'doc_count': doc_count,
         'size_mb': round(size_mb, 2),
-        'pdf_docs': pdf_docs
+        'pdf_docs': pdf_docs,
+        'embed_docs': embed_docs
     }
 
 
@@ -325,6 +348,7 @@ def generate_sync_report(**context):
         print(f"  Documents: {index_stats.get('doc_count', 0):,}")
         print(f"  Size: {index_stats.get('size_mb', 0)} MB")
         print(f"  PDF Documents: {index_stats.get('pdf_docs', 0):,}")
+        print(f"  Embedding Vectors: {index_stats.get('embed_docs', 0):,}")
     print("=" * 80)
     
     return report

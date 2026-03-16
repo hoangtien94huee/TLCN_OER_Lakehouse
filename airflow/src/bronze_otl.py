@@ -55,14 +55,19 @@ class OTLScraper:
     ]
     
     def __init__(self, delay: float = 0.5, max_documents: int = None,
-                 parallel: bool = True, max_workers: int = 4,
-                 output_dir: str = "/opt/airflow/scraped_data/otl"):
+                 parallel: bool = True, max_workers: int = 2,
+                 output_dir: str = "/opt/airflow/scraped_data/otl",
+                 download_pdfs: bool = None):
         self.source = "otl"
         self.delay = delay
         self.max_documents = max_documents or int(os.getenv('MAX_DOCUMENTS', '999999'))
         self.parallel = parallel
         self.max_workers = max_workers
         self.output_dir = output_dir
+        # Read from env if not explicitly passed
+        if download_pdfs is None:
+            download_pdfs = os.getenv('OTL_DOWNLOAD_PDFS', '1').lower() in ('1', 'true', 'yes')
+        self.download_pdfs = download_pdfs
         self.driver = None
         
         # HTTP Session
@@ -111,19 +116,31 @@ class OTLScraper:
                 self.minio_enable = False
     
     def _setup_selenium(self) -> Optional[webdriver.Chrome]:
-        """Setup Selenium WebDriver"""
+        """Setup Selenium WebDriver with minimal child-process footprint."""
         if not SELENIUM_AVAILABLE:
             return None
-        
+
         try:
             options = Options()
-            options.add_argument("--headless")
+            options.add_argument("--headless=new")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-gpu")
-            options.add_argument("--window-size=1920,1080")
+            options.add_argument("--window-size=1280,800")
             options.add_argument("--blink-settings=imagesEnabled=false")
-            
+            # --- reduce child-process spawning ---
+            options.add_argument("--no-zygote")                       # skip zygote helper
+            options.add_argument("--disable-extensions")
+            options.add_argument("--disable-background-networking")
+            options.add_argument("--disable-default-apps")
+            options.add_argument("--disable-background-timer-throttling")
+            options.add_argument("--disable-renderer-backgrounding")
+            options.add_argument("--disable-backgrounding-occluded-windows")
+            options.add_argument("--disable-client-side-phishing-detection")
+            options.add_argument("--disable-sync")
+            options.add_argument("--metrics-recording-only")
+            options.add_argument("--mute-audio")
+
             for path in ['/usr/local/bin/chromedriver', '/usr/bin/chromedriver', 'chromedriver']:
                 try:
                     if os.path.exists(path) or path == 'chromedriver':
@@ -131,12 +148,37 @@ class OTLScraper:
                         return webdriver.Chrome(service=service, options=options)
                 except Exception:
                     continue
-            
+
             return webdriver.Chrome(options=options)
-            
+
         except Exception as e:
             print(f"[Selenium] Setup failed: {e}")
             return None
+
+    def _quit_driver(self, driver) -> None:
+        """Quit WebDriver and forcefully reap any remaining Chrome child processes."""
+        if driver is None:
+            return
+        # Grab chromedriver PID before quit so we can SIGKILL its process group
+        service_pid: Optional[int] = None
+        try:
+            service_pid = driver.service.process.pid if driver.service and driver.service.process else None
+        except Exception:
+            pass
+
+        try:
+            driver.quit()
+        except Exception:
+            pass
+
+        # Give Chrome 1 s to exit cleanly, then force-kill the whole process group
+        if service_pid:
+            import signal
+            time.sleep(1)
+            try:
+                os.killpg(os.getpgid(service_pid), signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                pass  # already dead — that's fine
     
     # =========================================================================
     # SUBJECTS
@@ -172,16 +214,15 @@ class OTLScraper:
                     subjects.append({'name': name, 'url': full_url})
                     seen_urls.add(full_url)
             
-            driver.quit()
-            
+            self._quit_driver(driver)
+
             if subjects:
                 print(f"[OTL] Found {len(subjects)} subjects dynamically")
                 return subjects
-                
+
         except Exception as e:
             print(f"[OTL] Error fetching subjects: {e}")
-            if driver:
-                driver.quit()
+            self._quit_driver(driver)
         
         return self._get_subjects_fallback()
     
@@ -303,11 +344,8 @@ class OTLScraper:
         except Exception as e:
             print(f"[{subject['name']}] Error: {e}")
         finally:
-            try:
-                driver.quit()
-            except:
-                pass
-        
+            self._quit_driver(driver)
+
         return documents
     
     # =========================================================================
@@ -378,16 +416,30 @@ class OTLScraper:
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
             title = self._extract_title(soup)
+            book_id = self._create_document_id(url)
+            
+            # Extract license and PDF format URLs from the book page
+            page_info = self._extract_license_and_formats(soup)
+            
+            # Download PDF if enabled
+            pdf_result = {'downloaded': False, 'paths': []}
+            if self.download_pdfs and page_info['pdf_format_urls']:
+                pdf_result = self._download_book_pdf(book_id, title, page_info['pdf_format_urls'])
             
             return {
-                'id': self._create_document_id(url),
+                'id': book_id,
                 'title': title,
                 'description': self._extract_description(soup),
                 'authors': self._extract_authors(soup),
                 'subject': [subject_name],
                 'url': url,
-                'source': 'Open Textbook Library',
-                'scraped_at': datetime.now().isoformat()
+                'source': self.source,   # "otl" — consistent with mit_ocw / openstax
+                'language': 'en',
+                'license': page_info['license_name'],
+                'license_url': page_info['license_url'],
+                'scraped_at': datetime.now().isoformat(),
+                'pdf_count': len(pdf_result['paths']),
+                'pdf_paths': pdf_result['paths']
             }
             
         except Exception as e:
@@ -438,7 +490,236 @@ class OTLScraper:
                     authors.append(val)
         
         return authors[:10]
-    
+
+    # =========================================================================
+    # LICENSE & PDF HELPERS
+    # =========================================================================
+
+    def _cc_url_to_name(self, url: str) -> str:
+        """Convert a Creative Commons URL to a short human-readable name.
+        e.g. https://creativecommons.org/licenses/by-nc-sa/4.0/ -> 'CC BY-NC-SA 4.0'
+        """
+        if not url:
+            return 'Creative Commons'
+        if 'publicdomain/zero' in url:
+            return 'CC0 1.0'
+        m = re.search(r'/licenses/([a-z-]+)/([\d.]+)', url)
+        if m:
+            return f"CC {m.group(1).upper()} {m.group(2)}"
+        m = re.search(r'/licenses/([a-z-]+)', url)
+        if m:
+            return f"CC {m.group(1).upper()}"
+        return 'Creative Commons'
+
+    def _sanitize_filename(self, name: str) -> str:
+        """Create a filesystem-safe filename, max 100 chars."""
+        safe = re.sub(r'[^\w\s-]', '', name)
+        safe = re.sub(r'\s+', '_', safe.strip())
+        return safe[:100] or 'document'
+
+    def _extract_license_and_formats(self, soup: BeautifulSoup) -> Dict[str, Any]:
+        """Extract license info and PDF format links from an OTL book page."""
+        result: Dict[str, Any] = {
+            'license_name': None,
+            'license_url': None,
+            'pdf_format_urls': []
+        }
+
+        # --- License: find creativecommons.org or gnu.org FDL link ---
+        for a in soup.find_all('a', href=True):
+            href = a.get('href', '')
+            # Normalise to full URL
+            if href.startswith('//'):
+                full = 'https:' + href
+            elif href.startswith('http'):
+                full = href
+            else:
+                full = None
+
+            if full and 'creativecommons.org/licenses/' in full:
+                result['license_url'] = full
+                result['license_name'] = self._cc_url_to_name(full)
+                break
+            if full and 'creativecommons.org/publicdomain/' in full:
+                result['license_url'] = full
+                result['license_name'] = self._cc_url_to_name(full)
+                break
+            if full and 'gnu.org/licenses/fdl' in full:
+                result['license_url'] = full
+                result['license_name'] = 'GNU FDL'
+                break
+
+        # Fallback: CC badge image alt text (e.g. alt="CC BY-NC-SA")
+        if not result['license_name']:
+            for img in soup.find_all('img', alt=True):
+                alt = img.get('alt', '').strip()
+                if alt.upper().startswith('CC '):
+                    parent = img.find_parent('a', href=True)
+                    if parent:
+                        href = parent.get('href', '')
+                        if 'creativecommons.org' in href:
+                            full = href if href.startswith('http') else 'https:' + href
+                            result['license_url'] = full
+                            result['license_name'] = self._cc_url_to_name(full)
+                    else:
+                        result['license_name'] = alt
+                    break
+
+        # --- PDF formats: links with text == 'PDF' pointing to /formats/ ---
+        for a in soup.find_all('a', href=True):
+            href = a.get('href', '')
+            text = a.get_text(strip=True).upper()
+            if '/opentextbooks/formats/' in href and text == 'PDF':
+                full_url = urljoin(self.BASE_URL, href)
+                if full_url not in result['pdf_format_urls']:
+                    result['pdf_format_urls'].append(full_url)
+
+        return result
+
+    def _resolve_format_url(self, format_url: str) -> Optional[str]:
+        """Follow the OTL format redirect and return an actual downloadable PDF URL.
+
+        OTL /formats/{id} links redirect to external sources which may be:
+        - A direct .pdf URL
+        - An HTML page from which we must extract a .pdf link
+        """
+        try:
+            # HEAD first (cheap), fall back to streaming GET if HEAD fails
+            final_url = None
+            content_type = ''
+            try:
+                resp = self.session.head(format_url, allow_redirects=True, timeout=15)
+                final_url = resp.url
+                content_type = resp.headers.get('Content-Type', '')
+            except Exception:
+                pass
+
+            if not final_url:
+                resp = self.session.get(format_url, allow_redirects=True,
+                                        timeout=20, stream=True)
+                final_url = resp.url
+                content_type = resp.headers.get('Content-Type', '')
+                resp.close()
+
+            url_lower = final_url.lower()
+
+            # Direct PDF indicators
+            if url_lower.endswith('.pdf'):
+                return final_url
+            if 'application/pdf' in content_type:
+                return final_url
+            if 'type=pdf' in url_lower:
+                return final_url
+
+            # HTML landing page — try to scrape a .pdf link from it
+            resp2 = self.session.get(final_url, timeout=20)
+            if resp2.status_code == 200 and 'text/html' in resp2.headers.get('Content-Type', ''):
+                page_soup = BeautifulSoup(resp2.text, 'html.parser')
+                for a in page_soup.find_all('a', href=True):
+                    link = a['href']
+                    if link.lower().endswith('.pdf'):
+                        return urljoin(final_url, link)
+
+            return None
+
+        except Exception as e:
+            print(f"  [OTL PDF] Could not resolve {format_url}: {e}")
+            return None
+
+    def _fetch_pdf(self, url: str, max_retries: int = 3) -> Optional[bytes]:
+        """Download PDF bytes with retry logic (max 200 MB)."""
+        MAX_SIZE = 200 * 1024 * 1024  # 200 MB
+
+        for attempt in range(max_retries):
+            try:
+                resp = self.session.get(url, stream=True, timeout=30)
+                resp.raise_for_status()
+
+                # Reject accidental HTML responses
+                ct = resp.headers.get('Content-Type', '')
+                if 'text/html' in ct and '.pdf' not in url.lower():
+                    return None
+
+                size = 0
+                chunks = []
+                for chunk in resp.iter_content(chunk_size=65536):
+                    if chunk:
+                        size += len(chunk)
+                        if size > MAX_SIZE:
+                            print(f"  [OTL PDF] File exceeds {MAX_SIZE // 1024 // 1024} MB, skipping")
+                            return None
+                        chunks.append(chunk)
+
+                data = b''.join(chunks)
+                if len(data) < 1024:   # too small to be a real PDF
+                    return None
+                return data
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"  [OTL PDF] Download failed ({url[:60]}...): {e}")
+
+        return None
+
+    def _download_book_pdf(self, book_id: str, book_title: str,
+                           format_urls: List[str]) -> Dict[str, Any]:
+        """Resolve, download, and upload the first available PDF for an OTL book.
+
+        MinIO path: bronze/otl/otl-pdfs/{book_id}/{safe_title}.pdf
+        (Compatible with elasticsearch_sync.py which looks up bronze/otl/otl-pdfs/{normalized_id})
+        """
+        import io
+        result: Dict[str, Any] = {'downloaded': False, 'paths': []}
+
+        if not self.minio_client:
+            return result
+
+        safe_title = self._sanitize_filename(book_title)
+        minio_path = f"bronze/otl/otl-pdfs/{book_id}/{safe_title}.pdf"
+
+        # Deduplication — skip if already uploaded
+        try:
+            self.minio_client.stat_object(self.minio_bucket, minio_path)
+            print(f"  [OTL PDF] Already exists, skipping: {minio_path}")
+            result['paths'].append(minio_path)
+            result['downloaded'] = True
+            return result
+        except Exception:
+            pass  # Not found — proceed
+
+        # Try each format URL in order until one succeeds
+        for format_url in format_urls:
+            actual_url = self._resolve_format_url(format_url)
+            if not actual_url:
+                continue
+
+            print(f"  [OTL PDF] Downloading: {actual_url[:80]}...")
+            pdf_bytes = self._fetch_pdf(actual_url)
+            if not pdf_bytes:
+                continue
+
+            try:
+                self.minio_client.put_object(
+                    self.minio_bucket,
+                    minio_path,
+                    io.BytesIO(pdf_bytes),
+                    length=len(pdf_bytes),
+                    content_type='application/pdf'
+                )
+                print(f"  [OTL PDF] ✓ Uploaded: {minio_path}")
+                result['paths'].append(minio_path)
+                result['downloaded'] = True
+                return result
+            except Exception as e:
+                print(f"  [OTL PDF] MinIO upload error: {e}")
+
+        if not result['downloaded']:
+            print(f"  [OTL PDF] No downloadable PDF found for '{book_title}'")
+
+        return result
+
     # =========================================================================
     # STORAGE & DEDUPLICATION
     # =========================================================================

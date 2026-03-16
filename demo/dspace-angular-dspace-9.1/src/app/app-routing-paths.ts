@@ -61,6 +61,12 @@ export function getHomePageRoute() {
   return `/${HOME_PAGE_PATH}`;
 }
 
+export const ASK_PAGE_PATH = 'ask';
+
+export function getAskPageRoute() {
+  return `/${ASK_PAGE_PATH}`;
+}
+
 export const ADMIN_MODULE_PATH = 'admin';
 
 export function getAdminModuleRoute() {

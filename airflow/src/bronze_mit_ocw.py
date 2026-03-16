@@ -98,7 +98,7 @@ class MITOCWScraper:
         """Setup MinIO client"""
         self.minio_client = None
         self.minio_bucket = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
-        self.minio_enable = os.getenv('MINIO_ENABLE', '0').lower() in ('1', 'true', 'yes')
+        self.minio_enable = os.getenv('MINIO_ENABLE', '1').lower() in ('1', 'true', 'yes')
         
         if self.minio_enable and MINIO_AVAILABLE:
             try:
@@ -160,38 +160,49 @@ class MITOCWScraper:
         print("[MIT OCW] Starting scraper...")
         
         try:
-            # Get course URLs from sitemap
-            course_urls = list(self._get_course_urls())
-            print(f"[MIT OCW] Found {len(course_urls)} courses")
-            
+            # Get course URLs from sitemap — sort for consistent ordering across runs
+            all_course_urls = sorted(self._get_course_urls())
+            print(f"[MIT OCW] Found {len(all_course_urls)} total courses")
+
+            # --- Filter out already-scraped courses BEFORE applying batch limit ---
+            # This ensures max_documents always means "N NEW courses", not "N total"
+            pending_urls = [
+                url for url in all_course_urls
+                if self._create_document_id(url) not in self.existing_course_ids
+            ]
+            already_done = len(all_course_urls) - len(pending_urls)
+            print(f"[MIT OCW] Already scraped: {already_done} | Pending: {len(pending_urls)}")
+
             if self.max_documents:
-                course_urls = course_urls[:self.max_documents]
-                print(f"[MIT OCW] Limited to {len(course_urls)} courses")
-            
+                pending_urls = pending_urls[:self.max_documents]
+                print(f"[MIT OCW] This batch: {len(pending_urls)} courses")
+
+            if not pending_urls:
+                print("[MIT OCW] Nothing new to scrape.")
+                return []
+
             # Scrape courses
             documents = []
-            skipped = 0
-            
-            for i, url in enumerate(course_urls, 1):
-                course_hash = self._create_document_id(url)
-                
-                # Skip if already scraped
-                if course_hash in self.existing_course_ids:
-                    skipped += 1
-                    continue
-                
-                print(f"[{i}/{len(course_urls)}] Scraping: {url}")
+
+            for i, url in enumerate(pending_urls, 1):
+                print(f"[{i}/{len(pending_urls)}] Scraping: {url}")
                 
                 course_data = self._scrape_course(url)
                 if course_data:
                     documents.append(course_data)
-                    self.existing_course_ids.add(course_data['id'])
                     pdf_count = course_data.get('pdf_count', 0)
+                    # Mark as done only if: PDFs found, OR we're not downloading PDFs,
+                    # OR MinIO is unavailable (can't retry anyway).
+                    # Courses with 0 PDFs when download was attempted are kept retryable
+                    # so future runs can retry PDF collection if the page was mis-parsed.
+                    if pdf_count > 0 or not self.download_pdfs or not self.minio_client:
+                        self.existing_course_ids.add(course_data['id'])
                     print(f"  ✓ {course_data['title'][:50]}... | PDFs: {pdf_count}")
                 
                 time.sleep(self.delay)
             
-            print(f"\n[MIT OCW] Completed: {len(documents)} new, {skipped} skipped")
+            print(f"\n[MIT OCW] Completed: {len(documents)} new | {already_done} already done | "
+                  f"{len(pending_urls) - len(documents)} failed")
             return documents
             
         except Exception as e:
@@ -313,12 +324,20 @@ class MITOCWScraper:
         for attempt in range(max_retries):
             try:
                 self.driver.get(url)
-                WebDriverWait(self.driver, 10).until(
+                # Wait for body first (always safe), then try content selector
+                WebDriverWait(self.driver, 15).until(
                     EC.presence_of_element_located((By.TAG_NAME, "body"))
                 )
-                time.sleep(1)
+                # Extra wait for Next.js hydration (MIT OCW uses React/Next.js)
+                try:
+                    WebDriverWait(self.driver, 8).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "main, article, [class*='course']"))
+                    )
+                except Exception:
+                    pass  # Content selector optional — body is enough
+                time.sleep(1.5)
                 return BeautifulSoup(self.driver.page_source, 'html.parser')
-                
+
             except Exception as e:
                 if attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
@@ -388,24 +407,33 @@ class MITOCWScraper:
 
                 for a_tag in soup.find_all('a', href=True):
                     href = a_tag['href']
+
+                    # Normalize: strip trailing slash for consistent comparison
+                    href_norm = href.rstrip('/')
+
                     # Keep only direct .pdf links or /resources/ resource pages
-                    is_pdf_direct = href.lower().endswith('.pdf')
-                    is_resource_page = '/resources/' in href and not href.endswith('/')
+                    is_pdf_direct = href_norm.lower().endswith('.pdf')
+                    is_resource_page = '/resources/' in href_norm and '/pages/' not in href_norm
 
                     if not (is_pdf_direct or is_resource_page):
                         continue
 
-                    # Resolve to absolute URL
-                    abs_url = urljoin(self.base_url, href)
+                    # Resolve to absolute URL (use normalized href)
+                    abs_url = urljoin(self.base_url, href_norm)
                     if abs_url in seen_urls:
                         continue
                     seen_urls.add(abs_url)
 
                     label = a_tag.get_text(strip=True) or Path(urlparse(abs_url).path).stem
-                    # Strip trailing "notes (PDF)", "(PDF)" etc. from label
-                    label = re.sub(r'\s*\(pdf\)\s*$', '', label, flags=re.I).strip()
+                    # Strip trailing "(PDF)", "(PDF - 1.2MB)", bare "PDF", "PDF -" etc.
+                    label = re.sub(r'\s*\(pdf[^)]*\)\s*$', '', label, flags=re.I).strip()
                     label = re.sub(r'\s+notes\s*$', '', label, flags=re.I).strip()
-                    label = label or Path(urlparse(abs_url).path).stem
+                    # Strip bare "PDF" label (MIT OCW table cells with just link text "PDF")
+                    label = re.sub(r'^pdf$', '', label, flags=re.I).strip()
+                    # Fallback: use the resource page slug (e.g. mit24_910s09_lec01) for meaningful name
+                    if not label:
+                        slug = Path(urlparse(abs_url).path.rstrip('/')).name
+                        label = slug if slug and slug.lower() != 'resources' else ''
 
                     folder, priority = self._classify_pdf(label, abs_url)
 
@@ -417,9 +445,12 @@ class MITOCWScraper:
                         'is_resource_page': is_resource_page,
                     })
 
-                # Resource-index usually has everything; stop early if found enough
-                if '/resource-index/' in page_url and len(pdf_entries) > 5:
-                    break
+                # Resource-index usually has everything; stop early only if
+                # we found enough lecture-notes specifically
+                if '/resource-index/' in page_url:
+                    lecture_count = sum(1 for e in pdf_entries if e['folder'] == 'lecture-notes')
+                    if lecture_count >= 5:
+                        break
 
             except Exception as e:
                 print(f"  [PDF] Scan error on {page_url}: {e}")
@@ -437,14 +468,23 @@ class MITOCWScraper:
             soup = self._get_page(entry['url'])
             if not soup:
                 return None
-            # The resource page has a "Download file" link pointing to the actual PDF
+            # MIT OCW resource pages have a "Download file" link.
+            # The href can be:
+            #   1. Direct .pdf URL at course root: /courses/{slug}/{hash}_{name}.pdf
+            #   2. External .pdf URL
+            #   3. @@download/file/... endpoint
+            best_url = None
             for a_tag in soup.find_all('a', href=True):
                 href = a_tag['href']
+                # Priority 1: direct .pdf extension
                 if href.lower().endswith('.pdf'):
                     return urljoin(self.base_url, href)
+                # Priority 2: download endpoint (@@download or /download/)
+                if '@@download' in href or '/download/' in href.lower():
+                    best_url = urljoin(self.base_url, href)
         except Exception:
             pass
-        return None
+        return best_url
 
     def _download_course_pdfs(self, course_url: str, course_slug: str) -> Dict[str, Any]:
         """

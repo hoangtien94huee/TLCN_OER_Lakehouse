@@ -97,10 +97,11 @@ services:
       # Use local JARs instead of downloading from Maven
       - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.4.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
       # Spark Memory Configuration (optimized for 7GB total system)
-      - SPARK_DRIVER_MEMORY=512m
-      - SPARK_EXECUTOR_MEMORY=512m
-      - SPARK_DRIVER_MAXRESULTSIZE=256m
+      - SPARK_DRIVER_MEMORY=1g
+      - SPARK_EXECUTOR_MEMORY=1g
+      - SPARK_DRIVER_MAXRESULTSIZE=512m
       - SPARK_SHUFFLE_PARTITIONS=2
+      - PYSPARK_SUBMIT_ARGS=--master spark://spark-master:7077 --deploy-mode client --driver-memory 1g --executor-memory 1g pyspark-shell
       # Optional: download and upload PDFs for OTL
       - OTL_DOWNLOAD_PDFS=0
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
@@ -114,12 +115,8 @@ services:
       - DSPACE_USER=admin@dspace.org
       - DSPACE_PASSWORD=dspace
       - DSPACE_COLLECTION_UUID=1e9be5e4-6056-4f43-bad0-0288669ce6ad
-    deploy:
-      resources:
-        limits:
-          memory: 3G
-        reservations:
-          memory: 2G
+    mem_limit: 3g
+    mem_reservation: 2g
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -146,7 +143,7 @@ services:
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
       - PYTHONPATH=/opt/airflow:/opt/airflow/dags
-      # Iceberg Hadoop Catalog support 
+      # Iceberg Hadoop Catalog support (NO REST needed!)
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dcom.amazonaws.sdk.disableEc2Metadata=true
     ports:
       - "8081:8080" # Spark Master Web UI
@@ -348,10 +345,13 @@ services:
       dspace__P__server__P__url: http://localhost:8180/server
       dspace__P__ui__P__url: http://localhost:4000
       dspace__P__name: 'OER Repository - DSpace'
+      # Database connection - using shared postgres
       db__P__url: 'jdbc:postgresql://postgres:5432/dspace'
       db__P__username: dspace
       db__P__password: dspace
+      # Solr connection
       solr__P__server: http://dspacesolr:8983/solr
+      # Trust requests from Docker network
       proxies__P__trusted__P__ipranges: '172.0.0'
       LOGGING_CONFIG: /dspace/config/log4j2-container.xml
     depends_on:

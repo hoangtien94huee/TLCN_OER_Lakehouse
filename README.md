@@ -102,11 +102,8 @@ TLCN_OER_Lakehouse/
 │   ├── Dockerfile
 │   └── requirements.txt
 │
-├── search_app/                         # FastAPI Search Application
-│   ├── main.py                         # API endpoints
-│   ├── reviews.py                      # Rating & Review system
-│   ├── templates/                      # Jinja2 templates
-│   ├── static/                         # Static assets
+├── chatbot_api/                        # FastAPI chatbot API
+│   ├── main.py                         # Chatbot endpoints
 │   ├── Dockerfile
 │   └── requirements.txt
 │

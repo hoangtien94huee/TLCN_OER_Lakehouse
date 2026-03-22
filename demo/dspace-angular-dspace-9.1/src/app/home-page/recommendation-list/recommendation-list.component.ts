@@ -44,7 +44,7 @@ export class RecommendationListComponent implements OnInit, OnDestroy {
   private subscription: Subscription | null = null;
   private authSubscription: Subscription | null = null;
 
-  // API endpoint - search_app runs on port 8088
+  // API endpoint - chatbot_api runs on port 8088
   private readonly API_URL = 'http://localhost:8088';
 
   constructor(

@@ -76,7 +76,9 @@ def validate_silver_layer_availability(**context):
         
         bucket_name = os.getenv('MINIO_BUCKET', 'oer-lakehouse')
         required_tables = {
-            "oer_resources": "silver/default/oer_resources/metadata/",
+            "oer_resources_curated": "silver/default/oer_resources_curated/metadata/",
+            "oer_documents": "silver/default/oer_documents/metadata/",
+            "oer_chunks": "silver/default/oer_chunks/metadata/",
             "reference_subjects": "silver/default/reference_subjects/metadata/",
             "reference_programs": "silver/default/reference_programs/metadata/",
             "reference_program_subject_links": "silver/default/reference_program_subject_links/metadata/",
@@ -155,10 +157,14 @@ def create_analytics_tables(**context):
         
         # Set environment variables for Spark in Docker
         os.environ.setdefault("SPARK_MASTER_URL", "spark://spark-master:7077")
+        os.environ.setdefault("SPARK_MASTER", os.getenv("SPARK_MASTER_URL", "spark://spark-master:7077"))
         os.environ.setdefault("MINIO_ENDPOINT", "http://minio:9000")
         os.environ.setdefault("MINIO_ACCESS_KEY", "minioadmin")
         os.environ.setdefault("MINIO_SECRET_KEY", "minioadmin")
         os.environ.setdefault("MINIO_BUCKET", "oer-lakehouse")
+        os.environ.setdefault("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+        os.environ.setdefault("SPARK_DRIVER_HOST", "oer-airflow-scraper")
+        os.environ.setdefault("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0")
         
         # Process to Gold layer using standalone analytics
         os.environ.setdefault(
@@ -203,6 +209,8 @@ def create_analytics_tables(**context):
                 'dim_sources',
                 'dim_languages',
                 'dim_date',
+                'dim_oer_resources',
+                'bridge_oer_subjects',
                 'fact_program_coverage',
                 'fact_oer_resources'
             ],
@@ -261,6 +269,8 @@ def validate_gold_layer_quality(**context):
             'dim_sources': 'gold/analytics/dim_sources/metadata/',
             'dim_languages': 'gold/analytics/dim_languages/metadata/',
             'dim_date': 'gold/analytics/dim_date/metadata/',
+            'dim_oer_resources': 'gold/analytics/dim_oer_resources/metadata/',
+            'bridge_oer_subjects': 'gold/analytics/bridge_oer_subjects/metadata/',
             'fact_program_coverage': 'gold/analytics/fact_program_coverage/metadata/',
             'fact_oer_resources': 'gold/analytics/fact_oer_resources/metadata/',
         }
@@ -319,7 +329,7 @@ def validate_gold_layer_quality(**context):
             'total_tables_checked': len(gold_tables),
             'validated_tables': len(validated_tables),
             'validated_table_names': validated_tables,
-            'validation_passed': len(validated_tables) >= 5,  # At least 5 tables should be validated
+            'validation_passed': len(validated_tables) >= 7,  # Core gold tables must be validated
             'table_details': validation_results
         }
         

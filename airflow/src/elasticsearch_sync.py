@@ -1,1149 +1,481 @@
 #!/usr/bin/env python3
 """
-Gold -> Elasticsearch Sync
-=========================
+Chatbot-Optimized Elasticsearch Sync
+=====================================
+Streamlined version focused on RAG retrieval:
+- Index chunk-level data from Silver (oer_chunks) WITH embeddings
+- Metadata from Gold layer for filtering
+- No PDF re-parsing (use pre-chunked data)
+- Incremental upsert: only sync new/changed documents
+- Embeddings generated at Silver layer, just copy to ES
 
-Builds search-ready documents from Gold layer tables and indexes them into Elasticsearch.
-This job can run inside or outside Airflow to keep retrieval workloads decoupled from the
-core ETL while reusing the curated gold datasets.
+Flow:
+    Silver (oer_chunks with embeddings) 
+        → Gold (metadata) 
+        → ES (hybrid search ready)
+
+Model: paraphrase-multilingual-MiniLM-L12-v2 (384-dim, EN+VI)
 """
-
-from __future__ import annotations
 
 import os
 import json
 import logging
-import re
-import warnings
-from datetime import date, datetime
-from io import BytesIO
-from decimal import Decimal
-from pathlib import PurePosixPath
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, Iterator, List, Optional
 
 from elasticsearch import Elasticsearch, helpers
-
-from minio import Minio
-import pdfplumber
-import PyPDF2
-
-# Suppress pdfminer warnings about invalid color values (common in some PDFs)
-logging.getLogger("pdfminer").setLevel(logging.ERROR)
-warnings.filterwarnings("ignore", message=".*invalid float value.*")
-
 
 try:
     from pyspark.sql import DataFrame, SparkSession
     from pyspark.sql import functions as F
-    from pyspark.sql import types as T
-except ImportError:  # pragma: no cover - handled at runtime
-    SparkSession = DataFrame = F = T = None  # type: ignore
+except ImportError:
+    SparkSession = DataFrame = F = None
 
-SPARK_AVAILABLE = SparkSession is not None
-ELASTICSEARCH_AVAILABLE = Elasticsearch is not None
-MINIO_AVAILABLE = Minio is not None
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
-class OERElasticsearchIndexer:
-    """Sync Gold layer OER resources into an Elasticsearch index."""
+class ChatbotElasticsearchSync:
+    """Sync Gold/Silver data to Elasticsearch for chatbot RAG."""
 
-    def __init__(self) -> None:
-        # Kiểm tra các thư viện cần thiết
-        if not SPARK_AVAILABLE:
-            raise RuntimeError("PySpark is required to export Gold data to Elasticsearch")
-        if not ELASTICSEARCH_AVAILABLE:
-            raise RuntimeError(
-                "The 'elasticsearch' Python package is required. "
-                "Install it via airflow/requirements.txt."
-            )
-
-        # Cấu hình kết nối MinIO và Iceberg catalogs
+    def __init__(self):
+        # Iceberg catalogs
         self.bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
         self.silver_catalog = os.getenv("ICEBERG_SILVER_CATALOG", "silver")
         self.silver_database = os.getenv("SILVER_DATABASE", "default")
         self.gold_catalog = os.getenv("ICEBERG_GOLD_CATALOG", "gold")
         self.gold_database = os.getenv("GOLD_DATABASE", "analytics")
 
-        # Định nghĩa các bảng Gold layer cần đồng bộ
-        self.dim_programs_table = f"{self.gold_catalog}.{self.gold_database}.dim_programs"
-        self.dim_sources_table = f"{self.gold_catalog}.{self.gold_database}.dim_sources"
-        self.dim_languages_table = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
-        self.dim_date_table = f"{self.gold_catalog}.{self.gold_database}.dim_date"
-        self.dim_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
-        self.fact_oer_resources_table = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
+        # Table references
+        self.dim_resources = f"{self.gold_catalog}.{self.gold_database}.dim_oer_resources"
+        self.fact_resources = f"{self.gold_catalog}.{self.gold_database}.fact_oer_resources"
+        self.dim_sources = f"{self.gold_catalog}.{self.gold_database}.dim_sources"
+        self.dim_languages = f"{self.gold_catalog}.{self.gold_database}.dim_languages"
+        self.dim_date = f"{self.gold_catalog}.{self.gold_database}.dim_date"
+        self.silver_documents = f"{self.silver_catalog}.{self.silver_database}.oer_documents"
+        self.silver_chunks = f"{self.silver_catalog}.{self.silver_database}.oer_chunks"
 
-        # Cấu hình Elasticsearch
+        # Elasticsearch config
         self.es_host = os.getenv("ELASTICSEARCH_HOST", "http://elasticsearch:9200")
-        self.es_user = os.getenv("ELASTICSEARCH_USER")
-        self.es_password = os.getenv("ELASTICSEARCH_PASSWORD")
         self.index_name = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
-        self.batch_size = int(os.getenv("ELASTICSEARCH_BATCH_SIZE", "500"))  # Số documents/batch
-        self.request_timeout = int(os.getenv("ELASTICSEARCH_TIMEOUT", "120"))  # Timeout 2 phút
-        self.recreate_index = os.getenv("ELASTICSEARCH_RECREATE", "0").lower() in {
-            "1",
-            "true",
-            "yes",
-        }
+        self.batch_size = int(os.getenv("ELASTICSEARCH_BATCH_SIZE", "300"))
+        self.timeout = int(os.getenv("ELASTICSEARCH_TIMEOUT", "180"))
+        self.recreate = os.getenv("ELASTICSEARCH_RECREATE", "0") in {"1", "true", "yes"}
+        self.incremental = os.getenv("ELASTICSEARCH_INCREMENTAL", "1") in {"1", "true", "yes"}
 
-        # Kết nối đến Elasticsearch với authentication
-        http_auth = None
-        if self.es_user and self.es_password:
-            http_auth = (self.es_user, self.es_password)
-
+        # Connect to ES
+        es_user = os.getenv("ELASTICSEARCH_USER")
+        es_password = os.getenv("ELASTICSEARCH_PASSWORD")
+        auth = (es_user, es_password) if es_user and es_password else None
         self.es = Elasticsearch(
             hosts=[self.es_host],
-            basic_auth=http_auth,
+            basic_auth=auth,
             verify_certs=self.es_host.startswith("https"),
+            request_timeout=self.timeout,
         )
 
-        # Embedding dims (must match the model used in Colab/Kaggle)
-        # distiluse-base-multilingual-cased-v2 = 512d
-        self.embed_dims = int(os.getenv("EMBED_DIMS", "512"))
-
-        # Cấu hình PDF indexing (có index nội dung PDF hay không)
-        self.index_pdf_content = os.getenv("ELASTICSEARCH_INDEX_PDF_CONTENT", "1").lower() in {
-            "1",
-            "true",
-            "yes",
-        }
-        # PDF Processing Limits (for nested structure)
-        self.max_pdf_texts = int(os.getenv("ELASTICSEARCH_MAX_PDF_PER_RESOURCE", "3"))  # Max 3 PDFs per resource
-        self.max_pdf_pages = int(os.getenv("ELASTICSEARCH_PDF_MAX_PAGES", "50"))  # Max pages to parse per PDF
-        self.max_pdf_page_chars = int(os.getenv("ELASTICSEARCH_PDF_PAGE_CHARS", "2000"))  # Max chars per page chunk
-        self.search_pdf_chars = int(os.getenv("ELASTICSEARCH_SEARCH_PDF_CHARS", "5000"))  # Max chars to append to search_text
-        
-        # Kết nối MinIO để lấy PDF content (nếu cần)
-        self.minio_client = self._create_minio_client() if self.index_pdf_content else None
-        
-        # Khởi tạo cache để tối ưu hiệu suất
-        self._bronze_record_cache: Dict[str, Dict[str, Dict[str, Any]]] = {}  # Cache Bronze JSON
-        self._pdf_listing_cache: Dict[str, List[str]] = {}  # Cache danh sách PDFs
-        self._pdf_text_cache: Dict[str, str] = {}  # Cache nội dung PDF đã extract
-
-        # Khởi tạo Spark session để đọc Gold layer (Iceberg tables)
+        # Spark session
         self.spark = self._create_spark_session()
 
-    # Spark
     def _create_spark_session(self) -> SparkSession:
-        """Tạo Spark session để đọc dữ liệu từ Gold layer (Iceberg tables)"""
-        # Sử dụng local JARs thay vì download từ Maven (tránh network issues)
-        jars_dir = "/opt/airflow/jars"
-        local_jars = ",".join([
-            f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",  # Iceberg support
-            f"{jars_dir}/hadoop-aws-3.3.4.jar",  # S3A filesystem
-            f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"  # AWS SDK
-        ])
-        
-        print(f"[Spark] Using local JARs: {local_jars}")
-        
-        # Tạo Spark session với các cấu hình tối ưu
-        session = (
-            SparkSession.builder.appName("OER-Gold-Elasticsearch")
-            .master(os.getenv("SPARK_MASTER", "local[*]"))  # Local mode để tránh network issues
-            .config("spark.jars", local_jars)  # Load JARs vào classpath
-            .config("spark.driver.extraClassPath", local_jars)  # Classpath cho driver
-            .config("spark.executor.extraClassPath", local_jars)  # Classpath cho executor
-            # Cấu hình Iceberg extensions
-            .config(
-                "spark.sql.extensions",
-                "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions",
-            )
-            # Cấu hình Silver catalog (Iceberg)
-            .config(
-                f"spark.sql.catalog.{self.silver_catalog}",
-                "org.apache.iceberg.spark.SparkCatalog",
-            )
+        """Create Spark session for reading Iceberg tables."""
+        os.environ.setdefault("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+        os.environ.setdefault("SPARK_MASTER", os.getenv("SPARK_MASTER_URL", "spark://spark-master:7077"))
+        os.environ.setdefault("SPARK_DRIVER_HOST", "oer-airflow-scraper")
+        os.environ.setdefault("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0")
+        os.environ.pop("JAVA_TOOL_OPTIONS", None)
+
+        jars_dir = Path("/opt/airflow/jars")
+        local_jars = [
+            jars_dir / "iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
+            jars_dir / "hadoop-aws-3.3.4.jar",
+            jars_dir / "aws-java-sdk-bundle-1.12.262.jar",
+        ]
+        existing_jars = [str(j) for j in local_jars if j.exists()]
+        packages = (
+            "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,"
+            "org.apache.hadoop:hadoop-aws:3.3.4,"
+            "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+        )
+
+        builder = (
+            SparkSession.builder.appName("Chatbot-ES-Sync")
+            .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))
+            .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
+            .config(f"spark.sql.catalog.{self.silver_catalog}", "org.apache.iceberg.spark.SparkCatalog")
             .config(f"spark.sql.catalog.{self.silver_catalog}.type", "hadoop")
-            .config(
-                f"spark.sql.catalog.{self.silver_catalog}.warehouse",
-                f"s3a://{self.bucket}/silver/",
-            )
-            # Cấu hình Gold catalog (Iceberg) - Đây là catalog chính để đọc dữ liệu
-            .config(
-                f"spark.sql.catalog.{self.gold_catalog}",
-                "org.apache.iceberg.spark.SparkCatalog",
-            )
+            .config(f"spark.sql.catalog.{self.silver_catalog}.warehouse", f"s3a://{self.bucket}/silver/")
+            .config(f"spark.sql.catalog.{self.gold_catalog}", "org.apache.iceberg.spark.SparkCatalog")
             .config(f"spark.sql.catalog.{self.gold_catalog}.type", "hadoop")
-            .config(
-                f"spark.sql.catalog.{self.gold_catalog}.warehouse",
-                f"s3a://{self.bucket}/gold/",
-            )
-            # Cấu hình S3A filesystem để kết nối MinIO
+            .config(f"spark.sql.catalog.{self.gold_catalog}.warehouse", f"s3a://{self.bucket}/gold/")
             .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
-            .config("spark.hadoop.fs.s3a.path.style.access", "true")  # MinIO style
-            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")  # HTTP (không HTTPS)
+            .config("spark.hadoop.fs.s3a.path.style.access", "true")
+            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
-            # Cấu hình performance tuning
-            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8"))  # Giảm partitions cho local mode
-            .config("spark.sql.adaptive.enabled", "true")  # Adaptive Query Execution
-            .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))  # RAM cho driver
-            .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))  # RAM cho executor
-            .config("spark.driver.maxResultSize", os.getenv("SPARK_DRIVER_MAXRESULTSIZE", "2g"))  # Max result size
-            .getOrCreate()
+            .config("spark.driver.host", os.getenv("SPARK_DRIVER_HOST", "oer-airflow-scraper"))
+            .config("spark.driver.bindAddress", os.getenv("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0"))
+            .config("spark.sql.shuffle.partitions", "8")
+            .config("spark.sql.adaptive.enabled", "true")
+            .config("spark.driver.memory", "4g")
+            .config("spark.executor.memory", "4g")
         )
-        session.sparkContext.setLogLevel("WARN")
-        return session
 
-    # MinIO Utils
-    def _create_minio_client(self) -> Optional[Minio]:
-        """Tạo MinIO client để lấy PDF content từ Bronze layer"""
-        if not MINIO_AVAILABLE:
-            print("[Warning] MinIO library not available; PDF indexing disabled")
-            self.index_pdf_content = False
-            return None
-
-        try:
-            # Cấu hình kết nối MinIO
-            endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
-            endpoint = endpoint.replace("https://", "").replace("http://", "")  # Loại bỏ protocol
-            access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
-            secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
-            secure = os.getenv("MINIO_SECURE", "0").lower() in {"1", "true", "yes"}  # HTTP/HTTPS
-            client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
-            return client
-        except Exception as exc:
-            print(f"[Warning] Unable to initialize MinIO client: {exc}")
-            self.index_pdf_content = False
-            return None
-
-    def _parse_s3_uri(self, uri: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
-        if not uri:
-            return None, None
-        cleaned = uri.replace("s3a://", "").replace("s3://", "")
-        if "/" not in cleaned:
-            return cleaned, ""
-        bucket, key = cleaned.split("/", 1)
-        return bucket, key
-
-    def _load_bronze_records(self, bronze_path: str) -> Dict[str, Dict[str, Any]]:
-        """Load Bronze JSON file và tạo mapping từ resource_id -> record"""
-        # Kiểm tra cache trước (tránh đọc lại file nhiều lần)
-        if bronze_path in self._bronze_record_cache:
-            return self._bronze_record_cache[bronze_path]
-
-        mapping: Dict[str, Dict[str, Any]] = {}
-        if not self.minio_client or not bronze_path:
-            self._bronze_record_cache[bronze_path] = mapping
-            return mapping
-
-        # Parse S3 URI (ví dụ: s3a://bucket/bronze/mit_ocw/data.json)
-        bucket, object_name = self._parse_s3_uri(bronze_path)
-        if not bucket or not object_name:
-            self._bronze_record_cache[bronze_path] = mapping
-            return mapping
-
-        # Download Bronze JSON file từ MinIO
-        response = None
-        payload = []
-        try:
-            response = self.minio_client.get_object(bucket, object_name)
-            raw_bytes = response.read()
-            payload = json.loads(raw_bytes.decode("utf-8"))
-        except Exception as exc:
-            print(f"[Warning] Unable to read bronze file {bronze_path}: {exc}")
-            # ── Fallback: scan directory for latest JSON of same source ──
-            # Handles stale Gold parquet that references a deleted Bronze file.
-            dir_prefix = "/".join(object_name.split("/")[:-1]) + "/"
-            try:
-                siblings = sorted(
-                    [o.object_name for o in self.minio_client.list_objects(bucket, prefix=dir_prefix, recursive=False)
-                     if o.object_name.endswith(".json")]
-                )
-                if siblings:
-                    fallback = siblings[-1]  # Most recent by name (timestamp-sorted)
-                    if fallback != object_name:
-                        print(f"[Info] Falling back to Bronze file: {fallback}")
-                        fb_resp = self.minio_client.get_object(bucket, fallback)
-                        raw_bytes = fb_resp.read()
-                        fb_resp.close()
-                        payload = json.loads(raw_bytes.decode("utf-8"))
-            except Exception as fb_exc:
-                print(f"[Warning] Fallback Bronze scan also failed: {fb_exc}")
-        finally:
-            if response is not None:
-                try:
-                    response.close()
-                except Exception:
-                    pass
-                try:
-                    response.release_conn()
-                except Exception:
-                    pass
-
-        if isinstance(payload, list):
-            for record in payload:
-                if not isinstance(record, dict):
-                    continue
-                identifiers: List[str] = []
-                for key in ("id", "resource_id", "course_id", "url"):
-                    value = record.get(key)
-                    if value:
-                        identifiers.append(str(value))
-                # Also index by URL slug (e.g. MIT OCW course slug from URL)
-                url_val = record.get("url", "")
-                if url_val:
-                    slug_m = re.search(r'/courses/([^/?#]+)', str(url_val))
-                    if slug_m:
-                        identifiers.append(slug_m.group(1))
-                if not identifiers:
-                    continue
-                for identifier in identifiers:
-                    mapping[identifier] = record
-
-        self._bronze_record_cache[bronze_path] = mapping
-        return mapping
-
-    def _get_bronze_record(self, bronze_path: Optional[str], resource_id: Optional[str]) -> Optional[Dict[str, Any]]:
-        """Lấy Bronze record để extract metadata (course_id, url) cho việc tìm PDF path"""
-        if not bronze_path or not resource_id:
-            return None
-        records = self._load_bronze_records(bronze_path)
-        if not records:
-            return None
-        # Direct lookup
-        rec = records.get(resource_id) or records.get(str(resource_id).strip())
-        if rec:
-            return rec
-        # Strip known source system prefixes from Gold resource_id before retry
-        # Gold format: "mit_ocw_{slug}", "openstax_{hash}", "open textbook library_{hash}"
-        _SOURCE_PREFIXES = ("mit_ocw_", "openstax_", "open textbook library_", "otl_")
-        bare_id = str(resource_id)
-        for pfx in _SOURCE_PREFIXES:
-            if bare_id.lower().startswith(pfx):
-                bare_id = bare_id[len(pfx):]
-                break
-        if bare_id != str(resource_id):
-            rec = records.get(bare_id)
-        return rec
-
-    def _bundle_from_minio(
-        self,
-        source_system: Optional[str],
-        record: Optional[Dict[str, Any]],
-        resource_id: str,
-    ) -> Optional[Dict[str, Any]]:
-        if not source_system or not self.minio_client:
-            return None
-
-        system = str(source_system).lower()
-        pdf_entries: List[Tuple[str, str, str]] = []
-
-        # ── Primary: use exact pdf_paths recorded by the scraper at upload time ──
-        # Faster (no list_objects call) and more reliable (no URL→slug parsing).
-        # Falls back to prefix scan for old records that pre-date pdf_paths field.
-        known_paths: List[str] = []
-        if record:
-            # pdf_paths (list) — used by MIT OCW, OpenStax scrapers
-            raw = record.get("pdf_paths")
-            if isinstance(raw, list) and raw:
-                known_paths = [p for p in raw if p]
-            # pdf_path (singular string / s3a URI) — used by OTL scraper
-            if not known_paths:
-                singular = record.get("pdf_path")
-                if singular and isinstance(singular, str):
-                    known_paths = [singular]
-
-        if known_paths:
-            pdf_entries = self._collect_pdf_entries_from_paths(known_paths)
-            # If the stored paths yielded nothing (upload failures, moved files)
-            # fall through to prefix scan below so we still have a chance.
-
-        # ── Fallback: prefix scan (backward-compat for pre-pdf_paths records) ──
-        if not pdf_entries:
-            if system in {"mit_ocw", "mit ocw"}:
-                course_id = None
-                if record:
-                    course_id = record.get("course_id") or record.get("course_number")
-                    if not course_id and record.get("url"):
-                        url_path = record["url"].rstrip("/")
-                        m = re.search(r'/courses/([^/]+)', url_path)
-                        course_id = m.group(1) if m else url_path.split("/")[-1]
-                # Derive course slug directly from Gold resource_id (format: "mit_ocw_{slug}")
-                # This handles records whose Bronze JSON no longer exists.
-                if not course_id and resource_id:
-                    for pfx in ("mit_ocw_", "mit ocw_"):
-                        if str(resource_id).lower().startswith(pfx):
-                            course_id = resource_id[len(pfx):]
-                            break
-                if not course_id:
-                    return None
-                prefix = f"bronze/mit_ocw/pdfs/{course_id}/"
-                pdf_entries = self._collect_pdf_entries(prefix)
-            elif system in {"openstax", "open stax"}:
-                book_slug = None
-                if record:
-                    url = record.get("url", "")
-                    m = re.search(r'/books/([^/]+)', url)
-                    if m:
-                        book_slug = m.group(1)
-                if not book_slug:
-                    book_slug = resource_id
-                prefix = f"bronze/openstax/pdfs/{book_slug}/"
-                pdf_entries = self._collect_pdf_entries(prefix)
-            elif system in {"otl", "open textbook library"}:
-                normalized_id = resource_id.strip()
-                if normalized_id.startswith("open textbook library_"):
-                    normalized_id = normalized_id.replace("open textbook library_", "")
-                elif normalized_id.startswith("otl_"):
-                    normalized_id = normalized_id.replace("otl_", "")
-                prefix = f"bronze/otl/otl-pdfs/{normalized_id}"
-                pdf_entries = self._collect_pdf_entries(prefix)
-            else:
-                return None
-
-        if not pdf_entries:
-            return None
-
-        # Build nested pdf_chunks structure
-        pdf_chunks: List[Dict[str, Any]] = []
-        pdf_files_with_pages: List[Dict[str, Any]] = []
-        titles = []
-        files = []
-
-        for file_title, file_uri, first_text, pages in pdf_entries:
-            titles.append(file_title)
-            files.append(file_uri)
-            
-            # Add each page as a separate chunk (for nested search)
-            for page_num, page_text in pages:
-                if page_text:  # Only add non-empty pages
-                    # Store full text for search, but truncate for indexing
-                    truncated_text = page_text[:self.max_pdf_page_chars]
-
-                    chunk: Dict[str, Any] = {
-                        "text": truncated_text,
-                        "page": page_num,
-                        "file": file_title,
-                        "file_uri": file_uri
-                    }
-                    # NOTE: chunk embedding is computed offline (Colab/Kaggle)
-                    # and imported separately via import_embeddings.py
-
-                    pdf_chunks.append(chunk)
-                    # Also build pdf_files with page info for UI display
-                    pdf_files_with_pages.append({
-                        "path": file_uri,
-                        "name": file_title,
-                        "page": page_num
-                    })
-
-        # Create summary pdf_text for backward compatibility (optional)
-        pdf_text_summary = " ".join([chunk["text"][:500] for chunk in pdf_chunks[:5]])  # First 5 pages, 500 chars each
-
-        return {
-            "pdf_text": pdf_text_summary,  # Compact summary for legacy field
-            "pdf_titles": titles,
-            "pdf_files": files,  # Keep legacy format for backward compatibility
-            "pdf_files_with_pages": pdf_files_with_pages,  # New format with page numbers
-            "pdf_chunks": pdf_chunks,  # Main nested structure for page-level search
-        }
-
-    def _collect_pdf_entries(self, prefix: str) -> List[Tuple[str, str, str, List[Tuple[int, str]]]]:
-        if prefix in self._pdf_listing_cache:
-            objects = self._pdf_listing_cache[prefix]
+        if existing_jars:
+            builder = builder.config("spark.jars", ",".join(existing_jars))
+            logger.info(f"[Spark] Using local JARs: {len(existing_jars)} files")
         else:
-            objects = []
-            try:
-                for obj in self.minio_client.list_objects(self.bucket, prefix=prefix, recursive=True):
-                    objects.append(obj.object_name)
-            except Exception as exc:
-                print(f"[Warning] Unable to list PDFs for prefix {prefix}: {exc}")
-            self._pdf_listing_cache[prefix] = objects
+            builder = builder.config("spark.jars.packages", packages)
+            logger.info("[Spark] Using Maven packages (no local JARs found)")
 
-        entries: List[Tuple[str, str, str, List[Tuple[int, str]]]] = []
-        for object_name in objects:
-            pages = self._get_pdf_pages(object_name)
-            if not pages:
-                continue
-            file_title = PurePosixPath(object_name).name
-            file_uri = f"s3a://{self.bucket}/{object_name}"
-            # Keep first page text as summary (for backward compatibility in titles list)
-            first_text = pages[0][1] if pages else ""
-            entries.append((file_title, file_uri, first_text, pages))
-            if len(entries) >= self.max_pdf_texts:
-                break
-        return entries
+        spark = builder.getOrCreate()
+        spark.sparkContext.setLogLevel("WARN")
+        return spark
 
-    def _collect_pdf_entries_from_paths(
-        self, pdf_paths: List[str]
-    ) -> List[Tuple[str, str, str, List[Tuple[int, str]]]]:
-        """Build PDF entries directly from a list of known MinIO object paths.
-
-        More reliable and faster than prefix scan:
-        - No list_objects network call
-        - Exact paths recorded by the scraper at upload time
-        """
-        entries: List[Tuple[str, str, str, List[Tuple[int, str]]]] = []
-        for raw_path in pdf_paths:
-            if not raw_path:
-                continue
-            # Normalise: strip leading bucket prefix if accidentally included
-            # e.g.  "s3a://oer-lakehouse/bronze/..." or just "bronze/..."
-            object_name = raw_path
-            for scheme in (f"s3a://{self.bucket}/", f"s3://{self.bucket}/"):
-                if object_name.startswith(scheme):
-                    object_name = object_name[len(scheme):]
-                    break
-
-            pages = self._get_pdf_pages(object_name)
-            if not pages:
-                continue
-            file_title = PurePosixPath(object_name).name
-            file_uri = f"s3a://{self.bucket}/{object_name}"
-            first_text = pages[0][1] if pages else ""
-            entries.append((file_title, file_uri, first_text, pages))
-            if len(entries) >= self.max_pdf_texts:
-                break
-        return entries
-
-    def _get_pdf_pages(self, object_name: str) -> List[Tuple[int, str]]:
-        """Extract per-page text (chunked) with caching."""
-        if object_name in self._pdf_text_cache:
-            cached = self._pdf_text_cache[object_name]
-            if isinstance(cached, list):
-                return cached
-            if cached:
-                return [(1, cached)]
-
-        response = None
-        data: Optional[bytes] = None
-        try:
-            response = self.minio_client.get_object(self.bucket, object_name)
-            data = response.read()
-        except Exception as exc:
-            print(f"[Warning] Unable to download PDF {object_name}: {exc}")
-        finally:
-            if response is not None:
-                try:
-                    response.close()
-                except Exception:
-                    pass
-                try:
-                    response.release_conn()
-                except Exception:
-                    pass
-
-        pages = self._extract_pages_from_pdf_bytes(data)
-        self._pdf_text_cache[object_name] = pages
-        return pages
-
-    def _detect_repeating_pattern(self, lines_list: List[List[str]], position: str = 'first', threshold: float = 0.7) -> Optional[str]:
-        """Detect repeating patterns in first/last lines across pages.
-        
-        Args:
-            lines_list: List of line arrays for each page
-            position: 'first' for header, 'last' for footer
-            threshold: Minimum ratio of pages that must have the pattern
-        
-        Returns:
-            The repeating pattern if found, else None
-        """
-        if len(lines_list) < 3:  # Need at least 3 pages to detect pattern
-            return None
-        
-        from collections import Counter
-        
-        # Extract target lines based on position
-        target_lines = []
-        for lines in lines_list:
-            if not lines:
-                continue
-            if position == 'first' and len(lines) > 0:
-                target_lines.append(lines[0].strip())
-            elif position == 'last' and len(lines) > 0:
-                target_lines.append(lines[-1].strip())
-        
-        if not target_lines:
-            return None
-        
-        # Find most common line
-        counter = Counter(target_lines)
-        most_common, count = counter.most_common(1)[0]
-        
-        # Check if it's repeating enough
-        ratio = count / len(target_lines)
-        if ratio >= threshold and len(most_common.strip()) > 0:
-            # Exclude very short strings (likely not real headers)
-            if len(most_common.strip()) < 5:
-                return None
-            return most_common
-        
-        return None
-
-    def _remove_header_footer(self, pages_text: List[Tuple[int, str]]) -> List[Tuple[int, str]]:
-        """Remove repeating header/footer patterns from pages.
-        
-        Args:
-            pages_text: List of (page_num, text) tuples
-        
-        Returns:
-            Cleaned list of (page_num, text) tuples
-        """
-        if len(pages_text) < 3:
-            return pages_text
-        
-        # Split each page into lines
-        pages_lines = [text.split('\n') for _, text in pages_text]
-        
-        # Detect header pattern (first line)
-        header_pattern = self._detect_repeating_pattern(pages_lines, position='first', threshold=0.7)
-        
-        # Detect footer pattern (last line)
-        footer_pattern = self._detect_repeating_pattern(pages_lines, position='last', threshold=0.7)
-        
-        # Remove patterns from pages
-        cleaned_pages = []
-        for page_num, text in pages_text:
-            lines = text.split('\n')
-            
-            # Remove header (first line if matches pattern)
-            if header_pattern and len(lines) > 0 and lines[0].strip() == header_pattern:
-                lines = lines[1:]
-            
-            # Remove footer (last line if matches pattern)
-            if footer_pattern and len(lines) > 0 and lines[-1].strip() == footer_pattern:
-                lines = lines[:-1]
-            
-            # Rejoin
-            cleaned_text = '\n'.join(lines).strip()
-            if cleaned_text:  # Only keep non-empty pages
-                cleaned_pages.append((page_num, cleaned_text))
-        
-        return cleaned_pages
-
-    def _extract_real_page_number(self, text: str) -> Optional[int]:
-        """Try to extract actual page number from PDF text content.
-        
-        Common patterns:
-        - Footer: "Page 15", "15", "- 15 -"
-        - Header: "Chapter 2 | Page 15"
-        """
-        # Split into lines to check first/last lines (common page number locations)
-        lines = text.strip().split('\n')
-        if not lines:
-            return None
-        
-        # Check last 2 lines (footer) and first 2 lines (header)
-        check_lines = []
-        if len(lines) >= 1:
-            check_lines.append(lines[-1])  # Last line
-        if len(lines) >= 2:
-            check_lines.append(lines[-2])  # Second to last
-            check_lines.append(lines[0])   # First line
-        if len(lines) >= 3:
-            check_lines.append(lines[1])   # Second line
-        
-        # Patterns to match page numbers
-        patterns = [
-            r'(?:page|p\.?|pg\.?)\s*[:\-]?\s*(\d+)',  # "Page 15", "P: 15"
-            r'^\s*-?\s*(\d+)\s*-?\s*$',  # "- 15 -" or just "15" on its own line
-            r'(?:trang|tr\.?)\s*[:\-]?\s*(\d+)',  # Vietnamese: "Trang 15"
-            r'\|\s*(\d+)\s*$',  # "Chapter | 15"
-            r'^\s*(\d+)\s*\|',  # "15 | Chapter"
-        ]
-        
-        for line in check_lines:
-            line_clean = line.strip()
-            # Skip very long lines (unlikely to contain just page number)
-            if len(line_clean) > 50:
-                continue
-                
-            for pattern in patterns:
-                match = re.search(pattern, line_clean, re.IGNORECASE)
-                if match:
-                    try:
-                        page_num = int(match.group(1))
-                        # Sanity check: page number should be reasonable (1-9999)
-                        if 1 <= page_num <= 9999:
-                            return page_num
-                    except (ValueError, IndexError):
-                        continue
-        
-        return None
-
-    def _clean_text(self, text: Optional[str], max_chars: int) -> Optional[str]:
-        """Normalize whitespace and trim long PDF text."""
-        if not text:
-            return None
-        
-        # Normalize whitespace
-        compact = " ".join(str(text).split())
-        if not compact:
-            return None
-        
-        # Truncate if too long
-        if len(compact) > max_chars:
-            return compact[:max_chars]
-        
-        return compact
-
-    def _extract_pages_from_pdf_bytes(self, data: Optional[bytes]) -> List[Tuple[int, str]]:
-        """Extract text per page with limits, remove headers/footers, clean text."""
-        if not data:
-            return []
-
-        raw_pages: List[Tuple[int, str]] = []
-
-        # Try pdfplumber first
-        if pdfplumber:
-            try:
-                with pdfplumber.open(BytesIO(data)) as pdf:
-                    for idx, page in enumerate(pdf.pages[: self.max_pdf_pages], start=1):
-                        page_text = (page.extract_text() or "").strip()
-                        if page_text:
-                            raw_pages.append((idx, page_text))
-            except Exception:
-                raw_pages = []
-
-        # Fallback PyPDF2 if pdfplumber failed
-        if not raw_pages and PyPDF2:
-            try:
-                reader = PyPDF2.PdfReader(BytesIO(data))
-                for idx, page in enumerate(reader.pages[: self.max_pdf_pages], start=1):
-                    try:
-                        page_text = (page.extract_text() or "").strip()
-                        if page_text:
-                            raw_pages.append((idx, page_text))
-                    except Exception:
-                        continue
-            except Exception:
-                raw_pages = []
-
-        if not raw_pages:
-            return []
-
-        # Step 1: Remove header/footer patterns across all pages
-        cleaned_pages = self._remove_header_footer(raw_pages)
-
-        # Step 2: Extract real page numbers and clean text
-        final_pages = []
-        for idx_page_num, page_text in cleaned_pages:
-            # Try to extract real page number from content
-            real_page_num = self._extract_real_page_number(page_text)
-            # Use real page number if found, otherwise use index-based number
-            page_num = real_page_num if real_page_num else idx_page_num
-            
-            clean = self._clean_text(page_text, self.max_pdf_page_chars)
-            if clean:
-                final_pages.append((page_num, clean))
-
-        return final_pages
-
-    def _augment_with_pdf_content(self, document: Dict[str, Any]) -> None:
-        """Thêm nội dung PDF vào document để index vào Elasticsearch.
-
-        Workflow: Extract PDF text trực tiếp từ MinIO.
-        """
-        if not self.index_pdf_content or not self.minio_client:
-            return
-
-        resource_id = document.get("resource_id")
-        if resource_id is None:
-            return
-        resource_id = str(resource_id)
-
-        source_system = document.get("source_system")
-        bronze_path = document.get("bronze_source_path")
-        
-        record = None
-        if isinstance(bronze_path, str):
-            record = self._get_bronze_record(bronze_path, resource_id)
-
-        bundle = self._bundle_from_minio(source_system, record, resource_id)
-        if not bundle:
-            return
-
-        pdf_text = bundle.get("pdf_text")
-        if pdf_text:
-            document["pdf_text"] = pdf_text
-            current = document.get("search_text")
-            search_pdf_part = pdf_text[: self.search_pdf_chars]
-            document["search_text"] = " ".join(filter(None, [current, search_pdf_part]))
-
-        if bundle.get("pdf_titles"):
-            document["pdf_titles"] = bundle["pdf_titles"]
-
-        if bundle.get("pdf_files"):
-            document["pdf_files"] = bundle["pdf_files"]
-
-        if bundle.get("pdf_files_with_pages"):
-            document["pdf_files_with_pages"] = bundle["pdf_files_with_pages"]
-
-        if bundle.get("pdf_chunks"):
-            document["pdf_chunks"] = bundle["pdf_chunks"]
-
-    def _load_table(self, table_name: str, description: str) -> Optional[DataFrame]:
+    def _load_table(self, table_name: str) -> Optional[DataFrame]:
+        """Load Iceberg table, return None if empty/missing."""
         try:
             df = self.spark.table(table_name)
-            if df.rdd.isEmpty():
-                print(f"  {description}: Table empty ({table_name})")
+            count = df.count()
+            if count == 0:
+                logger.warning(f"Table {table_name} is empty")
                 return None
-            print(f"  {description}: Loaded {df.count():,} records")
+            logger.info(f"Loaded {table_name}: {count:,} records")
             return df
-        except Exception as exc:
-            print(f"  {description}: Unable to read {table_name} ({exc})")
+        except Exception as e:
+            logger.error(f"Failed to load {table_name}: {e}")
             return None
 
-    # Document build
-    def _prepare_fact_enrichment(
-        self,
-        fact_df: Optional[DataFrame],
-        dim_sources: Optional[DataFrame],
-        dim_languages: Optional[DataFrame],
-        dim_date: Optional[DataFrame],
-    ) -> Optional[DataFrame]:
-        """Join fact table với các dimension tables để làm giàu dữ liệu"""
-        if fact_df is None:
+    def _build_index_dataframe(self) -> Optional[DataFrame]:
+        """Build final DataFrame for Elasticsearch indexing."""
+        logger.info("Building index DataFrame from Gold/Silver...")
+
+        # Load tables
+        dim_resources = self._load_table(self.dim_resources)
+        fact_resources = self._load_table(self.fact_resources)
+        dim_sources = self._load_table(self.dim_sources)
+        dim_languages = self._load_table(self.dim_languages)
+        dim_date = self._load_table(self.dim_date)
+        documents = self._load_table(self.silver_documents)
+        chunks = self._load_table(self.silver_chunks)
+
+        if dim_resources is None:
+            logger.error("dim_oer_resources is required but missing")
             return None
 
-        # Chọn các columns cần thiết từ fact table
-        fact = fact_df.select(
-            "resource_key",
-            "source_key",
-            "language_key",
-            "publication_date_key",
-            "ingested_date_key",
+        # Start with dim_resources
+        df = dim_resources.alias("dim")
+
+        # Join fact for metrics
+        if fact_resources is not None:
+            fact = fact_resources.select(
+                "resource_key",
+                "source_key",
+                "language_key",
+                "publication_date_key",
+                F.col("data_quality_score").alias("quality_score"),
+                F.col("matched_subjects_count").alias("subjects_count"),
+            ).alias("fact")
+            df = df.join(fact, "resource_key", "left")
+
+            # Join source/language dimensions
+            if dim_sources is not None:
+                df = df.join(
+                    dim_sources.select("source_key", F.col("source_code").alias("source_system")),
+                    "source_key",
+                    "left",
+                )
+            if dim_languages is not None:
+                df = df.join(
+                    dim_languages.select("language_key", F.col("language_code").alias("language")),
+                    "language_key",
+                    "left",
+                )
+            if dim_date is not None:
+                df = df.join(
+                    dim_date.select(
+                        F.col("date_key").alias("pub_key"),
+                        F.col("date").alias("publication_date"),
+                    ),
+                    df.publication_date_key == F.col("pub_key"),
+                    "left",
+                ).drop("pub_key")
+
+        # Aggregate documents
+        if documents is not None:
+            doc_agg = (
+                documents.groupBy("resource_uid")
+                .agg(
+                    F.collect_list(
+                        F.struct(
+                            "asset_uid",
+                            F.col("asset_path").alias("path"),
+                            "file_name",
+                            "mime_type",
+                            "size_bytes",
+                        )
+                    ).alias("doc_documents"),
+                    F.count("*").alias("doc_count"),
+                )
+                .select(
+                    F.col("resource_uid").alias("doc_uid"),
+                    "doc_documents",
+                    "doc_count",
+                )
+            )
+            df = df.join(doc_agg, df.resource_key == F.col("doc_uid"), "left").drop("doc_uid")
+
+        # Aggregate chunks (include embeddings from Silver)
+        if chunks is not None:
+            chunk_agg = (
+                chunks.groupBy("resource_uid")
+                .agg(
+                    F.collect_list(
+                        F.struct(
+                            "chunk_id",
+                            "asset_uid",
+                            "page_no",
+                            "chunk_order",
+                            F.col("chunk_text").alias("text"),
+                            "token_count",
+                            "lang",
+                            "embedding",  # Include embedding from Silver
+                        )
+                    ).alias("chunk_chunk_items"),
+                    F.count("*").alias("chunk_cnt"),
+                    F.max("updated_at").alias("chunk_updated_at"),
+                    # Use first chunk's embedding as doc-level embedding (simple approach)
+                    # This is faster than averaging all chunks and often good enough
+                    F.first(F.col("embedding"), ignorenulls=True).alias("doc_embedding"),
+                )
+                .select(
+                    F.col("resource_uid").alias("chunk_uid"),
+                    "chunk_chunk_items",
+                    "chunk_cnt",
+                    "chunk_updated_at",
+                    "doc_embedding",
+                )
+            )
+            df = df.join(chunk_agg, df.resource_key == F.col("chunk_uid"), "left").drop("chunk_uid")
+
+        # Select final columns (include doc_embedding from Silver)
+        df = df.select(
+            F.col("resource_key").alias("_id"),
+            "resource_id",
+            "title",
+            "description",
+            "source_url",
+            F.coalesce("source_system", F.lit("unknown")).alias("source_system"),
+            F.coalesce("language", F.lit("en")).alias("language"),
+            F.col("matched_subjects.subject_id").alias("subject_ids"),
+            F.col("matched_subjects.subject_name").alias("subjects"),
+            F.coalesce("program_ids", F.array()).alias("program_ids"),
+            "license_name",
+            "license_url",
+            "publication_date",
+            F.coalesce("quality_score", F.lit(0.5)).alias("quality_score"),
+            F.coalesce("subjects_count", F.lit(0)).alias("subjects_count"),
+            F.coalesce("doc_count", F.lit(0)).alias("document_count"),
+            F.coalesce("chunk_cnt", F.lit(0)).alias("chunk_count"),
+            F.coalesce("doc_documents", F.array()).alias("documents"),
+            F.coalesce("chunk_chunk_items", F.array()).alias("chunk_items"),
+            F.coalesce("chunk_updated_at", F.current_timestamp()).alias("updated_at"),
+            "doc_embedding",  # Doc-level embedding (avg of chunks)
         )
 
-        # Join với dim_sources để có source_code, source_name (VD: mit_ocw, openstax)
-        if dim_sources is not None:
-            fact = fact.join(
-                dim_sources.select("source_key", "source_code", "source_name"),
-                "source_key",
-                "left",
-            )
-
-        # Join với dim_languages để có language_code (VD: en, vi)
-        if dim_languages is not None:
-            fact = fact.join(
-                dim_languages.select("language_key", "language_code"),
-                "language_key",
-                "left",
-            )
-
-        if dim_date is not None:
-            pub_dates = dim_date.select(
-                F.col("date_key").alias("pub_key"),
-                F.col("date").alias("publication_date"),
-            )
-            ing_dates = dim_date.select(
-                F.col("date_key").alias("ing_key"),
-                F.col("date").alias("ingested_date"),
-            )
-
-            fact = fact.join(
-                pub_dates,
-                fact.publication_date_key == pub_dates.pub_key,
-                "left",
-            ).drop("pub_key")
-            fact = fact.join(
-                ing_dates,
-                fact.ingested_date_key == ing_dates.ing_key,
-                "left",
-            ).drop("ing_key")
-
-        return fact
-
-    def _build_index_dataframe(
-        self,
-        dim_resources: DataFrame,
-        fact_enrichment: Optional[DataFrame],
-    ) -> DataFrame:
-        """Xây dựng DataFrame cuối cùng để index vào Elasticsearch"""
-        docs = dim_resources.alias("dim")
-
-        # Join với fact enrichment (source, language, dates, metrics)
-        if fact_enrichment is not None:
-            docs = docs.join(fact_enrichment.alias("fact"), "resource_key", "left")
-
-        column_aliases = [
-            ("resource_key", "resource_key"),
-            ("resource_id", "resource_id"),
-            ("title", "title"),
-            ("description", "description"),
-            ("source_url", "source_url"),
-            ("source_code", "source_system"),
-            ("language_code", "language"),
-            ("publication_date", "publication_date"),
-            ("bronze_source_path", "bronze_source_path"),  # Needed for PDF lookup
-        ]
-
-        select_exprs = [F.col(col).alias(alias) for col, alias in column_aliases if col in docs.columns]
-
-        # Extract subject names if available
-        if "matched_subjects" in docs.columns:
-            # Assuming matched_subjects is an array of structs with subject_name
-            # We extract just the names as an array of strings
-            select_exprs.append(F.col("matched_subjects.subject_name").alias("subjects"))
-
-        docs = docs.select(*select_exprs)
-
-        creator_text_col = "creator_names_text"
-        if "creator_names" in docs.columns:
-            docs = docs.withColumn(
-                creator_text_col,
-                F.when(
-                    F.col("creator_names").isNotNull(),
-                    F.array_join(F.col("creator_names"), " "),
-                ).otherwise(F.lit("")),
-            )
-        else:
-            docs = docs.withColumn(creator_text_col, F.lit(""))
-
-        # Build search_text: Tổng hợp TẤT CẢ text có thể search
-        # Elasticsearch sẽ index field này để full-text search
-        # Search_text: chỉ giữ phần tiêu đề + mô tả (PDF sẽ nối thêm ở bước augment)
-        # Also include subjects in search_text for better recall
-        search_text_cols = [F.col("title"), F.col("description")]
-        if "subjects" in docs.columns:
-             search_text_cols.append(F.array_join(F.col("subjects"), " "))
-
-        docs = docs.withColumn(
+        # Build search_text: title + description + subjects + chunk snippets
+        df = df.withColumn(
             "search_text",
-            F.concat_ws(" ", *search_text_cols),
-        ).drop(creator_text_col)
+            F.concat_ws(
+                " ",
+                F.col("title"),
+                F.col("description"),
+                F.array_join(F.coalesce("subjects", F.array()), " "),
+                F.expr(
+                    "array_join(transform(slice(chunk_items, 1, 10), x -> substring(x.text, 1, 300)), ' ')"
+                ),
+            ),
+        )
 
-        return docs
+        logger.info(f"Index DataFrame built: {df.count():,} documents")
+        return df
 
-    # Indexing
-    def _ensure_index(self) -> None:
-        """Tạo Elasticsearch index với mapping (nếu chưa tồn tại)"""
-        exists = self.es.indices.exists(index=self.index_name)
-        
-        # Xóa index cũ nếu RECREATE=1 (để rebuild từ đầu)
-        if exists and self.recreate_index:
-            print(f"Deleting existing index '{self.index_name}' (ELASTICSEARCH_RECREATE=1)")
-            self.es.indices.delete(index=self.index_name)
-            exists = False
+    def _ensure_index(self):
+        """Create ES index with chatbot-optimized mapping."""
+        if self.es.indices.exists(index=self.index_name):
+            if self.recreate:
+                logger.info(f"Deleting existing index: {self.index_name}")
+                self.es.indices.delete(index=self.index_name)
+            else:
+                logger.info(f"Index {self.index_name} exists, skipping creation")
+                return
 
-        if not exists:
-            print(f"Creating Elasticsearch index '{self.index_name}'")
-            body = {
-                "settings": {
-                    "index": {
-                        "number_of_shards": 1,  # 1 shard cho single node
-                        "number_of_replicas": 0  # Không cần replica (dev mode)
-                    },
-                    "analysis": {
-                        "analyzer": {
-                            "autocomplete": {
-                                "tokenizer": "autocomplete",
-                                "filter": ["lowercase"]
-                            },
-                            "autocomplete_search": {
-                                "tokenizer": "lowercase"
-                            }
-                        },
-                        "tokenizer": {
-                            "autocomplete": {
-                                "type": "edge_ngram",
-                                "min_gram": 2,
-                                "max_gram": 10,
-                                "token_chars": ["letter", "digit"]
-                            }
-                        }
-                    },
-                },
-                "mappings": {
-                    "properties": {
-                        # Text fields - Full-text search với analyzer
-                        "title": {
-                            "type": "text",
-                            "analyzer": "english",
-                            "fields": {
-                                "keyword": {"type": "keyword", "ignore_above": 256},
-                                "autocomplete": {"type": "text", "analyzer": "autocomplete", "search_analyzer": "autocomplete_search"}
-                            },
-                        },
-                        "description": {"type": "text", "analyzer": "english"},
-                        "search_text": {"type": "text", "analyzer": "english"},  # Field chính để search
-                        "subjects": {
-                            "type": "text", 
-                            "analyzer": "english",
-                            "fields": {
-                                "keyword": {"type": "keyword", "ignore_above": 256}
-                            }
-                        },
-                        
-                        # Keyword fields - Filtering (exact match, aggregation)
-                        "source_system": {"type": "keyword"},  # mit_ocw, openstax, otl, textbook
-                        "language": {"type": "keyword"},  # en, vi
-                        "publication_date": {"type": "date"},  # Hỗ trợ recency boosting
-                        
-                        # PDF content fields
-                        "pdf_text": {"type": "text", "analyzer": "english"},  # Nội dung PDF
-                        "pdf_titles": {"type": "keyword"},
-                        "pdf_files": {"type": "keyword"},  # Legacy format (s3a:// paths only)
-                        
-                        # PDF files with page info (for UI display)
-                        "pdf_files_with_pages": {
-                            "type": "nested",
-                            "properties": {
-                                "path": {"type": "keyword"},
-                                "name": {"type": "keyword"},
-                                "page": {"type": "integer"}
-                            }
-                        },
-                        
-                        # Nested PDF chunks for page-level search
-                        "pdf_chunks": {
-                            "type": "nested",
-                            "properties": {
-                                "text": {"type": "text", "analyzer": "english"},
-                                "page": {"type": "integer"},
-                                "file": {"type": "keyword"},
-                                "file_uri": {"type": "keyword"},
-                                # Chunk-level embedding (computed offline via Colab/Kaggle)
-                                "embedding": {
-                                    "type": "dense_vector",
-                                    "dims": self.embed_dims,
-                                    "index": False  # Not indexed — re-ranked client-side
-                                }
-                            }
-                        },
-                        # Doc-level embedding (computed offline via Colab/Kaggle)
-                        # Used for KNN retrieval — handles VI/EN cross-lingual queries
-                        "embedding": {
-                            "type": "dense_vector",
-                            "dims": self.embed_dims,
-                            "index": True,
-                            "similarity": "cosine"
+        mapping = {
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0,
+                "analysis": {
+                    "analyzer": {
+                        "default": {
+                            "type": "standard",
+                            "stopwords": "_none_",
                         }
                     }
-                }
-            }
-            self.es.indices.create(index=self.index_name, **body)
+                },
+            },
+            "mappings": {
+                "properties": {
+                    "resource_id": {"type": "keyword"},
+                    "title": {"type": "text", "analyzer": "standard"},
+                    "description": {"type": "text", "analyzer": "standard"},
+                    "search_text": {"type": "text", "analyzer": "standard"},
+                    "source_url": {"type": "keyword"},
+                    "source_system": {"type": "keyword"},
+                    "language": {"type": "keyword"},
+                    "subject_ids": {"type": "keyword"},
+                    "subjects": {"type": "keyword"},
+                    "program_ids": {"type": "keyword"},
+                    "license_name": {"type": "keyword"},
+                    "license_url": {"type": "keyword"},
+                    "publication_date": {"type": "date"},
+                    "quality_score": {"type": "float"},
+                    "subjects_count": {"type": "integer"},
+                    "document_count": {"type": "integer"},
+                    "chunk_count": {"type": "integer"},
+                    "updated_at": {"type": "date"},
+                    "documents": {
+                        "type": "nested",
+                        "properties": {
+                            "asset_uid": {"type": "keyword"},
+                            "path": {"type": "keyword"},
+                            "file_name": {"type": "text"},
+                            "mime_type": {"type": "keyword"},
+                            "size_bytes": {"type": "long"},
+                        },
+                    },
+                    "chunk_items": {
+                        "type": "nested",
+                        "properties": {
+                            "chunk_id": {"type": "keyword"},
+                            "asset_uid": {"type": "keyword"},
+                            "page_no": {"type": "integer"},
+                            "chunk_order": {"type": "integer"},
+                            "text": {"type": "text", "analyzer": "standard"},
+                            "token_count": {"type": "integer"},
+                            "lang": {"type": "keyword"},
+                            "embedding": {
+                                "type": "dense_vector",
+                                "dims": 384,  # paraphrase-multilingual-MiniLM-L12-v2
+                                "index": True,
+                                "similarity": "cosine",
+                            },
+                        },
+                    },
+                    "embedding": {
+                        "type": "dense_vector",
+                        "dims": 384,  # Doc-level (avg of chunks)
+                        "index": True,
+                        "similarity": "cosine",
+                    },
+                },
+            },
+        }
 
-    def _bulk_index(self, df: DataFrame) -> None:
-        """Bulk index documents vào Elasticsearch (batch processing)"""
-        # Cache DataFrame để không tính lại nhiều lần
-        cached = df.persist()
-        total = cached.count()
-        if total == 0:
-            cached.unpersist()
-            print("No documents to index")
-            return
+        logger.info(f"Creating index: {self.index_name}")
+        self.es.indices.create(index=self.index_name, body=mapping)
 
-        print(f"Indexing {total:,} documents into '{self.index_name}' (batch={self.batch_size})")
-        
-        # Bulk index với batching (500 docs/request)
+    def _bulk_index(self, df: DataFrame):
+        """Bulk index documents to Elasticsearch."""
+        logger.info(f"Indexing {df.count():,} documents (batch={self.batch_size})...")
+
+        # Get watermark for incremental
+        watermark = None
+        if self.incremental:
+            try:
+                resp = self.es.search(
+                    index=self.index_name,
+                    body={
+                        "size": 0,
+                        "aggs": {"max_updated": {"max": {"field": "updated_at"}}},
+                    },
+                )
+                watermark_ms = resp["aggregations"]["max_updated"].get("value")
+                if watermark_ms:
+                    watermark = datetime.fromtimestamp(watermark_ms / 1000)
+                    logger.info(f"Incremental mode: watermark = {watermark}")
+            except Exception as e:
+                logger.warning(f"Failed to get watermark: {e}")
+
+        # Filter incremental
+        if watermark:
+            df = df.filter(F.col("updated_at") > F.lit(watermark))
+            count = df.count()
+            if count == 0:
+                logger.info("No new documents to index (incremental)")
+                return
+            logger.info(f"Incremental: indexing {count:,} new/updated documents")
+
+        # Convert to actions
+        def _yield_actions():
+            for row in df.toLocalIterator():
+                doc = row.asDict(recursive=True)
+                doc_id = doc.pop("_id")
+                
+                # Map doc_embedding to embedding field
+                if doc.get("doc_embedding"):
+                    doc["embedding"] = doc.pop("doc_embedding")
+                else:
+                    doc.pop("doc_embedding", None)
+                
+                # Clean None values
+                doc = {k: v for k, v in doc.items() if v is not None}
+                yield {"_index": self.index_name, "_id": doc_id, "_source": doc}
+
         success, errors = helpers.bulk(
             self.es,
-            self._yield_actions(cached),  # Generator yield từng document
-            chunk_size=self.batch_size,  # 500 docs/batch
-            request_timeout=self.request_timeout,  # 120s timeout
+            _yield_actions(),
+            chunk_size=self.batch_size,
+            request_timeout=self.timeout,
+            raise_on_error=False,
         )
-        
-        cached.unpersist()  # Giải phóng cache
-        
+
+        # Log embedding stats
+        with_emb = df.filter(F.col("doc_embedding").isNotNull()).count()
+        logger.info(f"Indexed {success} documents ({with_emb} with embeddings)")
         if errors:
-            print(f"[Warning] Elasticsearch bulk errors: {errors}")
-        print(f"[Success] Indexed {success:,} documents into {self.index_name}")
+            logger.error(f"Failed to index {len(errors)} documents")
 
-    def _yield_actions(self, df: DataFrame) -> Iterator[Dict[str, Any]]:
-        """Yield Elasticsearch bulk actions from a Spark DataFrame."""
-        pdf_by_source: Dict[str, int] = {}  # Track PDFs by source system
-        source_counts: Dict[str, int] = {}  # Track total docs by source system
-        pdf_error_count = 0
-        total_count = 0
-        
-        for row in df.toLocalIterator():
-            doc = row.asDict(recursive=True)
-            doc = {k: v for k, v in doc.items() if v is not None}
-            total_count += 1
-            
-            # Track source systems
-            source = doc.get("source_system", "unknown")
-            source_counts[source] = source_counts.get(source, 0) + 1
-            
-            try:
-                self._augment_with_pdf_content(doc)
-                if doc.get("pdf_text") or doc.get("pdf_chunks"):
-                    pdf_by_source[source] = pdf_by_source.get(source, 0) + 1
-            except Exception as exc:
-                pdf_error_count += 1
-                if pdf_error_count <= 3:
-                    print(f"[Warning] PDF augment error for {doc.get('resource_id')}: {exc}")
-
-            # NOTE: doc-level embedding is computed offline (Colab/Kaggle)
-            # and imported via import_embeddings.py
-
-            doc_id = doc.get("resource_key") or doc.get("resource_id")
-            yield {"_index": self.index_name, "_id": doc_id, "_source": doc}
-        
-        # Summary by source
-        total_pdf = sum(pdf_by_source.values())
-        print(f"[PDF Stats] Total: {total_pdf}/{total_count} documents with PDF content")
-        print(f"[Source Systems] {source_counts}")
-        for source, count in sorted(source_counts.items()):
-            pdf_count = pdf_by_source.get(source, 0)
-            print(f"  - {source}: {pdf_count}/{count} PDFs")
-
-    def run(self) -> None:
-        """Main function: Đồng bộ dữ liệu từ Gold layer sang Elasticsearch"""
-        print("=" * 80)
-        print("Starting Gold -> Elasticsearch sync")
-        print("=" * 80)
-
-        # Bước 1: Load Gold tables (dimension và fact)
-        dim_resources = self._load_table(self.dim_oer_resources_table, "dim_oer_resources")
-        if dim_resources is None:
-            print("[Error] dim_oer_resources missing; aborting sync")
-            return
-
-        fact_resources = self._load_table(self.fact_oer_resources_table, "fact_oer_resources")
-        dim_sources = self._load_table(self.dim_sources_table, "dim_sources")
-        dim_languages = self._load_table(self.dim_languages_table, "dim_languages")
-        dim_date = self._load_table(self.dim_date_table, "dim_date")
-
-        # Bước 2: Join và enrich dữ liệu
-        fact_enrichment = self._prepare_fact_enrichment(
-            fact_resources, dim_sources, dim_languages, dim_date
-        )
-
-        # Bước 3: Build search documents với search_text
-        docs = self._build_index_dataframe(dim_resources, fact_enrichment)
-        
-        # Bước 4: Tạo Elasticsearch index (nếu chưa có)
-        self._ensure_index()
-        
-        # Bước 5: Bulk index documents vào Elasticsearch
-        self._bulk_index(docs)
-
-        # Bước 6: Export texts for offline embedding (Colab/Kaggle)
-        export_path = os.getenv(
-            "ELASTICSEARCH_EXPORT_PATH",
-            "/opt/airflow/exports/oer_texts_for_embedding.jsonl",
-        )
-        self._export_texts_for_embedding(export_path)
-        
-        print("Gold -> Elasticsearch sync complete")
-
-    def _export_texts_for_embedding(self, output_path: str) -> None:
-        """Export lightweight JSONL with texts to embed on Colab/Kaggle.
-
-        Each line: {"_id": "...", "doc_text": "...", "chunks": [{"idx":0, "text":"..."}]}
-
-        This file is ~10-50x smaller than full docs because it only contains
-        the text fields needed for embedding (no PDF binary, no metadata).
-        Upload this to Colab/Kaggle → run embedding notebook → download result.
-        """
-        print(f"[Export] Writing texts for embedding → {output_path}")
+    def _export_for_embedding(self, output_path: str):
+        """Export texts for embedding generation."""
+        logger.info(f"Exporting texts for embedding → {output_path}")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
-        # Read all indexed docs from ES (just the text fields we need)
-        scroll_body = {
+        query = {
             "size": 500,
-            "_source": ["title", "description", "pdf_chunks.text"],
-            "query": {"match_all": {}}
+            "_source": [
+                "resource_id",
+                "title",
+                "description",
+                "source_system",
+                "language",
+                "subjects",
+                "chunk_items.chunk_id",
+                "chunk_items.asset_uid",
+                "chunk_items.page_no",
+                "chunk_items.chunk_order",
+                "chunk_items.text",
+                "chunk_items.token_count",
+                "chunk_items.lang",
+            ],
+            "query": {"match_all": {}},
         }
 
         count = 0
-        with open(output_path, "w", encoding="utf-8") as fh:
-            resp = self.es.search(index=self.index_name, body=scroll_body, scroll="5m")
-            scroll_id = resp.get("_scroll_id")
+        with open(output_path, "w", encoding="utf-8") as f:
+            resp = self.es.search(index=self.index_name, body=query, scroll="5m")
+            scroll_id = resp["_scroll_id"]
 
             while True:
                 hits = resp.get("hits", {}).get("hits", [])
@@ -1151,46 +483,80 @@ class OERElasticsearchIndexer:
                     break
 
                 for hit in hits:
-                    src = hit.get("_source", {})
-                    doc_id = hit["_id"]
-
-                    # Doc-level text: title + description (for doc embedding)
+                    src = hit["_source"]
                     title = src.get("title", "")
-                    desc = (src.get("description") or "")[:800]
-                    doc_text = f"{title}. {desc}".strip()
+                    desc = (src.get("description") or "")[:500]
+                    subjects = " ".join(src.get("subjects") or [])
+                    doc_text = f"{title}. {desc}. {subjects}".strip()
 
-                    # Chunk texts (for chunk embeddings)
                     chunks = []
-                    for i, ch in enumerate(src.get("pdf_chunks") or []):
-                        text = (ch.get("text") or "")[:2000]
+                    for ch in src.get("chunk_items") or []:
+                        text = (ch.get("text") or "").strip()
                         if text:
-                            chunks.append({"idx": i, "text": text})
+                            chunks.append(
+                                {
+                                    "chunk_id": ch.get("chunk_id"),
+                                    "asset_uid": ch.get("asset_uid"),
+                                    "page_no": ch.get("page_no"),
+                                    "chunk_order": ch.get("chunk_order"),
+                                    "text": text[:2000],
+                                    "lang": ch.get("lang", "en"),
+                                }
+                            )
 
                     record = {
-                        "_id": doc_id,
+                        "_id": hit["_id"],
+                        "resource_id": src.get("resource_id"),
+                        "title": title,
+                        "source_system": src.get("source_system"),
+                        "language": src.get("language"),
+                        "subjects": src.get("subjects") or [],
                         "doc_text": doc_text,
                         "chunks": chunks,
                     }
-                    fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
                     count += 1
 
                 resp = self.es.scroll(scroll_id=scroll_id, scroll="5m")
 
-            # Clean up scroll
             try:
                 self.es.clear_scroll(scroll_id=scroll_id)
-            except Exception:
+            except:
                 pass
 
         size_mb = os.path.getsize(output_path) / (1024 * 1024)
-        print(f"[Export] Done — {count} records, {size_mb:.1f} MB → {output_path}")
-        print(f"[Export] Upload this file to Colab/Kaggle and run the embedding notebook.")
-        print(f"[Export] Then run: python import_embeddings.py <enriched_file.jsonl>")
+        logger.info(f"Exported {count} records ({size_mb:.1f} MB) → {output_path}")
+        logger.info("Next: Generate embeddings with multilingual model (e.g., distiluse-base-multilingual-cased-v2)")
+        logger.info("Then import back: python import_embeddings.py <enriched_file.jsonl>")
+
+    def run(self):
+        """Run full sync pipeline."""
+        logger.info("=" * 80)
+        logger.info("Starting Chatbot Elasticsearch Sync")
+        logger.info("=" * 80)
+
+        df = self._build_index_dataframe()
+        if df is None:
+            logger.error("Failed to build index DataFrame")
+            return
+
+        self._ensure_index()
+        self._bulk_index(df)
+
+        # Log embedding coverage
+        total = df.count()
+        with_emb = df.filter(F.col("doc_embedding").isNotNull()).count()
+        logger.info(f"[Embedding Coverage] {with_emb}/{total} docs ({with_emb*100//total if total > 0 else 0}%)")
+        logger.info("Note: Run Silver embedding pipeline to generate embeddings")
+
+        logger.info("=" * 80)
+        logger.info("Chatbot Elasticsearch Sync Complete")
+        logger.info("=" * 80)
 
 
-def main() -> None:
-    indexer = OERElasticsearchIndexer()
-    indexer.run()
+def main():
+    sync = ChatbotElasticsearchSync()
+    sync.run()
 
 
 if __name__ == "__main__":

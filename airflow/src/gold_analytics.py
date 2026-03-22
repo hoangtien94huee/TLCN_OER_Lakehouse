@@ -44,7 +44,9 @@ class GoldAnalyticsBuilder:
         self.gold_database = os.getenv("GOLD_DATABASE", "analytics")
 
         # Silver tables
-        self.silver_oer_table = f"{self.silver_catalog}.{self.silver_database}.oer_resources"
+        self.silver_oer_table = f"{self.silver_catalog}.{self.silver_database}.oer_resources_curated"
+        self.silver_documents_table = f"{self.silver_catalog}.{self.silver_database}.oer_documents"
+        self.silver_chunks_table = f"{self.silver_catalog}.{self.silver_database}.oer_chunks"
         self.reference_programs_table = f"{self.silver_catalog}.{self.silver_database}.reference_programs"
         self.reference_subjects_table = f"{self.silver_catalog}.{self.silver_database}.reference_subjects"
         self.reference_program_subject_links_table = (
@@ -68,6 +70,14 @@ class GoldAnalyticsBuilder:
         print(f"Gold Analytics Builder initialized: {self.gold_catalog}.{self.gold_database}")
 
     def _create_spark_session(self) -> SparkSession:
+        java_home = os.getenv("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+        os.environ.setdefault("JAVA_HOME", java_home)
+        os.environ["PATH"] = f"{java_home}/bin:{os.environ.get('PATH', '')}"
+        os.environ.pop("JAVA_TOOL_OPTIONS", None)
+        os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
+        os.environ.setdefault("SPARK_DRIVER_HOST", "oer-airflow-scraper")
+        os.environ.setdefault("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0")
+
         # Use local JARs instead of downloading from Maven
         jars_dir = "/opt/airflow/jars"
         local_jars = ",".join([
@@ -102,6 +112,8 @@ class GoldAnalyticsBuilder:
             .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
             .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "4g"))
             .config("spark.driver.maxResultSize", os.getenv("SPARK_DRIVER_MAXRESULTSIZE", "2g"))
+            .config("spark.driver.host", os.getenv("SPARK_DRIVER_HOST", "oer-airflow-scraper"))
+            .config("spark.driver.bindAddress", os.getenv("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0"))
             .config("spark.sql.debug.maxToStringFields", "500")  # Increase field limit for complex schemas
             .getOrCreate()
         )
@@ -112,7 +124,9 @@ class GoldAnalyticsBuilder:
         """Build all Gold layer tables."""
        
         # Load source data
-        oer_df = self._load_table(self.silver_oer_table, "Silver OER Resources")
+        oer_df = self._load_table(self.silver_oer_table, "Silver OER Resources (Curated)")
+        documents_df = self._load_table(self.silver_documents_table, "Silver OER Documents")
+        chunks_df = self._load_table(self.silver_chunks_table, "Silver OER Chunks")
         programs_df = self._load_table(self.reference_programs_table, "Programs")
         subjects_df = self._load_table(self.reference_subjects_table, "Subjects")
         program_subject_links_df = self._load_table(
@@ -132,7 +146,7 @@ class GoldAnalyticsBuilder:
         dim_sources = self._build_dim_sources(oer_df)
         dim_languages = self._build_dim_languages(oer_df)
         dim_date = self._build_dim_date(oer_df)
-        dim_oer_resources = self._build_dim_oer_resources(oer_df)
+        dim_oer_resources = self._build_dim_oer_resources(oer_df, documents_df, chunks_df)
 
         # Build facts
         
@@ -145,7 +159,7 @@ class GoldAnalyticsBuilder:
             dim_date,
         )
         fact_oer_resources = self._build_fact_oer_resources(
-            oer_df, dim_sources, dim_languages, dim_date
+            oer_df, dim_sources, dim_languages, dim_date, documents_df, chunks_df
         )
         
         # Build bridge tables (many-to-many relationships)
@@ -401,7 +415,12 @@ class GoldAnalyticsBuilder:
 
         return dim_date
 
-    def _build_dim_oer_resources(self, oer_df: DataFrame) -> DataFrame:
+    def _build_dim_oer_resources(
+        self,
+        oer_df: DataFrame,
+        documents_df: Optional[DataFrame],
+        chunks_df: Optional[DataFrame],
+    ) -> DataFrame:
         """
         Dimension: OER Resources (Descriptive Attributes)
         
@@ -425,9 +444,50 @@ class GoldAnalyticsBuilder:
             ).otherwise(F.col("publisher_name")).alias("publisher_name"),
             F.col("creator_names"),
             F.col("bronze_source_path"),
+            F.col("matched_subjects"),
+            F.col("program_ids"),
             F.col("license_name"),
             F.col("license_url"),
+            F.col("data_quality_score"),
+            F.col("ingested_at"),
         )
+
+        if documents_df is not None and not documents_df.rdd.isEmpty():
+            doc_stats = (
+                documents_df.groupBy("resource_uid")
+                .agg(
+                    F.countDistinct("asset_uid").alias("document_count"),
+                    F.max("updated_at").alias("documents_updated_at"),
+                )
+                .select(F.col("resource_uid").alias("doc_resource_uid"), "document_count", "documents_updated_at")
+            )
+            dim = dim.join(
+                doc_stats,
+                dim.resource_key == doc_stats.doc_resource_uid,
+                "left",
+            ).drop("doc_resource_uid")
+        else:
+            dim = dim.withColumn("document_count", F.lit(0)).withColumn("documents_updated_at", F.lit(None).cast("timestamp"))
+
+        if chunks_df is not None and not chunks_df.rdd.isEmpty():
+            chunk_stats = (
+                chunks_df.groupBy("resource_uid")
+                .agg(
+                    F.countDistinct("chunk_id").alias("chunk_count"),
+                    F.max("updated_at").alias("chunks_updated_at"),
+                )
+                .select(F.col("resource_uid").alias("chunk_resource_uid"), "chunk_count", "chunks_updated_at")
+            )
+            dim = dim.join(
+                chunk_stats,
+                dim.resource_key == chunk_stats.chunk_resource_uid,
+                "left",
+            ).drop("chunk_resource_uid")
+        else:
+            dim = dim.withColumn("chunk_count", F.lit(0)).withColumn("chunks_updated_at", F.lit(None).cast("timestamp"))
+
+        dim = dim.withColumn("document_count", F.coalesce(F.col("document_count"), F.lit(0)))
+        dim = dim.withColumn("chunk_count", F.coalesce(F.col("chunk_count"), F.lit(0)))
         
         return dim.dropDuplicates(["resource_key"]).orderBy("resource_key")
 
@@ -552,6 +612,8 @@ class GoldAnalyticsBuilder:
         dim_sources: DataFrame,
         dim_languages: DataFrame,
         dim_date: DataFrame,
+        documents_df: Optional[DataFrame],
+        chunks_df: Optional[DataFrame],
     ) -> DataFrame:
         """
         Fact Table: OER Resources (Kimball Standard - Keys + Measures Only)
@@ -605,7 +667,35 @@ class GoldAnalyticsBuilder:
             "left"
         )
 
-        # Select only keys and measures (Kimball standard - NO arrays, NO descriptive attributes)
+        if documents_df is not None and not documents_df.rdd.isEmpty():
+            document_counts = (
+                documents_df.groupBy("resource_uid")
+                .agg(F.countDistinct("asset_uid").alias("document_count"))
+                .select(F.col("resource_uid").alias("doc_resource_uid"), "document_count")
+            )
+            fact = fact.join(
+                document_counts,
+                F.col("oer.resource_uid") == F.col("doc_resource_uid"),
+                "left",
+            ).drop("doc_resource_uid")
+        else:
+            fact = fact.withColumn("document_count", F.lit(0))
+
+        if chunks_df is not None and not chunks_df.rdd.isEmpty():
+            chunk_counts = (
+                chunks_df.groupBy("resource_uid")
+                .agg(F.countDistinct("chunk_id").alias("chunk_count"))
+                .select(F.col("resource_uid").alias("chunk_resource_uid"), "chunk_count")
+            )
+            fact = fact.join(
+                chunk_counts,
+                F.col("oer.resource_uid") == F.col("chunk_resource_uid"),
+                "left",
+            ).drop("chunk_resource_uid")
+        else:
+            fact = fact.withColumn("chunk_count", F.lit(0))
+
+        # Select only keys and measures (Kimball standard - NO descriptive attributes)
         # Normalize data_quality_score to 0-1 scale (handle legacy 0-10 scale)
         fact = fact.select(
             # Primary Key (Degenerate Dimension - links to dim_oer_resources)
@@ -619,6 +709,8 @@ class GoldAnalyticsBuilder:
             
             # Measures (numeric facts) - Only meaningful aggregatable metrics
             F.size(F.col("oer.matched_subjects")).alias("matched_subjects_count"),
+            F.coalesce(F.col("document_count"), F.lit(0)).cast(T.IntegerType()).alias("document_count"),
+            F.coalesce(F.col("chunk_count"), F.lit(0)).cast(T.IntegerType()).alias("chunk_count"),
             # Normalize: if score > 1, it's on 0-10 scale, divide by 10
             F.when(
                 F.col("oer.data_quality_score") > 1.0,

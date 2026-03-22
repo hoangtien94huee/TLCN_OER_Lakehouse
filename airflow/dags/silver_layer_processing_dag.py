@@ -31,6 +31,11 @@ os.environ.setdefault("REFERENCE_DATA_URI", "s3a://oer-lakehouse/bronze/referenc
 
 from src.silver_transform import SilverTransformer
 
+# Lazy import for embedding (heavy dependency)
+def get_embedding_generator():
+    from src.silver_embeddings import SilverEmbeddingGenerator
+    return SilverEmbeddingGenerator()
+
 # DAG Configuration
 default_args = {
     'owner': 'oer-lakehouse',
@@ -58,7 +63,7 @@ dag = DAG(
 def check_bronze_data_availability(**context):
     """Check if bronze data is available for processing"""
     try:
-        execution_date = context['execution_date'].strftime('%Y-%m-%d')
+        execution_date = context['logical_date'].strftime('%Y-%m-%d')
         print(f"[Bronze Check] Checking bronze data for {execution_date}")
         
         return check_bronze_data_fallback(**context)
@@ -71,7 +76,7 @@ def check_bronze_data_fallback(**context):
     """Fallback method to check bronze data using direct MinIO"""
     from minio import Minio
     
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     print(f"[Bronze Check Fallback] Using direct MinIO check for {execution_date}")
     
     try:
@@ -128,15 +133,38 @@ def check_bronze_data_fallback(**context):
 
 
 # === Processing Tasks - Each source independently ===
+def run_reference_bootstrap_task(**context):
+    """Bootstrap reference_* tables once; rerun only when reference hash changes."""
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
+    print(f"[Reference Bootstrap] Starting for {execution_date}")
+    try:
+        os.environ['SILVER_MODE'] = 'reference_bootstrap'
+        os.environ['RUN_REFERENCE_BOOTSTRAP'] = '1'
+        os.environ.setdefault('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')
+        os.environ.setdefault('SPARK_MASTER', os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077'))
+        os.environ.setdefault('SPARK_DRIVER_HOST', 'oer-airflow-scraper')
+        os.environ.setdefault('SPARK_DRIVER_BIND_ADDRESS', '0.0.0.0')
+        transformer = SilverTransformer()
+        transformer.run_reference_bootstrap_only()
+        return {'status': 'success', 'execution_date': execution_date}
+    except Exception as e:
+        print(f"[Reference Bootstrap] Failed: {e}")
+        raise
 
 def process_mit_ocw_task(**context):
     """Process MIT OCW data to silver layer - INDEPENDENT"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     print(f"[MIT OCW] Starting silver layer processing for {execution_date}")
     
     try:
         # Set to process ONLY MIT OCW
         os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/mit_ocw/json/'
+        os.environ['SILVER_MODE'] = 'transform'
+        os.environ['RUN_REFERENCE_BOOTSTRAP'] = '0'
+        os.environ.setdefault('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')
+        os.environ.setdefault('SPARK_MASTER', os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077'))
+        os.environ.setdefault('SPARK_DRIVER_HOST', 'oer-airflow-scraper')
+        os.environ.setdefault('SPARK_DRIVER_BIND_ADDRESS', '0.0.0.0')
         
         # Run silver transform for MIT OCW only
         transformer = SilverTransformer()
@@ -172,11 +200,17 @@ def process_mit_ocw_task(**context):
 
 def process_openstax_task(**context):
     """Process OpenStax data to silver layer - INDEPENDENT"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     print(f"[OpenStax] Starting silver layer processing for {execution_date}")
     
     try:
         os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/openstax/json/'
+        os.environ['SILVER_MODE'] = 'transform'
+        os.environ['RUN_REFERENCE_BOOTSTRAP'] = '0'
+        os.environ.setdefault('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')
+        os.environ.setdefault('SPARK_MASTER', os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077'))
+        os.environ.setdefault('SPARK_DRIVER_HOST', 'oer-airflow-scraper')
+        os.environ.setdefault('SPARK_DRIVER_BIND_ADDRESS', '0.0.0.0')
         
         # Run silver transform for OpenStax only
         transformer = SilverTransformer()
@@ -212,12 +246,18 @@ def process_openstax_task(**context):
 
 def process_otl_task(**context):
     """Process OTL data to silver layer - INDEPENDENT"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     print(f"[OTL] Starting silver layer processing for {execution_date}")
     
     try:
         # Set to process ONLY OTL
         os.environ['BRONZE_INPUT'] = 's3a://oer-lakehouse/bronze/otl/json/'
+        os.environ['SILVER_MODE'] = 'transform'
+        os.environ['RUN_REFERENCE_BOOTSTRAP'] = '0'
+        os.environ.setdefault('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')
+        os.environ.setdefault('SPARK_MASTER', os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077'))
+        os.environ.setdefault('SPARK_DRIVER_HOST', 'oer-airflow-scraper')
+        os.environ.setdefault('SPARK_DRIVER_BIND_ADDRESS', '0.0.0.0')
         
         # Run silver transform for OTL only
         transformer = SilverTransformer()
@@ -253,7 +293,7 @@ def process_otl_task(**context):
 
 def generate_processing_report(**context):
     """Generate comprehensive processing report"""
-    execution_date = context['execution_date'].strftime('%Y-%m-%d')
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
     
     # Collect results from all processing tasks
     mit_result = context['task_instance'].xcom_pull(
@@ -312,6 +352,37 @@ def generate_processing_report(**context):
     
     return report
 
+
+def run_embedding_generation_task(**context):
+    """Generate embeddings for new chunks in Silver layer."""
+    execution_date = context['logical_date'].strftime('%Y-%m-%d')
+    print(f"[Embedding] Starting embedding generation for {execution_date}")
+    
+    try:
+        os.environ.setdefault('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')
+        os.environ.setdefault('SPARK_MASTER', os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077'))
+        os.environ.setdefault('SPARK_DRIVER_HOST', 'oer-airflow-scraper')
+        os.environ.setdefault('SPARK_DRIVER_BIND_ADDRESS', '0.0.0.0')
+        
+        generator = get_embedding_generator()
+        result = generator.run()
+        stats = generator.get_stats()
+        
+        print(f"[Embedding] Result: {result}")
+        print(f"[Embedding] Stats: {stats}")
+        
+        context['task_instance'].xcom_push(key='embedding_result', value=result)
+        context['task_instance'].xcom_push(key='embedding_stats', value=stats)
+        
+        return result
+        
+    except Exception as e:
+        print(f"[Embedding] Failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
+
+
 # === DAG Tasks Definition ===
 
 start_task = DummyOperator(
@@ -322,6 +393,12 @@ start_task = DummyOperator(
 check_bronze_task = PythonOperator(
     task_id='check_bronze_data_availability',
     python_callable=check_bronze_data_availability,
+    dag=dag,
+)
+
+reference_bootstrap_task = PythonOperator(
+    task_id='reference_bootstrap',
+    python_callable=run_reference_bootstrap_task,
     dag=dag,
 )
 
@@ -350,6 +427,13 @@ generate_report_task = PythonOperator(
     dag=dag,
 )
 
+# Embedding generation task (after all sources processed)
+generate_embeddings_task = PythonOperator(
+    task_id='generate_embeddings',
+    python_callable=run_embedding_generation_task,
+    dag=dag,
+)
+
 end_task = DummyOperator(
     task_id='end_silver_processing',
     dag=dag,
@@ -357,5 +441,7 @@ end_task = DummyOperator(
 
 # === DAG Dependencies ===
 start_task >> check_bronze_task
-check_bronze_task >> process_mit_ocw_silver >> process_openstax_silver >> process_otl_silver
-process_otl_silver >> generate_report_task >> end_task
+check_bronze_task >> reference_bootstrap_task
+reference_bootstrap_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
+[process_mit_ocw_silver, process_openstax_silver, process_otl_silver] >> generate_report_task
+generate_report_task >> generate_embeddings_task >> end_task

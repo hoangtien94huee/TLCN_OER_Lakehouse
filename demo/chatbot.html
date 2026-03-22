@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OER Chatbot - Demo</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .chat-container {
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .chat-header h1 {
+            font-size: 1.5rem;
+            margin-bottom: 5px;
+        }
+        
+        .chat-header p {
+            font-size: 0.85rem;
+            opacity: 0.9;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        
+        .message {
+            margin-bottom: 20px;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .message.user {
+            align-items: flex-end;
+        }
+        
+        .message.bot {
+            align-items: flex-start;
+        }
+        
+        .message-content {
+            max-width: 80%;
+            padding: 15px 20px;
+            border-radius: 20px;
+            line-height: 1.5;
+        }
+        
+        .message.user .message-content {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 5px;
+        }
+        
+        .message.bot .message-content {
+            background: white;
+            color: #333;
+            border-bottom-left-radius: 5px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .message-label {
+            font-size: 0.75rem;
+            color: #888;
+            margin-bottom: 5px;
+            padding: 0 10px;
+        }
+        
+        .contexts {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #eee;
+        }
+        
+        .contexts-title {
+            font-size: 0.8rem;
+            color: #666;
+            margin-bottom: 10px;
+            font-weight: 600;
+        }
+        
+        .context-item {
+            background: #f8f9fa;
+            border-left: 3px solid #667eea;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 0 8px 8px 0;
+            font-size: 0.85rem;
+        }
+        
+        .context-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .context-source {
+            font-size: 0.75rem;
+            color: #667eea;
+            margin-top: 5px;
+        }
+        
+        .context-source a {
+            color: #667eea;
+            text-decoration: none;
+        }
+        
+        .context-source a:hover {
+            text-decoration: underline;
+        }
+        
+        .context-text {
+            color: #555;
+            display: -webkit-box;
+            -webkit-line-clamp: 3;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        
+        .chat-input-container {
+            padding: 20px;
+            background: white;
+            border-top: 1px solid #eee;
+        }
+        
+        .chat-input-wrapper {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .chat-input {
+            flex: 1;
+            padding: 15px 20px;
+            border: 2px solid #e0e0e0;
+            border-radius: 25px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .chat-input:focus {
+            border-color: #667eea;
+        }
+        
+        .chat-input::placeholder {
+            color: #aaa;
+        }
+        
+        .send-btn {
+            padding: 15px 30px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+        
+        .send-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .send-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .typing-indicator {
+            display: flex;
+            gap: 5px;
+            padding: 15px 20px;
+        }
+        
+        .typing-indicator span {
+            width: 8px;
+            height: 8px;
+            background: #667eea;
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out;
+        }
+        
+        .typing-indicator span:nth-child(1) { animation-delay: -0.32s; }
+        .typing-indicator span:nth-child(2) { animation-delay: -0.16s; }
+        
+        @keyframes bounce {
+            0%, 80%, 100% { transform: scale(0); }
+            40% { transform: scale(1); }
+        }
+        
+        .error-message {
+            background: #fee;
+            color: #c00;
+            padding: 10px 15px;
+            border-radius: 10px;
+            margin-top: 10px;
+            font-size: 0.85rem;
+        }
+        
+        .search-mode {
+            display: inline-block;
+            background: #e8f4e8;
+            color: #2a7d2a;
+            padding: 3px 10px;
+            border-radius: 10px;
+            font-size: 0.7rem;
+            margin-left: 10px;
+        }
+        
+        .welcome-message {
+            text-align: center;
+            padding: 40px;
+            color: #888;
+        }
+        
+        .welcome-message h2 {
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+        
+        .suggestions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        
+        .suggestion-btn {
+            padding: 10px 15px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+        
+        .suggestion-btn:hover {
+            border-color: #667eea;
+            color: #667eea;
+        }
+        
+        /* API Config */
+        .api-config {
+            padding: 10px 20px;
+            background: #f0f0f0;
+            font-size: 0.8rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .api-config input {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 0.8rem;
+        }
+        
+        .api-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ccc;
+        }
+        
+        .api-status.connected {
+            background: #4caf50;
+        }
+        
+        .api-status.error {
+            background: #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h1>📚 OER Chatbot</h1>
+            <p>Hỏi đáp tài liệu giáo dục mở - Open Educational Resources</p>
+        </div>
+        
+        <div class="api-config">
+            <span>API:</span>
+            <input type="text" id="apiUrl" value="http://localhost:18088/api" placeholder="API URL">
+            <div class="api-status" id="apiStatus" title="Checking..."></div>
+        </div>
+        
+        <div class="chat-messages" id="chatMessages">
+            <div class="welcome-message">
+                <h2>Xin chào! 👋</h2>
+                <p>Tôi có thể giúp bạn tìm kiếm và trả lời các câu hỏi về tài liệu giáo dục mở.</p>
+                <p>Hãy thử hỏi tôi về:</p>
+                <div class="suggestions">
+                    <button class="suggestion-btn" onclick="askSuggestion(this)">What is calculus?</button>
+                    <button class="suggestion-btn" onclick="askSuggestion(this)">Đại số tuyến tính là gì?</button>
+                    <button class="suggestion-btn" onclick="askSuggestion(this)">Explain machine learning</button>
+                    <button class="suggestion-btn" onclick="askSuggestion(this)">Giải thích về xác suất thống kê</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="chat-input-container">
+            <div class="chat-input-wrapper">
+                <input 
+                    type="text" 
+                    class="chat-input" 
+                    id="userInput" 
+                    placeholder="Nhập câu hỏi của bạn..." 
+                    onkeypress="handleKeyPress(event)"
+                >
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">Gửi</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const chatMessages = document.getElementById('chatMessages');
+        const userInput = document.getElementById('userInput');
+        const sendBtn = document.getElementById('sendBtn');
+        const apiUrlInput = document.getElementById('apiUrl');
+        const apiStatus = document.getElementById('apiStatus');
+        
+        let isFirstMessage = true;
+        
+        // Check API health on load and when URL changes
+        async function checkApiHealth() {
+            const apiUrl = apiUrlInput.value.trim();
+            try {
+                const response = await fetch(`${apiUrl}/health`, { 
+                    method: 'GET',
+                    mode: 'cors'
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    apiStatus.className = 'api-status connected';
+                    apiStatus.title = `Connected - ES: ${data.elasticsearch}, LLM: ${data.llm_provider}`;
+                } else {
+                    throw new Error('API not healthy');
+                }
+            } catch (e) {
+                apiStatus.className = 'api-status error';
+                apiStatus.title = 'Connection failed: ' + e.message;
+            }
+        }
+        
+        // Check on load
+        checkApiHealth();
+        apiUrlInput.addEventListener('change', checkApiHealth);
+        
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+        
+        function askSuggestion(btn) {
+            userInput.value = btn.textContent;
+            sendMessage();
+        }
+        
+        function addMessage(content, isUser, contexts = null, searchMode = null) {
+            if (isFirstMessage) {
+                chatMessages.innerHTML = '';
+                isFirstMessage = false;
+            }
+            
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${isUser ? 'user' : 'bot'}`;
+            
+            let html = `
+                <div class="message-label">${isUser ? 'Bạn' : 'OER Bot'}${searchMode ? `<span class="search-mode">${searchMode}</span>` : ''}</div>
+                <div class="message-content">
+                    ${formatText(content)}
+            `;
+            
+            if (contexts && contexts.length > 0) {
+                html += `
+                    <div class="contexts">
+                        <div class="contexts-title">📖 Nguồn tham khảo (${contexts.length})</div>
+                        ${contexts.map((ctx, i) => `
+                            <div class="context-item">
+                                <div class="context-text">${escapeHtml(ctx.text?.substring(0, 200) || '')}...</div>
+                                <div class="context-source">
+                                    <strong>${escapeHtml(ctx.title || 'Unknown')}</strong>
+                                    ${ctx.page_no ? ` - Trang ${ctx.page_no}` : ''}
+                                    ${ctx.source_url ? ` | <a href="${ctx.source_url}" target="_blank">Xem nguồn</a>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            
+            html += '</div>';
+            messageDiv.innerHTML = html;
+            chatMessages.appendChild(messageDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function addTypingIndicator() {
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message bot';
+            typingDiv.id = 'typingIndicator';
+            typingDiv.innerHTML = `
+                <div class="message-label">OER Bot</div>
+                <div class="message-content">
+                    <div class="typing-indicator">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                </div>
+            `;
+            chatMessages.appendChild(typingDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+        }
+        
+        function removeTypingIndicator() {
+            const typing = document.getElementById('typingIndicator');
+            if (typing) typing.remove();
+        }
+        
+        function formatText(text) {
+            // Basic formatting: newlines to <br>, bold, etc.
+            return escapeHtml(text)
+                .replace(/\n/g, '<br>')
+                .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+        }
+        
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        async function sendMessage() {
+            const question = userInput.value.trim();
+            if (!question) return;
+            
+            const apiUrl = apiUrlInput.value.trim();
+            
+            // Add user message
+            addMessage(question, true);
+            userInput.value = '';
+            sendBtn.disabled = true;
+            
+            // Show typing indicator
+            addTypingIndicator();
+            
+            try {
+                const response = await fetch(`${apiUrl}/ask`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        top_k: 5,
+                        use_hybrid: true
+                    }),
+                });
+                
+                removeTypingIndicator();
+                
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'API request failed');
+                }
+                
+                const data = await response.json();
+                addMessage(
+                    data.answer || 'Không có câu trả lời.',
+                    false,
+                    data.contexts,
+                    data.search_mode
+                );
+                
+            } catch (error) {
+                removeTypingIndicator();
+                addMessage(
+                    `❌ Lỗi: ${error.message}\n\nHãy kiểm tra:\n1. API URL có đúng không\n2. Chatbot API đang chạy không\n3. CORS đã được cấu hình chưa`,
+                    false
+                );
+            }
+            
+            sendBtn.disabled = false;
+            userInput.focus();
+        }
+    </script>
+</body>
+</html>

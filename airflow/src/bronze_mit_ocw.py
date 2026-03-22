@@ -125,6 +125,11 @@ class MITOCWScraper:
             chrome_options.add_argument("--disable-gpu")
             chrome_options.add_argument("--window-size=1920,1080")
             chrome_options.add_argument("--disable-images")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-software-rasterizer")
+            chrome_options.add_argument("--single-process")
+            chrome_options.add_argument("--memory-pressure-off")
+            chrome_options.add_argument("--max_old_space_size=512")
             
             chromedriver_paths = ['/usr/local/bin/chromedriver', '/usr/bin/chromedriver', 'chromedriver']
             
@@ -319,6 +324,20 @@ class MITOCWScraper:
             print(f"  ✗ Error: {e}")
             return None
     
+    def _restart_driver(self):
+        """Restart Chrome driver after crash"""
+        try:
+            if self.driver:
+                self.driver.quit()
+        except Exception:
+            pass
+        self.driver = None
+        try:
+            self._setup_selenium()
+            print("  [Selenium] Driver restarted successfully")
+        except Exception as e:
+            print(f"  [Selenium] Failed to restart driver: {e}")
+
     def _get_page(self, url: str, max_retries=3) -> Optional[BeautifulSoup]:
         """Get page content with Selenium"""
         for attempt in range(max_retries):
@@ -339,11 +358,19 @@ class MITOCWScraper:
                 return BeautifulSoup(self.driver.page_source, 'html.parser')
 
             except Exception as e:
-                if attempt < max_retries - 1:
+                err_str = str(e)
+                # Chrome crashed or session dead → restart driver
+                if "tab crashed" in err_str or "invalid session id" in err_str or "session deleted" in err_str:
+                    print(f"  [Selenium] Chrome crashed, restarting driver (attempt {attempt+1})")
+                    self._restart_driver()
+                    time.sleep(3)
+                elif attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
                 else:
                     print(f"  ✗ Failed to load page: {e}")
                     return None
+        print(f"  ✗ Failed to load page after {max_retries} attempts")
+        return None
     
     # =========================================================================
     # PDF DOWNLOAD

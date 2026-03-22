@@ -52,7 +52,7 @@ export class AskPageComponent implements OnDestroy, AfterViewChecked {
   ];
   private shouldScrollToBottom = false;
 
-  // OER Search API base URL (search_app runs on port 8088)
+  // OER Chatbot API base URL (chatbot_api runs on port 8088)
   private readonly API_URL = 'http://localhost:8088';
 
   @ViewChild('chatContainer') private chatContainer!: ElementRef;

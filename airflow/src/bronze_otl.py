@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
 """
 Open Textbook Library Scraper - Bronze Layer
-Scrapes textbook metadata from open.umn.edu/opentextbooks
+Scrapes textbook metadata AND PDF resources from open.umn.edu/opentextbooks
+
+PDF Storage structure in MinIO:
+  bronze/otl/pdfs/{book-slug}/textbook/Book_Title.pdf
+  bronze/otl/pdfs/{book-slug}/ancillary/Instructor_Guide.pdf
+  bronze/otl/pdfs/{book-slug}/ancillary/Student_Solutions.pdf
 """
 
 import os
@@ -10,11 +15,21 @@ import time
 import hashlib
 import requests
 import re
+import io
+import warnings
+import threading
 from datetime import datetime
-from typing import List, Dict, Any, Set, Optional
-from urllib.parse import urljoin
+from typing import List, Dict, Any, Set, Optional, Tuple
+from urllib.parse import urljoin, urlparse
+from pathlib import Path
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# Suppress SSL warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # Selenium imports
 try:
@@ -37,9 +52,20 @@ except ImportError:
 
 
 class OTLScraper:
-    """Open Textbook Library scraper for bronze layer - textbook metadata only"""
+    """Open Textbook Library scraper for bronze layer - textbook metadata + PDFs"""
     
     BASE_URL = "https://open.umn.edu"
+    
+    # PDF type classification keywords → (folder_name, priority)
+    # priority: lower = more valuable for chatbot (textbook = 0, ancillary = 1)
+    _PDF_TYPE_RULES: List[Tuple[List[str], str, int]] = [
+        (['textbook', 'book', 'full text', 'complete', 'main text'], 'textbook', 0),
+        (['instructor', 'teaching', 'teacher', 'faculty'], 'ancillary', 1),
+        (['student', 'solution', 'answer key', 'answers'], 'ancillary', 2),
+        (['guide', 'manual', 'supplement', 'workbook'], 'ancillary', 3),
+        (['slide', 'presentation', 'powerpoint', 'ppt'], 'ancillary', 4),
+        (['test bank', 'quiz', 'exam', 'assessment'], 'ancillary', 5),
+    ]
     
     # Default subjects fallback
     DEFAULT_SUBJECTS = [
@@ -54,26 +80,67 @@ class OTLScraper:
         'economics', 'psychology', 'sociology', 'political-science'
     ]
     
-    def __init__(self, delay: float = 0.5, max_documents: int = None,
-                 parallel: bool = True, max_workers: int = 2,
+    def __init__(self, delay: float = 1.5, max_documents: int = None,
+                 parallel: bool = False, max_workers: int = 2,
                  output_dir: str = "/opt/airflow/scraped_data/otl",
-                 download_pdfs: bool = None):
+                 download_pdfs: bool = True, max_pdfs_per_book: int = 20,
+                 pdf_types: Optional[List[str]] = None,
+                 batch_size: int = 50,
+                 subjects_filter: Optional[List[str]] = None,
+                 **kwargs):
+        """
+        Args:
+            delay: Delay giữa các requests (giây) - default 1.5s
+            max_documents: Giới hạn tổng số books cào
+            parallel: False = sequential (ổn định hơn), True = parallel
+            max_workers: Số workers cho parallel mode (default 2)
+            batch_size: Số books tối đa mỗi subject (default 50)
+            subjects_filter: List tên subjects cụ thể để cào (None = all)
+                           VD: ['Business', 'Computer Science', 'Mathematics']
+            pdf_types: ['textbook'] hoặc ['textbook', 'ancillary']
+        """
+        # Default: lấy textbook chính cho chatbot Q&A
+        if pdf_types is None:
+            pdf_types = ['textbook']
+        
         self.source = "otl"
         self.delay = delay
         self.max_documents = max_documents or int(os.getenv('MAX_DOCUMENTS', '999999'))
         self.parallel = parallel
         self.max_workers = max_workers
         self.output_dir = output_dir
-        # Read from env if not explicitly passed
-        if download_pdfs is None:
-            download_pdfs = os.getenv('OTL_DOWNLOAD_PDFS', '1').lower() in ('1', 'true', 'yes')
-        self.download_pdfs = download_pdfs
         self.driver = None
+        self.batch_size = batch_size
+        self.subjects_filter = subjects_filter
         
-        # HTTP Session
+        # PDF config
+        self.download_pdfs = download_pdfs
+        self.max_pdfs_per_book = max_pdfs_per_book
+        # Which types to keep: None = all; e.g. ['textbook', 'ancillary']
+        self.pdf_types_filter: Optional[Set[str]] = set(pdf_types) if pdf_types else None
+        
+        # HTTP Session with retry strategy
         self.session = requests.Session()
+
+        # Setup retry strategy for better stability
+        retry_strategy = Retry(
+            total=3,  # Increased from 2 to 3 retries
+            backoff_factor=2,  # Increased from 1 to 2 (2, 4, 8 seconds)
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["HEAD", "GET", "OPTIONS"],
+            raise_on_status=False  # Don't raise on retry errors
+        )
+        adapter = HTTPAdapter(
+            max_retries=retry_strategy, 
+            pool_connections=10,  # Increased from 5
+            pool_maxsize=20,  # Increased from 10
+            pool_block=False
+        )
+        self.session.mount("http://", adapter)
+        self.session.mount("https://", adapter)
+
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            'User-Agent': 'OER-Educational-Bot/2.0 (Research; +https://github.com/oer-lakehouse)'
         })
         
         # Setup
@@ -84,15 +151,23 @@ class OTLScraper:
         if self.existing_book_ids:
             print(f"[OTL] Loaded {len(self.existing_book_ids)} existing books")
         
-        # Get subjects
-        self.subjects = self._get_subjects()
-        
+        # Get subjects and apply filter
+        all_subjects = self._get_subjects()
+        if self.subjects_filter:
+            self.subjects = [s for s in all_subjects if s['name'] in self.subjects_filter]
+            print(f"[OTL] Filtered to {len(self.subjects)} subjects: {[s['name'] for s in self.subjects]}")
+        else:
+            self.subjects = all_subjects
+
         # Stats
         self.total_scraped = 0
         
         mode = "PARALLEL" if parallel else "SEQUENTIAL"
-        print(f"[OTL] Scraper initialized - {mode} mode, Max docs: {self.max_documents}")
-        print(f"[OTL] Subjects: {len(self.subjects)}")
+        print(f"[OTL] Scraper initialized - {mode} mode, Max docs: {self.max_documents}, "
+              f"Batch size: {self.batch_size} books/subject, "
+              f"Download PDFs: {self.download_pdfs}, "
+              f"PDF types: {list(self.pdf_types_filter) if self.pdf_types_filter else 'all'}")
+        print(f"[OTL] Subjects to scrape: {len(self.subjects)}")
     
     def _setup_minio(self):
         """Setup MinIO client"""
@@ -116,69 +191,46 @@ class OTLScraper:
                 self.minio_enable = False
     
     def _setup_selenium(self) -> Optional[webdriver.Chrome]:
-        """Setup Selenium WebDriver with minimal child-process footprint."""
+        """Setup Selenium WebDriver with optimized timeouts"""
         if not SELENIUM_AVAILABLE:
             return None
-
+        
         try:
             options = Options()
-            options.add_argument("--headless=new")
+            options.add_argument("--headless")
             options.add_argument("--no-sandbox")
             options.add_argument("--disable-dev-shm-usage")
             options.add_argument("--disable-gpu")
-            options.add_argument("--window-size=1280,800")
+            options.add_argument("--window-size=1920,1080")
             options.add_argument("--blink-settings=imagesEnabled=false")
-            # --- reduce child-process spawning ---
-            options.add_argument("--no-zygote")                       # skip zygote helper
-            options.add_argument("--disable-extensions")
-            options.add_argument("--disable-background-networking")
-            options.add_argument("--disable-default-apps")
-            options.add_argument("--disable-background-timer-throttling")
-            options.add_argument("--disable-renderer-backgrounding")
-            options.add_argument("--disable-backgrounding-occluded-windows")
-            options.add_argument("--disable-client-side-phishing-detection")
-            options.add_argument("--disable-sync")
-            options.add_argument("--metrics-recording-only")
-            options.add_argument("--mute-audio")
-
+            
+            # Add page load strategy for better timeout handling
+            options.page_load_strategy = 'normal'
+            
             for path in ['/usr/local/bin/chromedriver', '/usr/bin/chromedriver', 'chromedriver']:
                 try:
                     if os.path.exists(path) or path == 'chromedriver':
                         service = Service(path)
-                        return webdriver.Chrome(service=service, options=options)
+                        driver = webdriver.Chrome(service=service, options=options)
+                        
+                        # Set explicit timeouts (increased from 15s to 30s)
+                        driver.set_page_load_timeout(30)
+                        driver.set_script_timeout(30)
+                        driver.implicitly_wait(10)
+                        
+                        return driver
                 except Exception:
                     continue
-
-            return webdriver.Chrome(options=options)
-
+            
+            driver = webdriver.Chrome(options=options)
+            driver.set_page_load_timeout(30)
+            driver.set_script_timeout(30)
+            driver.implicitly_wait(10)
+            return driver
+            
         except Exception as e:
             print(f"[Selenium] Setup failed: {e}")
             return None
-
-    def _quit_driver(self, driver) -> None:
-        """Quit WebDriver and forcefully reap any remaining Chrome child processes."""
-        if driver is None:
-            return
-        # Grab chromedriver PID before quit so we can SIGKILL its process group
-        service_pid: Optional[int] = None
-        try:
-            service_pid = driver.service.process.pid if driver.service and driver.service.process else None
-        except Exception:
-            pass
-
-        try:
-            driver.quit()
-        except Exception:
-            pass
-
-        # Give Chrome 1 s to exit cleanly, then force-kill the whole process group
-        if service_pid:
-            import signal
-            time.sleep(1)
-            try:
-                os.killpg(os.getpgid(service_pid), signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                pass  # already dead — that's fine
     
     # =========================================================================
     # SUBJECTS
@@ -214,15 +266,16 @@ class OTLScraper:
                     subjects.append({'name': name, 'url': full_url})
                     seen_urls.add(full_url)
             
-            self._quit_driver(driver)
-
+            driver.quit()
+            
             if subjects:
                 print(f"[OTL] Found {len(subjects)} subjects dynamically")
                 return subjects
-
+                
         except Exception as e:
             print(f"[OTL] Error fetching subjects: {e}")
-            self._quit_driver(driver)
+            if driver:
+                driver.quit()
         
         return self._get_subjects_fallback()
     
@@ -298,104 +351,308 @@ class OTLScraper:
         return all_documents
     
     def _scrape_subject(self, subject: Dict[str, str]) -> List[Dict[str, Any]]:
-        """Scrape all books from a subject"""
-        documents = []
-        driver = self._setup_selenium()
+        """Scrape books from a specific subject page.
         
+        Each subject will scrape its own books from the subject URL.
+        Limited by batch_size parameter.
+        """
+        documents = []
+
+        driver = self._setup_selenium()
+
         if not driver:
             print(f"[{subject['name']}] Selenium not available")
             return documents
-        
+
         try:
-            # Get book URLs
-            book_urls = self._get_book_urls(driver, subject)
-            print(f"[{subject['name']}] Found {len(book_urls)} books")
+            # Get book URLs for this specific subject
+            book_urls = self._get_book_urls_from_subject_page(driver, subject)
             
+            # Apply batch size limit
+            if len(book_urls) > self.batch_size:
+                print(f"[{subject['name']}] Found {len(book_urls)} books, limiting to {self.batch_size}")
+                book_urls = book_urls[:self.batch_size]
+            else:
+                print(f"[{subject['name']}] Found {len(book_urls)} books")
+
             # Scrape each book
-            skipped = 0
+            skipped_metadata = 0
+            skipped_pdfs = 0
+            scraped_new = 0
+            scraped_pdfs_only = 0
+
             for idx, url in enumerate(book_urls, 1):
-                # Check limit
+                # Check global limit
                 if self.total_scraped >= self.max_documents:
                     print(f"[{subject['name']}] Reached max limit ({self.max_documents})")
                     break
-                
+
                 book_id = self._create_document_id(url)
-                
-                # Skip if already scraped
-                if book_id in self.existing_book_ids:
-                    skipped += 1
+                book_slug = self._extract_book_slug(url)
+
+                # Check if we should skip this book
+                has_metadata = book_id in self.existing_book_ids
+                has_pdfs = False
+
+                if has_metadata and self.download_pdfs and self.minio_client:
+                    # Check if PDFs already exist
+                    try:
+                        existing_prefix = f"bronze/otl/pdfs/{book_slug}/"
+                        existing = list(self.minio_client.list_objects(
+                            self.minio_bucket, prefix=existing_prefix, recursive=True
+                        ))
+                        has_pdfs = len(existing) > 0
+                    except:
+                        has_pdfs = False
+
+                # Skip only if BOTH metadata AND PDFs exist
+                if has_metadata and (not self.download_pdfs or has_pdfs):
+                    skipped_metadata += 1
                     continue
-                
-                # Scrape book
-                book_data = self._scrape_book(driver, url, subject['name'])
-                if book_data:
-                    documents.append(book_data)
-                    self.existing_book_ids.add(book_data['id'])
-                    self.total_scraped += 1
-                
-                if idx % 10 == 0:
-                    print(f"[{subject['name']}] {idx}/{len(book_urls)}")
-                
+
+                # Scrape book (either new or needs PDF update)
+                if has_metadata and not has_pdfs:
+                    # Has metadata but missing PDFs - scrape for PDFs only
+                    book_data = self._scrape_book(driver, url, subject['name'])
+                    if book_data and book_data.get('pdf_count', 0) > 0:
+                        scraped_pdfs_only += 1
+                        documents.append(book_data)
+                else:
+                    # New book - scrape everything
+                    book_data = self._scrape_book(driver, url, subject['name'])
+                    if book_data:
+                        scraped_new += 1
+                        documents.append(book_data)
+                        self.existing_book_ids.add(book_data['id'])
+                        self.total_scraped += 1
+
+                # Progress indicator
+                if idx % 10 == 0 or idx == len(book_urls):
+                    print(f"[{subject['name']}] Progress: {idx}/{len(book_urls)} | "
+                          f"New: {scraped_new} | PDFs added: {scraped_pdfs_only} | "
+                          f"Skipped: {skipped_metadata}")
+
                 time.sleep(self.delay)
-            
-            if skipped > 0:
-                print(f"[{subject['name']}] Skipped {skipped} already scraped")
-            
+
+            if scraped_new > 0 or scraped_pdfs_only > 0:
+                print(f"[{subject['name']}] Summary: New books: {scraped_new} | "
+                      f"PDFs added: {scraped_pdfs_only} | Skipped (complete): {skipped_metadata}")
+
         except Exception as e:
             print(f"[{subject['name']}] Error: {e}")
         finally:
-            self._quit_driver(driver)
+            try:
+                driver.quit()
+            except:
+                pass
 
         return documents
     
     # =========================================================================
     # URL EXTRACTION
     # =========================================================================
-    
-    def _get_book_urls(self, driver, subject: Dict[str, str]) -> List[str]:
-        """Get all book URLs from subject page with infinite scroll"""
-        urls = []
+
+    def _get_book_urls_from_subject_page(self, driver, subject: Dict[str, str]) -> List[str]:
+        """Get book URLs from a specific subject page by scrolling and loading all books.
+        
+        Each subject page has its own list of books that dynamically loads on scroll.
+        Uses improved scroll detection to load ALL books.
+        """
+        book_urls = []
+        seen_urls = set()
         
         try:
+            # Navigate to subject page
+            print(f"[{subject['name']}] Loading subject page...")
             driver.get(subject['url'])
-            WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            time.sleep(1)
             
-            # Scroll to load all books
-            self._scroll_to_bottom(driver)
+            # Wait for page to fully load with book cards
+            try:
+                WebDriverWait(driver, 20).until(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href*="/opentextbooks/textbooks/"]'))
+                )
+                print(f"[{subject['name']}] ✓ Page loaded, found book cards")
+            except:
+                print(f"[{subject['name']}] ⚠ No book cards detected on initial load")
             
-            # Extract URLs
+            time.sleep(4)  # Initial page load - increased from 3s to 4s
+            
+            # Scroll aggressively to load all books
+            print(f"[{subject['name']}] Scrolling to load all books...")
+            self._scroll_to_load_all_books(driver)
+            
+            # Parse page and extract book links
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
-            for link in soup.select('a[href*="/opentextbooks/textbooks/"]'):
-                href = link.get('href', '')
-                if any(x in href for x in ['/submit', '/newest', '/in_development']):
-                    continue
+            # Find all book links on this subject page
+            # Pattern: /opentextbooks/textbooks/123 or /opentextbooks/textbooks/book-slug
+            for a_tag in soup.find_all('a', href=True):
+                href = a_tag['href']
                 
-                full_url = urljoin(self.BASE_URL, href)
-                if full_url not in urls:
-                    urls.append(full_url)
+                # Check if this is a book detail link
+                if '/opentextbooks/textbooks/' in href and 'submit' not in href:
+                    full_url = urljoin(self.BASE_URL, href)
+                    
+                    # Clean URL (remove query params)
+                    parsed = urlparse(full_url)
+                    clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+                    
+                    if clean_url not in seen_urls:
+                        book_urls.append(clean_url)
+                        seen_urls.add(clean_url)
+            
+            print(f"[{subject['name']}] ✓ Found {len(book_urls)} total books")
             
         except Exception as e:
-            print(f"[{subject['name']}] URL extraction error: {e}")
+            print(f"[{subject['name']}] ✗ Error loading books: {e}")
         
-        return urls
+        return book_urls
     
-    def _scroll_to_bottom(self, driver, max_scrolls: int = 50):
-        """Scroll page to load all content"""
+    def _scroll_to_load_all_books(self, driver):
+        """Aggressive scrolling to load ALL books on subject page.
+        
+        OTL uses infinite scroll - need to scroll many times and wait for content.
+        Uses improved strategy: scroll slower, wait for DOM changes, check book count.
+        """
+        scroll_count = 0
+        max_scrolls = 200  # Increased limit for pages with many books
+        no_change_count = 0
+        last_book_count = 0
+        
+        while scroll_count < max_scrolls:
+            # Get current book count before scrolling
+            current_book_count = driver.execute_script("""
+                return document.querySelectorAll('a[href*="/opentextbooks/textbooks/"]').length;
+            """)
+            
+            # Scroll to bottom in multiple steps for smoother loading
+            driver.execute_script("""
+                window.scrollTo({
+                    top: document.body.scrollHeight,
+                    behavior: 'smooth'
+                });
+            """)
+            scroll_count += 1
+            
+            # Wait longer for lazy loading to trigger (critical for OTL)
+            time.sleep(3.5)  # Increased from 2.5s to 3.5s
+            
+            # Wait for any loading indicators to disappear
+            try:
+                WebDriverWait(driver, 3).until_not(
+                    EC.presence_of_element_located((By.CSS_SELECTOR, ".loading, .spinner, [class*='loading']"))
+                )
+            except:
+                pass  # No loading indicator found
+            
+            # Additional wait for new DOM elements to render
+            time.sleep(1.5)
+            
+            # Get new book count after scroll
+            new_book_count = driver.execute_script("""
+                return document.querySelectorAll('a[href*="/opentextbooks/textbooks/"]').length;
+            """)
+            
+            # Check if new books were loaded
+            if new_book_count == last_book_count:
+                no_change_count += 1
+                # Give it 7 tries before stopping (was 5)
+                if no_change_count >= 7:
+                    print(f"    → Stopped after {scroll_count} scrolls ({new_book_count} books found, no new content)")
+                    break
+            else:
+                # New content detected!
+                no_change_count = 0
+                if scroll_count % 5 == 0:  # Report more frequently
+                    print(f"    → Scrolled {scroll_count}x | Books loaded: {new_book_count}")
+            
+            last_book_count = new_book_count
+            
+            # Early exit if we have a lot of books already
+            if new_book_count > 500:
+                print(f"    → Loaded {new_book_count} books, stopping scroll")
+                break
+        
+        if scroll_count >= max_scrolls:
+            print(f"    → Reached max scrolls ({max_scrolls}) with {last_book_count} books")
+        
+        # Final wait for any pending renders
+        time.sleep(3)
+
+    def _fetch_all_book_urls_from_atom(self) -> List[str]:
+        """Fetch all book URLs from Atom feed (legacy method, not used anymore)"""
+        all_urls = []
+        page = 1
+        max_pages = 200  # Safety limit
+
+        while page <= max_pages:
+            try:
+                feed_url = f"{self.BASE_URL}/opentextbooks/textbooks?page={page}"
+                resp = self.session.get(feed_url, timeout=15)
+
+                if resp.status_code != 200:
+                    print(f"  Page {page}: status {resp.status_code}, stopping")
+                    break
+
+                # Parse Atom feed (XML)
+                soup = BeautifulSoup(resp.text, 'xml')
+                entries = soup.find_all('entry')
+
+                if not entries:
+                    break
+
+                # Extract book URLs
+                found = 0
+                for entry in entries:
+                    link_elem = entry.find('link', rel='alternate')
+                    if link_elem:
+                        href = link_elem.get('href', '')
+                        if '/opentextbooks/textbooks/' in href and 'submit' not in href:
+                            full_url = urljoin(self.BASE_URL, href)
+                            if full_url not in all_urls:
+                                all_urls.append(full_url)
+                                found += 1
+
+                # Check for next page
+                has_next = bool(soup.find('link', rel='next'))
+                if not found or not has_next:
+                    break
+
+                page += 1
+
+                # Progress indicator every 50 pages
+                if page % 50 == 0:
+                    print(f"  ... fetched {len(all_urls)} books so far")
+
+            except Exception as e:
+                print(f"  Error on page {page}: {e}")
+                break
+
+        return all_urls
+
+    def _get_book_urls(self, driver, subject: Dict[str, str]) -> List[str]:
+        """Get book URLs for a subject (delegates to new method)"""
+        return self._get_book_urls_from_subject_page(driver, subject)
+    
+    def _scroll_to_bottom(self, driver, max_scrolls: int = 30):
+        """Scroll page to load all dynamically loaded content (legacy method).
+        
+        OTL subject pages load books dynamically on scroll.
+        """
         last_height = driver.execute_script("return document.body.scrollHeight")
         no_change_count = 0
         
         for i in range(max_scrolls):
             # Scroll down
-            driver.execute_script("window.scrollBy(0, 2000);")
-            time.sleep(0.5)
+            driver.execute_script("window.scrollBy(0, 1500);")
+            time.sleep(1.5)  # Wait for content to load
             
             new_height = driver.execute_script("return document.body.scrollHeight")
             
             if new_height == last_height:
                 no_change_count += 1
                 if no_change_count >= 3:
+                    # No new content after 3 attempts
                     break
             else:
                 no_change_count = 0
@@ -407,40 +664,40 @@ class OTLScraper:
     # =========================================================================
     
     def _scrape_book(self, driver, url: str, subject_name: str) -> Optional[Dict[str, Any]]:
-        """Scrape individual book metadata"""
+        """Scrape individual book metadata + download PDFs"""
         try:
             driver.get(url)
-            WebDriverWait(driver, 8).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
-            time.sleep(0.5)
+            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, 'body')))
+            time.sleep(1.5)
             
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             
             title = self._extract_title(soup)
-            book_id = self._create_document_id(url)
             
-            # Extract license and PDF format URLs from the book page
-            page_info = self._extract_license_and_formats(soup)
-            
-            # Download PDF if enabled
-            pdf_result = {'downloaded': False, 'paths': []}
-            if self.download_pdfs and page_info['pdf_format_urls']:
-                pdf_result = self._download_book_pdf(book_id, title, page_info['pdf_format_urls'])
-            
-            return {
-                'id': book_id,
+            book_data = {
+                'id': self._create_document_id(url),
                 'title': title,
                 'description': self._extract_description(soup),
                 'authors': self._extract_authors(soup),
                 'subject': [subject_name],
                 'url': url,
-                'source': self.source,   # "otl" — consistent with mit_ocw / openstax
-                'language': 'en',
-                'license': page_info['license_name'],
-                'license_url': page_info['license_url'],
-                'scraped_at': datetime.now().isoformat(),
-                'pdf_count': len(pdf_result['paths']),
-                'pdf_paths': pdf_result['paths']
+                'source': 'Open Textbook Library',
+                'scraped_at': datetime.now().isoformat()
             }
+            
+            # Download PDFs after metadata extraction
+            if self.download_pdfs and self.minio_client:
+                book_slug = self._extract_book_slug(url)
+                pdf_results = self._download_book_pdfs(soup, url, book_slug)
+                book_data['pdf_count'] = pdf_results['downloaded']
+                book_data['pdf_paths'] = pdf_results['paths']
+                book_data['pdf_types_found'] = pdf_results['types_found']
+            else:
+                book_data['pdf_count'] = 0
+                book_data['pdf_paths'] = []
+                book_data['pdf_types_found'] = []
+            
+            return book_data
             
         except Exception as e:
             print(f"  ✗ Error scraping {url}: {e}")
@@ -490,236 +747,360 @@ class OTLScraper:
                     authors.append(val)
         
         return authors[:10]
-
+    
     # =========================================================================
-    # LICENSE & PDF HELPERS
+    # PDF DOWNLOAD
     # =========================================================================
 
-    def _cc_url_to_name(self, url: str) -> str:
-        """Convert a Creative Commons URL to a short human-readable name.
-        e.g. https://creativecommons.org/licenses/by-nc-sa/4.0/ -> 'CC BY-NC-SA 4.0'
+    def _extract_book_slug(self, book_url: str) -> str:
+        """Extract clean book slug from URL for folder naming.
+        e.g. https://open.umn.edu/opentextbooks/textbooks/123
+             → textbooks-123
         """
-        if not url:
-            return 'Creative Commons'
-        if 'publicdomain/zero' in url:
-            return 'CC0 1.0'
-        m = re.search(r'/licenses/([a-z-]+)/([\d.]+)', url)
-        if m:
-            return f"CC {m.group(1).upper()} {m.group(2)}"
-        m = re.search(r'/licenses/([a-z-]+)', url)
-        if m:
-            return f"CC {m.group(1).upper()}"
-        return 'Creative Commons'
+        path = urlparse(book_url).path.rstrip('/')
+        # Extract the last parts of the path
+        parts = [p for p in path.split('/') if p]
+        if len(parts) >= 2:
+            return f"{parts[-2]}-{parts[-1]}"
+        elif len(parts) == 1:
+            return parts[0]
+        return 'unknown'
+
+    def _classify_pdf(self, link_text: str, href: str) -> Tuple[str, int]:
+        """Return (folder_name, priority) based on link text / filename."""
+        combined = f"{link_text} {href}".lower()
+        for keywords, folder, priority in self._PDF_TYPE_RULES:
+            if any(kw in combined for kw in keywords):
+                return folder, priority
+        return 'ancillary', 99
 
     def _sanitize_filename(self, name: str) -> str:
-        """Create a filesystem-safe filename, max 100 chars."""
-        safe = re.sub(r'[^\w\s-]', '', name)
-        safe = re.sub(r'\s+', '_', safe.strip())
-        return safe[:100] or 'document'
+        """Convert a human-readable label to a safe filename."""
+        # Remove characters that are unsafe in filenames
+        name = re.sub(r'[\\/:*?"<>|]', '', name)
+        # Collapse whitespace → underscore
+        name = re.sub(r'\s+', '_', name.strip())
+        # Remove duplicate underscores
+        name = re.sub(r'_+', '_', name)
+        return name[:120]  # cap length
 
-    def _extract_license_and_formats(self, soup: BeautifulSoup) -> Dict[str, Any]:
-        """Extract license info and PDF format links from an OTL book page."""
-        result: Dict[str, Any] = {
-            'license_name': None,
-            'license_url': None,
-            'pdf_format_urls': []
+    def _collect_pdf_links(self, soup: BeautifulSoup, book_url: str) -> List[Dict[str, Any]]:
+        """Collect all PDF links for a book from its page.
+
+        OTL books typically have:
+        - "View on the Web" or "Download PDF" links
+        - Multiple formats (PDF, EPUB, etc.)
+        - Ancillary resources section
+        - Links to intermediate hosts (e.g., saylor.org, pressbooks)
+
+        Returns list of dicts: {url, label, folder, priority}
+        """
+        seen_urls: Set[str] = set()
+        pdf_entries: List[Dict[str, Any]] = []
+
+        # Known intermediate hosts that may contain PDFs
+        INTERMEDIATE_HOSTS = {
+            'saylor.org', 'resources.saylor.org',
+            'archive.org', 'wayback.archive.org',
+            'libretexts.org', 'pressbooks', 'opentextbc.ca',
+            'open.lib.umn.edu', 'openoregon', 'oer.hawaii.edu'
         }
 
-        # --- License: find creativecommons.org or gnu.org FDL link ---
-        for a in soup.find_all('a', href=True):
-            href = a.get('href', '')
-            # Normalise to full URL
-            if href.startswith('//'):
-                full = 'https:' + href
-            elif href.startswith('http'):
-                full = href
-            else:
-                full = None
+        # Look for PDF download links
+        for a_tag in soup.find_all('a', href=True):
+            href = a_tag['href']
 
-            if full and 'creativecommons.org/licenses/' in full:
-                result['license_url'] = full
-                result['license_name'] = self._cc_url_to_name(full)
-                break
-            if full and 'creativecommons.org/publicdomain/' in full:
-                result['license_url'] = full
-                result['license_name'] = self._cc_url_to_name(full)
-                break
-            if full and 'gnu.org/licenses/fdl' in full:
-                result['license_url'] = full
-                result['license_name'] = 'GNU FDL'
-                break
+            # Skip obvious non-PDF links
+            if any(x in href for x in ['javascript:', 'mailto:', '#', 'void(0)']):
+                continue
 
-        # Fallback: CC badge image alt text (e.g. alt="CC BY-NC-SA")
-        if not result['license_name']:
-            for img in soup.find_all('img', alt=True):
-                alt = img.get('alt', '').strip()
-                if alt.upper().startswith('CC '):
-                    parent = img.find_parent('a', href=True)
-                    if parent:
-                        href = parent.get('href', '')
-                        if 'creativecommons.org' in href:
-                            full = href if href.startswith('http') else 'https:' + href
-                            result['license_url'] = full
-                            result['license_name'] = self._cc_url_to_name(full)
-                    else:
-                        result['license_name'] = alt
-                    break
+            # Resolve to absolute URL
+            abs_url = urljoin(self.BASE_URL, href)
+            if abs_url in seen_urls:
+                continue
+            seen_urls.add(abs_url)
 
-        # --- PDF formats: links with text == 'PDF' pointing to /formats/ ---
-        for a in soup.find_all('a', href=True):
-            href = a.get('href', '')
-            text = a.get_text(strip=True).upper()
-            if '/opentextbooks/formats/' in href and text == 'PDF':
-                full_url = urljoin(self.BASE_URL, href)
-                if full_url not in result['pdf_format_urls']:
-                    result['pdf_format_urls'].append(full_url)
+            # Extract label from link text or nearby text
+            label = a_tag.get_text(strip=True)
+            aria_label = a_tag.get('aria-label', '')
+            title_attr = a_tag.get('title', '')
 
-        return result
+            # Try to get more context from parent elements
+            if not label or len(label) < 3:
+                parent = a_tag.find_parent(['li', 'div', 'p'])
+                if parent:
+                    label = parent.get_text(strip=True)
 
-    def _resolve_format_url(self, format_url: str) -> Optional[str]:
-        """Follow the OTL format redirect and return an actual downloadable PDF URL.
+            # Clean label
+            label = re.sub(r'\s*\(pdf\)\s*$', '', label, flags=re.I).strip()
+            label = re.sub(r'\s*download\s*$', '', label, flags=re.I).strip()
 
-        OTL /formats/{id} links redirect to external sources which may be:
-        - A direct .pdf URL
-        - An HTML page from which we must extract a .pdf link
-        """
+            if not label:
+                label = Path(urlparse(abs_url).path).stem or 'document'
+
+            # Strategy 1: Direct .pdf links
+            if abs_url.lower().endswith('.pdf'):
+                folder, priority = self._classify_pdf(label, abs_url)
+                pdf_entries.append({
+                    'url': abs_url,
+                    'label': label,
+                    'folder': folder,
+                    'priority': priority,
+                })
+                continue
+
+            # Strategy 2: OTL format links (e.g., /opentextbooks/formats/123)
+            parsed = urlparse(abs_url)
+            is_otl_format = (parsed.netloc in ('open.umn.edu', '') and
+                           '/opentextbooks/formats/' in parsed.path)
+
+            # Check if link text/attributes mention PDF
+            mentions_pdf = re.search(r'\bpdf\b', label + aria_label + title_attr, re.I)
+
+            if is_otl_format or mentions_pdf:
+                # Try to follow this link to find actual PDF
+                discovered = self._follow_link_for_pdf(abs_url, label)
+                for entry in discovered:
+                    if entry['url'] not in {e['url'] for e in pdf_entries}:
+                        pdf_entries.append(entry)
+                continue
+
+            # Strategy 3: Links to known intermediate hosts
+            host = parsed.netloc.lower().lstrip('www.')
+            if any(h in host for h in INTERMEDIATE_HOSTS):
+                discovered = self._follow_link_for_pdf(abs_url, label)
+                for entry in discovered:
+                    if entry['url'] not in {e['url'] for e in pdf_entries}:
+                        pdf_entries.append(entry)
+
+        # Sort: textbook first, then ancillary materials
+        pdf_entries.sort(key=lambda x: (x['priority'], x['label']))
+        return pdf_entries
+
+    def _follow_link_for_pdf(self, url: str, parent_label: str) -> List[Dict[str, Any]]:
+        """Follow a link to discover PDF URLs (handles redirects and intermediate pages)."""
+        results: List[Dict[str, Any]] = []
+
         try:
-            # HEAD first (cheap), fall back to streaming GET if HEAD fails
-            final_url = None
-            content_type = ''
-            try:
-                resp = self.session.head(format_url, allow_redirects=True, timeout=15)
-                final_url = resp.url
-                content_type = resp.headers.get('Content-Type', '')
-            except Exception:
-                pass
+            # Increased timeout from 30s to 60s for slow external sites
+            resp = self.session.get(url, timeout=60, allow_redirects=True, verify=False)
 
-            if not final_url:
-                resp = self.session.get(format_url, allow_redirects=True,
-                                        timeout=20, stream=True)
-                final_url = resp.url
-                content_type = resp.headers.get('Content-Type', '')
-                resp.close()
+            # Check if redirected to PDF directly
+            final_url = resp.url
+            if final_url.lower().endswith('.pdf'):
+                # Verify it's actually a PDF via magic bytes
+                if self._is_pdf_content(resp.content[:1024]):
+                    folder, priority = self._classify_pdf(parent_label, final_url)
+                    results.append({
+                        'url': final_url,
+                        'label': parent_label,
+                        'folder': folder,
+                        'priority': priority
+                    })
+                    return results
 
-            url_lower = final_url.lower()
+            # Check content-type
+            content_type = resp.headers.get('Content-Type', '').lower()
+            if 'pdf' in content_type:
+                if self._is_pdf_content(resp.content[:1024]):
+                    folder, priority = self._classify_pdf(parent_label, final_url)
+                    results.append({
+                        'url': final_url,
+                        'label': parent_label,
+                        'folder': folder,
+                        'priority': priority
+                    })
+                    return results
 
-            # Direct PDF indicators
-            if url_lower.endswith('.pdf'):
-                return final_url
-            if 'application/pdf' in content_type:
-                return final_url
-            if 'type=pdf' in url_lower:
-                return final_url
+            # If HTML, parse for PDF links
+            if 'html' in content_type or self._looks_like_html(resp.content[:500]):
+                soup = BeautifulSoup(resp.text, 'html.parser')
 
-            # HTML landing page — try to scrape a .pdf link from it
-            resp2 = self.session.get(final_url, timeout=20)
-            if resp2.status_code == 200 and 'text/html' in resp2.headers.get('Content-Type', ''):
-                page_soup = BeautifulSoup(resp2.text, 'html.parser')
-                for a in page_soup.find_all('a', href=True):
-                    link = a['href']
-                    if link.lower().endswith('.pdf'):
-                        return urljoin(final_url, link)
+                # Find all .pdf links
+                for a_tag in soup.find_all('a', href=True):
+                    href = a_tag['href']
+                    if not href.lower().endswith('.pdf'):
+                        continue
 
-            return None
+                    pdf_url = urljoin(final_url, href)
+                    label = a_tag.get_text(strip=True) or parent_label
+                    label = re.sub(r'\s*\(pdf\)\s*', '', label, flags=re.I).strip() or parent_label
 
-        except Exception as e:
-            print(f"  [OTL PDF] Could not resolve {format_url}: {e}")
-            return None
+                    folder, priority = self._classify_pdf(label, pdf_url)
+                    results.append({
+                        'url': pdf_url,
+                        'label': label,
+                        'folder': folder,
+                        'priority': priority
+                    })
 
-    def _fetch_pdf(self, url: str, max_retries: int = 3) -> Optional[bytes]:
-        """Download PDF bytes with retry logic (max 200 MB)."""
-        MAX_SIZE = 200 * 1024 * 1024  # 200 MB
+        except Exception:
+            # Silent fail - expected for many links
+            pass
 
-        for attempt in range(max_retries):
-            try:
-                resp = self.session.get(url, stream=True, timeout=30)
-                resp.raise_for_status()
+        return results
 
-                # Reject accidental HTML responses
-                ct = resp.headers.get('Content-Type', '')
-                if 'text/html' in ct and '.pdf' not in url.lower():
-                    return None
+    def _is_pdf_content(self, data: bytes) -> bool:
+        """Check if bytes content is actually a PDF via magic bytes."""
+        if not data or len(data) < 5:
+            return False
+        return data[:4] == b'%PDF' or data[:5] == b'%PDF-'
 
-                size = 0
-                chunks = []
-                for chunk in resp.iter_content(chunk_size=65536):
-                    if chunk:
-                        size += len(chunk)
-                        if size > MAX_SIZE:
-                            print(f"  [OTL PDF] File exceeds {MAX_SIZE // 1024 // 1024} MB, skipping")
-                            return None
-                        chunks.append(chunk)
+    def _looks_like_html(self, data: bytes) -> bool:
+        """Quick check if response is HTML."""
+        if not data or len(data) < 10:
+            return False
+        start = data[:200].lower()
+        return b'<!doctype' in start or b'<html' in start or b'<head' in start
 
-                data = b''.join(chunks)
-                if len(data) < 1024:   # too small to be a real PDF
-                    return None
-                return data
 
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    print(f"  [OTL PDF] Download failed ({url[:60]}...): {e}")
+    def _download_book_pdfs(self, soup: BeautifulSoup, book_url: str, book_slug: str) -> Dict[str, Any]:
+        """Download all PDFs for a book and upload to MinIO.
 
-        return None
+        MinIO path structure:
+          bronze/otl/pdfs/{book_slug}/{folder}/{label}.pdf
 
-    def _download_book_pdf(self, book_id: str, book_title: str,
-                           format_urls: List[str]) -> Dict[str, Any]:
-        """Resolve, download, and upload the first available PDF for an OTL book.
-
-        MinIO path: bronze/otl/otl-pdfs/{book_id}/{safe_title}.pdf
-        (Compatible with elasticsearch_sync.py which looks up bronze/otl/otl-pdfs/{normalized_id})
+        Returns:
+          {'downloaded': int, 'paths': [minio_path, ...], 'types_found': [folder, ...]}
         """
-        import io
-        result: Dict[str, Any] = {'downloaded': False, 'paths': []}
+        result = {'downloaded': 0, 'paths': [], 'types_found': []}
 
         if not self.minio_client:
             return result
 
-        safe_title = self._sanitize_filename(book_title)
-        minio_path = f"bronze/otl/otl-pdfs/{book_id}/{safe_title}.pdf"
-
-        # Deduplication — skip if already uploaded
+        # Check if PDFs already downloaded for this book
+        existing_prefix = f"bronze/otl/pdfs/{book_slug}/"
         try:
-            self.minio_client.stat_object(self.minio_bucket, minio_path)
-            print(f"  [OTL PDF] Already exists, skipping: {minio_path}")
-            result['paths'].append(minio_path)
-            result['downloaded'] = True
-            return result
+            existing = list(self.minio_client.list_objects(
+                self.minio_bucket, prefix=existing_prefix, recursive=True
+            ))
+            if existing:
+                existing_paths = [o.object_name for o in existing]
+                types_found = list({p.split('/')[4] for p in existing_paths
+                                    if len(p.split('/')) > 4})
+                print(f"  [PDF] Already have {len(existing_paths)} PDFs for {book_slug}, skipping")
+                result['downloaded'] = len(existing_paths)
+                result['paths'] = existing_paths
+                result['types_found'] = types_found
+                return result
         except Exception:
-            pass  # Not found — proceed
+            pass
 
-        # Try each format URL in order until one succeeds
-        for format_url in format_urls:
-            actual_url = self._resolve_format_url(format_url)
-            if not actual_url:
-                continue
+        # Collect PDF links from book page
+        pdf_entries = self._collect_pdf_links(soup, book_url)
 
-            print(f"  [OTL PDF] Downloading: {actual_url[:80]}...")
-            pdf_bytes = self._fetch_pdf(actual_url)
-            if not pdf_bytes:
-                continue
+        if not pdf_entries:
+            print(f"  [PDF] ⚠ No PDF links found for {book_slug}")
+            return result
 
+        print(f"  [PDF] Found {len(pdf_entries)} potential PDF links")
+
+        # Apply type filter
+        if self.pdf_types_filter:
+            pdf_entries = [e for e in pdf_entries if e['folder'] in self.pdf_types_filter]
+
+        # Limit per book
+        pdf_entries = pdf_entries[:self.max_pdfs_per_book]
+
+        # Track filename collisions per folder
+        used_names: Dict[str, Set[str]] = {}
+        types_seen: Set[str] = set()
+
+        for entry in pdf_entries:
             try:
+                pdf_url = entry['url']
+                
+                # Build a clean, human-readable filename
+                label = self._sanitize_filename(entry['label'])
+                folder = entry['folder']
+                if not label:
+                    label = Path(urlparse(pdf_url).path).stem
+                    label = self._sanitize_filename(label)
+
+                # Handle duplicates within same folder by appending counter
+                used_names.setdefault(folder, set())
+                base_label = label
+                counter = 1
+                while label in used_names[folder]:
+                    label = f"{base_label}_{counter}"
+                    counter += 1
+                used_names[folder].add(label)
+
+                minio_path = f"bronze/otl/pdfs/{book_slug}/{folder}/{label}.pdf"
+
+                # Skip if already exists in MinIO
+                try:
+                    self.minio_client.stat_object(self.minio_bucket, minio_path)
+                    result['paths'].append(minio_path)
+                    types_seen.add(folder)
+                    result['downloaded'] += 1
+                    continue
+                except Exception:
+                    pass  # Doesn't exist, proceed to download
+
+                # Download PDF bytes
+                pdf_bytes = self._fetch_pdf(pdf_url)
+                if not pdf_bytes:
+                    print(f"  [PDF] ✗ Failed to fetch or validate: {label[:40]}")
+                    continue
+
+                # Upload to MinIO
                 self.minio_client.put_object(
                     self.minio_bucket,
                     minio_path,
                     io.BytesIO(pdf_bytes),
                     length=len(pdf_bytes),
-                    content_type='application/pdf'
+                    content_type='application/pdf',
                 )
-                print(f"  [OTL PDF] ✓ Uploaded: {minio_path}")
+
                 result['paths'].append(minio_path)
-                result['downloaded'] = True
-                return result
+                types_seen.add(folder)
+                result['downloaded'] += 1
+
+                size_mb = len(pdf_bytes) / (1024 * 1024)
+                print(f"  [PDF] ✓ {folder}/{label}.pdf ({size_mb:.2f}MB)")
+
+                time.sleep(0.5)
+
             except Exception as e:
-                print(f"  [OTL PDF] MinIO upload error: {e}")
+                print(f"  [PDF] ✗ {entry.get('label', '?')}: {e}")
 
-        if not result['downloaded']:
-            print(f"  [OTL PDF] No downloadable PDF found for '{book_title}'")
-
+        result['types_found'] = list(types_seen)
+        print(f"  [PDF] Book {book_slug}: {result['downloaded']} PDFs uploaded "
+              f"({', '.join(types_seen) or 'none'})")
         return result
 
+    def _fetch_pdf(self, url: str, max_retries: int = 3) -> Optional[bytes]:
+        """Download PDF bytes with retry logic and magic bytes validation."""
+        for attempt in range(max_retries):
+            try:
+                # Disable SSL verification to avoid certificate errors with external sites
+                resp = self.session.get(url, timeout=60, stream=True, verify=False)
+                resp.raise_for_status()
+
+                # Download content
+                content = resp.content
+
+                # Verify it's actually a PDF using magic bytes
+                if not self._is_pdf_content(content):
+                    # Might be HTML error page
+                    if self._looks_like_html(content):
+                        # Silent skip - not a PDF
+                        return None
+                    # Or wrong content type - skip
+                    return None
+
+                # Valid PDF
+                return content
+
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    # Only log on final failure
+                    pass
+        return None
+    
     # =========================================================================
     # STORAGE & DEDUPLICATION
     # =========================================================================

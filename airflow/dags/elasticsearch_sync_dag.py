@@ -18,6 +18,7 @@ Dependencies:
 """
 
 from datetime import datetime, timedelta
+from pathlib import Path
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.dummy import DummyOperator
@@ -95,38 +96,65 @@ def check_gold_layer_tables(**context):
     gold_catalog = os.getenv("ICEBERG_GOLD_CATALOG", "gold")
     gold_database = os.getenv("GOLD_DATABASE", "analytics")
     
-    # Create minimal Spark session for table check
-    jars_dir = "/opt/airflow/jars"
-    local_jars = ",".join([
-        f"{jars_dir}/iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
-        f"{jars_dir}/hadoop-aws-3.3.4.jar",
-        f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
-    ])
-    
-    spark = (
+    # Harden Spark env for Airflow task runtime
+    os.environ.setdefault("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+    os.environ.setdefault("SPARK_MASTER", os.getenv("SPARK_MASTER_URL", "spark://spark-master:7077"))
+    os.environ.setdefault("SPARK_DRIVER_HOST", "oer-airflow-scraper")
+    os.environ.setdefault("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0")
+    os.environ.pop("JAVA_TOOL_OPTIONS", None)
+
+    # Prefer local jars; fallback to packages when local jars are unavailable
+    jars_dir = Path("/opt/airflow/jars")
+    jar_candidates = [
+        jars_dir / "iceberg-spark-runtime-3.5_2.12-1.9.2.jar",
+        jars_dir / "hadoop-aws-3.3.4.jar",
+        jars_dir / "aws-java-sdk-bundle-1.12.262.jar",
+    ]
+    existing_local_jars = [str(p) for p in jar_candidates if p.exists()]
+    spark_packages = (
+        "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,"
+        "org.apache.hadoop:hadoop-aws:3.3.4,"
+        "com.amazonaws:aws-java-sdk-bundle:1.12.262"
+    )
+
+    builder = (
         SparkSession.builder
         .appName("ES-Sync-TableCheck")
-        .master("local[*]")
-        .config("spark.jars", local_jars)
+        .master(os.getenv("SPARK_MASTER", "spark://spark-master:7077"))
         .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
         .config(f"spark.sql.catalog.{gold_catalog}", "org.apache.iceberg.spark.SparkCatalog")
         .config(f"spark.sql.catalog.{gold_catalog}.type", "hadoop")
         .config(f"spark.sql.catalog.{gold_catalog}.warehouse", f"s3a://{bucket}/gold/")
+        .config("spark.sql.catalog.silver", "org.apache.iceberg.spark.SparkCatalog")
+        .config("spark.sql.catalog.silver.type", "hadoop")
+        .config("spark.sql.catalog.silver.warehouse", f"s3a://{bucket}/silver/")
         .config("spark.hadoop.fs.s3a.access.key", os.getenv("MINIO_ACCESS_KEY", "minioadmin"))
         .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
         .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
         .config("spark.hadoop.fs.s3a.path.style.access", "true")
         .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
         .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+        .config("spark.driver.host", os.getenv("SPARK_DRIVER_HOST", "oer-airflow-scraper"))
+        .config("spark.driver.bindAddress", os.getenv("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0"))
         .config("spark.driver.memory", "1g")
-        .getOrCreate()
     )
+
+    if existing_local_jars:
+        builder = builder.config("spark.jars", ",".join(existing_local_jars))
+    else:
+        builder = builder.config("spark.jars.packages", os.getenv("SPARK_PACKAGES", spark_packages))
+
+    spark = builder.getOrCreate()
     
     try:
         # Check required tables
         required_tables = [
             f"{gold_catalog}.{gold_database}.dim_oer_resources",
             f"{gold_catalog}.{gold_database}.fact_oer_resources",
+        ]
+        silver_required_tables = [
+            "silver.default.oer_documents",
+            "silver.default.oer_chunks",
         ]
         
         optional_tables = [
@@ -147,6 +175,16 @@ def check_gold_layer_tables(**context):
                 if count == 0:
                     raise Exception(f"Required table {table} is empty!")
                     
+            except Exception as e:
+                print(f" {table}: MISSING or ERROR - {e}")
+                raise Exception(f"Required table {table} not found: {e}")
+
+        for table in silver_required_tables:
+            try:
+                df = spark.table(table)
+                count = df.count()
+                print(f" {table}: {count:,} records")
+                table_stats[table] = count
             except Exception as e:
                 print(f" {table}: MISSING or ERROR - {e}")
                 raise Exception(f"Required table {table} not found: {e}")
@@ -172,29 +210,27 @@ def check_gold_layer_tables(**context):
 
 def run_elasticsearch_sync(**context):
     """Execute the main Elasticsearch sync job"""
-    from src.elasticsearch_sync import OERElasticsearchIndexer
+    from src.elasticsearch_sync import ChatbotElasticsearchSync
     
     print("=" * 80)
-    print("Starting Elasticsearch Sync")
+    print("Starting Chatbot Elasticsearch Sync")
     print("=" * 80)
     
     # Log configuration
     print(f"Configuration:")
     print(f"  ES_HOST: {os.getenv('ELASTICSEARCH_HOST', 'http://elasticsearch:9200')}")
     print(f"  ES_INDEX: {os.getenv('ELASTICSEARCH_INDEX', 'oer_resources')}")
-    print(f"  BATCH_SIZE: {os.getenv('ELASTICSEARCH_BATCH_SIZE', '500')}")
+    print(f"  BATCH_SIZE: {os.getenv('ELASTICSEARCH_BATCH_SIZE', '300')}")
     print(f"  RECREATE_INDEX: {os.getenv('ELASTICSEARCH_RECREATE', '0')}")
-    print(f"  INDEX_PDF_CONTENT: {os.getenv('ELASTICSEARCH_INDEX_PDF_CONTENT', '1')}")
-    print(f"  MAX_PDF_PER_RESOURCE: {os.getenv('ELASTICSEARCH_MAX_PDF_PER_RESOURCE', '3')}")
-    print(f"  PDF_MAX_PAGES: {os.getenv('ELASTICSEARCH_PDF_MAX_PAGES', '50')}")
+    print(f"  INCREMENTAL: {os.getenv('ELASTICSEARCH_INCREMENTAL', '1')}")
     print()
     
-    # Run indexer
-    indexer = OERElasticsearchIndexer()
-    indexer.run()
+    # Run sync
+    sync = ChatbotElasticsearchSync()
+    sync.run()
     
     print("=" * 80)
-    print("Elasticsearch Sync Complete")
+    print("Chatbot Elasticsearch Sync Complete")
     print("=" * 80)
 
 

@@ -94,6 +94,20 @@ services:
       - MAX_PDF_SIZE_MB=20
       - IMPORTANT_CATEGORIES=lecture_notes,textbook,handout,reading
       - SKIP_CATEGORIES=exam,assignment,quiz
+      # Silver chunking configuration
+      - SILVER_MAX_PDF_PAGES=1000
+      - SILVER_CHUNK_MAX_CHARS=2400
+      - SILVER_CHUNK_OVERLAP=300
+      - SILVER_CHUNK_MIN_CHARS=400
+      # Hierarchical chunking
+      - ENABLE_HIERARCHICAL_CHUNKING=1
+      - TOC_EXTRACTION_ENABLED=1
+      - TOC_MIN_CONFIDENCE=0.60
+      - TOC_FALLBACK_CHAPTER_SIZE=50
+      - DOC_SUMMARY_MAX_CHARS=1000
+      - CHAPTER_SUMMARY_MAX_CHARS=800
+      - SECTION_CHUNK_MAX_CHARS=2400
+      - HIERARCHICAL_INDEX_ALL_TIERS=1
       # Spark cluster configuration - connect to Spark cluster
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_DEPLOY_MODE=client

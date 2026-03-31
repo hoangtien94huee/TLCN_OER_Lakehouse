@@ -21,7 +21,7 @@ dag = DAG(
     'mit_ocw_scraper_daily',
     default_args=default_args,
     description='Daily MIT OCW scraping with MinIO backup support',
-    schedule_interval=timedelta(days=30),  # Chạy hàng ngày
+    schedule_interval=timedelta(days=1),  # Chạy hàng ngày
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -40,7 +40,7 @@ def scrape_mit_ocw_documents(**context):
             use_selenium=True,
             output_dir="/opt/airflow/scraped_data/mit_ocw",
             batch_size=int(os.getenv('BATCH_SIZE', 25)),
-            max_documents=50
+            max_documents=100
         )
         
         # Run scraper

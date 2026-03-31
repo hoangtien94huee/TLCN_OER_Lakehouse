@@ -24,6 +24,9 @@ pdfplumber>=0.10.0
 numpy==1.26.4
 pdfminer.six>=20221105
 
+# Hierarchical Chunking (TOC extraction + summarization)
+scikit-learn==1.3.2
+
 # Embedding generation (for Silver layer + Chatbot API)
 sentence-transformers==3.0.1
 torch>=2.0.0

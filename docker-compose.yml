@@ -120,13 +120,15 @@ services:
       - ELASTICSEARCH_RECREATE=0
       - ELASTICSEARCH_INCREMENTAL=1
       - ELASTICSEARCH_TIMEOUT=180
+      # Embedding pipeline configuration
+      - EMBEDDING_INCREMENTAL=1
       # Chatbot API configuration
       - LLM_PROVIDER=groq
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GROQ_MODEL=llama-3.1-8b-instant
       - GEMINI_API_KEY=${GOOGLE_API_KEY}
       - GEMINI_MODEL=gemini-2.0-flash
-      - EMBEDDING_MODEL=paraphrase-multilingual-MiniLM-L12-v2
+      - EMBEDDING_MODEL=intfloat/multilingual-e5-base
       # Chatbot-optimized: use silver chunks, avoid re-parsing PDFs
       - ELASTICSEARCH_INDEX_PDF_CONTENT=0
       - ELASTICSEARCH_MAX_PDF_PER_RESOURCE=1

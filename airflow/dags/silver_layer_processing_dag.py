@@ -31,11 +31,6 @@ os.environ.setdefault("REFERENCE_DATA_URI", "s3a://oer-lakehouse/bronze/referenc
 
 from src.silver_transform import SilverTransformer
 
-# Lazy import for embedding (heavy dependency)
-def get_embedding_generator():
-    from src.silver_embeddings import SilverEmbeddingGenerator
-    return SilverEmbeddingGenerator()
-
 # DAG Configuration
 default_args = {
     'owner': 'oer-lakehouse',
@@ -353,36 +348,6 @@ def generate_processing_report(**context):
     return report
 
 
-def run_embedding_generation_task(**context):
-    """Generate embeddings for new chunks in Silver layer."""
-    execution_date = context['logical_date'].strftime('%Y-%m-%d')
-    print(f"[Embedding] Starting embedding generation for {execution_date}")
-    
-    try:
-        os.environ.setdefault('JAVA_HOME', '/usr/lib/jvm/java-17-openjdk-amd64')
-        os.environ.setdefault('SPARK_MASTER', os.getenv('SPARK_MASTER_URL', 'spark://spark-master:7077'))
-        os.environ.setdefault('SPARK_DRIVER_HOST', 'oer-airflow-scraper')
-        os.environ.setdefault('SPARK_DRIVER_BIND_ADDRESS', '0.0.0.0')
-        
-        generator = get_embedding_generator()
-        result = generator.run()
-        stats = generator.get_stats()
-        
-        print(f"[Embedding] Result: {result}")
-        print(f"[Embedding] Stats: {stats}")
-        
-        context['task_instance'].xcom_push(key='embedding_result', value=result)
-        context['task_instance'].xcom_push(key='embedding_stats', value=stats)
-        
-        return result
-        
-    except Exception as e:
-        print(f"[Embedding] Failed: {e}")
-        import traceback
-        traceback.print_exc()
-        raise
-
-
 # === DAG Tasks Definition ===
 
 start_task = DummyOperator(
@@ -427,13 +392,6 @@ generate_report_task = PythonOperator(
     dag=dag,
 )
 
-# Embedding generation task (after all sources processed)
-generate_embeddings_task = PythonOperator(
-    task_id='generate_embeddings',
-    python_callable=run_embedding_generation_task,
-    dag=dag,
-)
-
 end_task = DummyOperator(
     task_id='end_silver_processing',
     dag=dag,
@@ -444,4 +402,4 @@ start_task >> check_bronze_task
 check_bronze_task >> reference_bootstrap_task
 reference_bootstrap_task >> [process_mit_ocw_silver, process_openstax_silver, process_otl_silver]
 [process_mit_ocw_silver, process_openstax_silver, process_otl_silver] >> generate_report_task
-generate_report_task >> generate_embeddings_task >> end_task
+generate_report_task >> end_task

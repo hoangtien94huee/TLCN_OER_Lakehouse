@@ -24,9 +24,10 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-# Embedding config (same model as Silver layer)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "paraphrase-multilingual-MiniLM-L12-v2")
-EMBEDDING_DIM = 384
+# Embedding config (same model as Silver layer) - E5-Base for cross-lingual
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
+EMBEDDING_DIM = 768
+USE_E5_PREFIXES = True  # E5 models need query: prefix
 
 # Hybrid search weights - adjusted per language
 # Vietnamese queries: rely more on kNN (multilingual embedding handles cross-language)
@@ -165,11 +166,20 @@ English:"""
 
 
 def _embed_query(query: str) -> List[float]:
-    """Embed query using sentence-transformers."""
+    """Embed query using sentence-transformers.
+    
+    E5 models require 'query:' prefix for search queries.
+    See: https://huggingface.co/intfloat/multilingual-e5-base
+    """
     model = _get_embedding_model()
     # Extract keywords before embedding for better semantic match
     clean_query = _extract_keywords(query)
-    embedding = model.encode(clean_query, convert_to_numpy=True)
+    
+    # Add E5 query prefix if using E5 model
+    if USE_E5_PREFIXES and "e5" in EMBEDDING_MODEL.lower():
+        clean_query = f"query: {clean_query}"
+    
+    embedding = model.encode(clean_query, convert_to_numpy=True, normalize_embeddings=True)
     return embedding.tolist()
 
 
@@ -180,11 +190,11 @@ def _es_hybrid_search(
     language: Optional[str],
     use_hybrid: bool = True,
 ) -> List[Dict[str, Any]]:
-    """Hybrid search: BM25 + kNN with RRF fusion.
+    """Hybrid search: BM25 + kNN with RRF fusion (SIMPLIFIED for flat index).
     
-    For cross-language queries (e.g., Vietnamese query on English docs),
-    translates to English before search for better BM25 matching.
-    kNN uses multilingual embeddings for semantic matching.
+    New architecture: Direct chunk-level search (no nested structure).
+    - Each document = 1 chunk (chunk_id as _id)
+    - Faster queries, simpler mapping
     """
     query_lang = _detect_lang(question)
     
@@ -192,33 +202,20 @@ def _es_hybrid_search(
     search_query = _translate_query_for_search(question) if query_lang == "vi" else question
     
     filters: List[Dict[str, Any]] = []
-    if source_system:
-        filters.append({"term": {"source_system": source_system}})
     if language:
-        filters.append({"term": {"language": language}})
+        filters.append({"term": {"lang": language}})
 
-    # BM25 query (text search) - uses translated query
+    # BM25 query (text search on chunk_text)
     bm25_query = {
         "bool": {
             "filter": filters,
             "should": [
                 {
-                    "nested": {
-                        "path": "chunk_items",
-                        "query": {"match": {"chunk_items.text": {"query": search_query, "fuzziness": "AUTO"}}},
-                        "inner_hits": {
-                            "size": 3,
-                            "_source": ["chunk_items.text", "chunk_items.page_no", "chunk_items.chunk_order", "chunk_items.asset_uid"],
-                        },
-                        "score_mode": "max",
-                    }
-                },
-                {
-                    "multi_match": {
-                        "query": search_query,
-                        "fields": ["title^3", "description^2", "search_text"],
-                        "type": "best_fields",
-                        "fuzziness": "AUTO",
+                    "match": {
+                        "chunk_text": {
+                            "query": search_query,
+                            "fuzziness": "AUTO",
+                        }
                     }
                 },
             ],
@@ -226,30 +223,29 @@ def _es_hybrid_search(
         }
     }
 
-    # If not using hybrid or embedding fails, use BM25 only
+    # If not using hybrid, use BM25 only
     if not use_hybrid:
         body = {
             "size": top_k,
-            "_source": ["resource_id", "title", "source_url", "source_system", "language", "chunk_items", "documents"],
+            "_source": ["chunk_id", "resource_uid", "chunk_text", "page_no", "lang"],
             "query": bm25_query,
         }
         resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=body, timeout=20)
         resp.raise_for_status()
         return resp.json().get("hits", {}).get("hits", [])
 
-    # Hybrid: Use ES RRF (Reciprocal Rank Fusion) if available (ES 8.8+)
+    # Hybrid: Use ES RRF (Reciprocal Rank Fusion) - Flat index structure
     try:
         query_vector = _embed_query(question)
         
-        # For cross-language queries, increase kNN candidates for better semantic coverage
-        # Vietnamese queries searching English content need more semantic matching
+        # For cross-language queries, increase kNN candidates
         knn_k = top_k * 3 if query_lang == "vi" else top_k * 2
         knn_candidates = 100 if query_lang == "vi" else 50
         
-        # ES 8.8+ supports sub_searches with RRF
+        # ES 8.8+ RRF with flat index (direct chunk search)
         body = {
             "size": top_k,
-            "_source": ["resource_id", "title", "source_url", "source_system", "language", "chunk_items", "documents"],
+            "_source": ["chunk_id", "resource_uid", "chunk_text", "page_no", "lang"],
             "query": bm25_query,
             "knn": {
                 "field": "embedding",
@@ -279,7 +275,7 @@ def _es_hybrid_search(
         print(f"[Hybrid Search] Fallback to BM25: {e}")
         body = {
             "size": top_k,
-            "_source": ["resource_id", "title", "source_url", "source_system", "language", "chunk_items", "documents"],
+            "_source": ["chunk_id", "resource_uid", "chunk_text", "page_no", "lang"],
             "query": bm25_query,
         }
         resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=body, timeout=20)
@@ -288,40 +284,38 @@ def _es_hybrid_search(
 
 
 def _build_context(question: str, hits: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
+    """Build context from flat chunk-level search results."""
     contexts: List[Dict[str, Any]] = []
     for hit in hits:
         src = hit.get("_source", {})
-        title = src.get("title", "Untitled")
-        source_url = src.get("source_url", "#")
-        inner_hits = hit.get("inner_hits", {}).get("chunk_items", {}).get("hits", {}).get("hits", [])
-        if inner_hits:
-            for ch in inner_hits:
-                csrc = ch.get("_source", {})
-                text = csrc.get("text", "")
-                if not text:
-                    continue
-                contexts.append(
-                    {
-                        "text": text,
-                        "title": title,
-                        "source_url": source_url,
-                        "page_no": csrc.get("page_no"),
-                        "chunk_order": csrc.get("chunk_order"),
-                        "asset_uid": csrc.get("asset_uid"),
-                    }
-                )
-                if len(contexts) >= top_k:
-                    return contexts
-    return contexts[:top_k]
+        
+        # Flat structure: each hit is a chunk
+        text = src.get("chunk_text", "")
+        if not text:
+            continue
+            
+        contexts.append({
+            "text": text,
+            "chunk_id": src.get("chunk_id"),
+            "resource_uid": src.get("resource_uid"),
+            "page_no": src.get("page_no"),
+            "lang": src.get("lang"),
+        })
+        
+        if len(contexts) >= top_k:
+            break
+    
+    return contexts
 
 
 def _build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
     lang = _detect_lang(question)
     parts = []
     for i, c in enumerate(contexts, 1):
-        cite = f"[Source {i}: {c['title']}]"
-        if lang == "vi":
-            cite = f"[Nguồn {i}: {c['title']}]"
+        # Simplified citation (no title/URL in flat structure yet)
+        cite = f"[Chunk {c.get('chunk_id', i)}]"
+        if c.get("page_no"):
+            cite += f" (Page {c['page_no']})"
         parts.append(f"{cite}\n{c['text']}")
     context = "\n\n".join(parts)
     if lang == "vi":

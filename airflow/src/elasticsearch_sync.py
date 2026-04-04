@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
+from itertools import islice
 from typing import Any, Dict, List, Optional, Tuple
 
 from elasticsearch import Elasticsearch, helpers
@@ -50,14 +52,18 @@ class ChatbotElasticsearchSync:
 
         self.es_host = os.getenv("ELASTICSEARCH_HOST", "http://elasticsearch:9200")
         self.index_name = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
-        self.batch_size = int(os.getenv("ELASTICSEARCH_BATCH_SIZE", "100"))
+        self.batch_size = int(os.getenv("ELASTICSEARCH_BATCH_SIZE", "500"))  # Increased from 100 for faster processing
         self.timeout = int(os.getenv("ELASTICSEARCH_TIMEOUT", "180"))
-        self.recreate = os.getenv("ELASTICSEARCH_RECREATE", "0").lower() in {"1", "true", "yes"}
+        self.recreate = os.getenv("ELASTICSEARCH_RECREATE", "1").lower() in {"1", "true", "yes"}
         self.incremental = os.getenv("ELASTICSEARCH_INCREMENTAL", "1").lower() in {"1", "true", "yes"}
         self.index_all_tiers = os.getenv("HIERARCHICAL_INDEX_ALL_TIERS", "1").lower() in {"1", "true", "yes"}
+        self.stream_partitions = max(1, int(os.getenv("ELASTICSEARCH_STREAM_PARTITIONS", "32")))
+        self.spark_master = os.getenv("ELASTICSEARCH_SPARK_MASTER", os.getenv("SPARK_MASTER", os.getenv("SPARK_MASTER_URL", "local[*]")))
 
         self.model_name = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
         self.embedding_dim = int(os.getenv("EMBEDDING_DIM", "768"))
+        self.minio_bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
+        self.minio_public_base_url = os.getenv("MINIO_PUBLIC_BASE_URL", "http://localhost:19000").rstrip("/")
 
         es_user = os.getenv("ELASTICSEARCH_USER")
         es_password = os.getenv("ELASTICSEARCH_PASSWORD")
@@ -73,11 +79,50 @@ class ChatbotElasticsearchSync:
 
     def _create_spark_session(self) -> SparkSession:
         logger.info("Creating Spark session for ES sync...")
+        java_home = os.getenv("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+        os.environ.setdefault("JAVA_HOME", java_home)
+        os.environ["PATH"] = f"{java_home}/bin:{os.environ.get('PATH', '')}"
+        os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
+        os.environ.pop("JAVA_TOOL_OPTIONS", None)
+
         minio_endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
         endpoint = minio_endpoint if minio_endpoint.startswith(("http://", "https://")) else f"http://{minio_endpoint}"
+        logger.info(f"ES sync Spark master: {self.spark_master}")
+        builder = SparkSession.builder.appName("ChatbotESSync").master(self.spark_master)
+
+        spark_jars = os.getenv("SPARK_JARS")
+        use_local_jars = False
+        if spark_jars:
+            jar_paths = [p.strip() for p in spark_jars.split(",") if p.strip()]
+            use_local_jars = bool(jar_paths) and all(Path(p).exists() for p in jar_paths)
+            if use_local_jars:
+                logger.info(f"Using local Spark jars: {spark_jars}")
+                builder = (
+                    builder
+                    .config("spark.jars", spark_jars)
+                    .config("spark.driver.extraClassPath", spark_jars)
+                    .config("spark.executor.extraClassPath", spark_jars)
+                )
+
+        if not use_local_jars:
+            logger.info("Local Spark jars not found; falling back to spark.jars.packages")
+            builder = (
+                builder
+                .config(
+                    "spark.jars.packages",
+                    ",".join(
+                        [
+                            "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2",
+                            "org.apache.hadoop:hadoop-aws:3.3.4",
+                            "com.amazonaws:aws-java-sdk-bundle:1.12.565",
+                        ]
+                    ),
+                )
+                .config("spark.jars.ivy", os.getenv("SPARK_IVY_DIR", "/tmp/.ivy2"))
+            )
 
         return (
-            SparkSession.builder.appName("ChatbotESSync")
+            builder
             .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
             .config(f"spark.sql.catalog.{self.silver_catalog}", "org.apache.iceberg.spark.SparkCatalog")
             .config(f"spark.sql.catalog.{self.silver_catalog}.type", "hadoop")
@@ -87,6 +132,13 @@ class ChatbotElasticsearchSync:
             .config("spark.hadoop.fs.s3a.secret.key", os.getenv("MINIO_SECRET_KEY", "minioadmin"))
             .config("spark.hadoop.fs.s3a.path.style.access", "true")
             .config("spark.hadoop.fs.s3a.impl", "org.apache.hadoop.fs.s3a.S3AFileSystem")
+            .config("spark.hadoop.fs.s3a.connection.ssl.enabled", "false")
+            .config("spark.driver.host", os.getenv("SPARK_DRIVER_HOST", "oer-airflow-scraper"))
+            .config("spark.driver.bindAddress", os.getenv("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0"))
+            .config("spark.driver.memory", os.getenv("SPARK_DRIVER_MEMORY", "4g"))
+            .config("spark.executor.memory", os.getenv("SPARK_EXECUTOR_MEMORY", "2g"))
+            .config("spark.driver.maxResultSize", os.getenv("SPARK_DRIVER_MAXRESULTSIZE", "1g"))
+            .config("spark.sql.shuffle.partitions", os.getenv("SPARK_SHUFFLE_PARTITIONS", "8"))
             .getOrCreate()
         )
 
@@ -95,8 +147,7 @@ class ChatbotElasticsearchSync:
         try:
             chunks = self.spark.table(self.silver_chunks)
         except Exception as exc:
-            logger.error(f"Failed to load chunks table {self.silver_chunks}: {exc}")
-            return None
+            raise RuntimeError(f"Failed to load chunks table {self.silver_chunks}") from exc
 
         count = chunks.count()
         if count == 0:
@@ -131,15 +182,43 @@ class ChatbotElasticsearchSync:
             chunks = chunks.filter((F.col("chunk_tier").isin([1, 2])) | (F.col("is_summary") == F.lit(True)))
             logger.info("Indexing summaries only (tier 1-2), tier 3 excluded by config")
 
-        if "source_system" not in chunks.columns and self._table_exists(self.silver_documents):
+        if self._table_exists(self.silver_documents):
             docs = self.spark.table(self.silver_documents).select(
                 F.col("asset_uid").alias("_doc_asset_uid"),
                 F.col("source_system").alias("_doc_source_system"),
+                F.col("title").alias("_doc_title"),
+                F.col("source_url").alias("_doc_source_url"),
+                F.col("asset_path").alias("_doc_asset_path"),
+                F.col("file_name").alias("_doc_file_name"),
             )
-            chunks = chunks.join(docs, chunks.asset_uid == docs._doc_asset_uid, "left").drop("_doc_asset_uid")
-            chunks = chunks.withColumn("source_system", F.col("_doc_source_system")).drop("_doc_source_system")
-        elif "source_system" not in chunks.columns:
-            chunks = chunks.withColumn("source_system", F.lit(None))
+            chunks = chunks.join(F.broadcast(docs), chunks.asset_uid == docs._doc_asset_uid, "left").drop("_doc_asset_uid")
+            if "source_system" not in chunks.columns:
+                chunks = chunks.withColumn("source_system", F.col("_doc_source_system"))
+            chunks = chunks.withColumn("source_system", F.coalesce(F.col("source_system"), F.col("_doc_source_system")))
+            chunks = chunks.withColumn("title", F.coalesce(F.col("title"), F.col("_doc_title")) if "title" in chunks.columns else F.col("_doc_title"))
+            chunks = chunks.withColumn("source_url", F.coalesce(F.col("source_url"), F.col("_doc_source_url")) if "source_url" in chunks.columns else F.col("_doc_source_url"))
+            chunks = chunks.withColumn("asset_path", F.coalesce(F.col("asset_path"), F.col("_doc_asset_path")) if "asset_path" in chunks.columns else F.col("_doc_asset_path"))
+            chunks = chunks.withColumn("file_name", F.coalesce(F.col("file_name"), F.col("_doc_file_name")) if "file_name" in chunks.columns else F.col("_doc_file_name"))
+            chunks = chunks.drop("_doc_source_system", "_doc_title", "_doc_source_url", "_doc_asset_path", "_doc_file_name")
+        else:
+            if "source_system" not in chunks.columns:
+                chunks = chunks.withColumn("source_system", F.lit(None))
+            if "title" not in chunks.columns:
+                chunks = chunks.withColumn("title", F.lit(None))
+            if "source_url" not in chunks.columns:
+                chunks = chunks.withColumn("source_url", F.lit(None))
+            if "asset_path" not in chunks.columns:
+                chunks = chunks.withColumn("asset_path", F.lit(None))
+            if "file_name" not in chunks.columns:
+                chunks = chunks.withColumn("file_name", F.lit(None))
+
+        chunks = chunks.withColumn(
+            "minio_url",
+            F.when(
+                F.col("asset_path").isNotNull() & (F.length(F.trim(F.col("asset_path"))) > 0),
+                F.concat(F.lit(f"{self.minio_public_base_url}/{self.minio_bucket}/"), F.regexp_replace(F.col("asset_path"), r"^/+", "")),
+            ).otherwise(F.lit(None)),
+        )
 
         df = chunks.select(
             F.col("chunk_id").alias("_id"),
@@ -147,6 +226,11 @@ class ChatbotElasticsearchSync:
             "resource_uid",
             "asset_uid",
             "source_system",
+            "title",
+            "source_url",
+            "asset_path",
+            "file_name",
+            "minio_url",
             "chunk_text",
             "page_no",
             "chunk_order",
@@ -170,7 +254,8 @@ class ChatbotElasticsearchSync:
             "summary_method",
         )
 
-        logger.info(f"Prepared {df.count():,} chunks for Elasticsearch indexing")
+        df = df.repartition(self.stream_partitions)
+        logger.info(f"Prepared chunk dataframe for Elasticsearch indexing with {self.stream_partitions} partitions")
         return df
 
     def _table_exists(self, table_name: str) -> bool:
@@ -205,6 +290,11 @@ class ChatbotElasticsearchSync:
                     "resource_uid": {"type": "keyword"},
                     "asset_uid": {"type": "keyword"},
                     "source_system": {"type": "keyword"},
+                    "title": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                    "source_url": {"type": "keyword"},
+                    "asset_path": {"type": "keyword"},
+                    "file_name": {"type": "keyword"},
+                    "minio_url": {"type": "keyword"},
                     "chunk_text": {"type": "text", "analyzer": "standard"},
                     "page_no": {"type": "integer"},
                     "chunk_order": {"type": "integer"},
@@ -248,7 +338,7 @@ class ChatbotElasticsearchSync:
         self.es.indices.create(index=self.index_name, body=mapping)
 
     def _bulk_index(self, df: DataFrame) -> None:
-        logger.info(f"Preparing to index {df.count():,} chunks...")
+        logger.info("Preparing to index chunk stream...")
         existing_ids = set()
         if self.incremental:
             try:
@@ -264,30 +354,54 @@ class ChatbotElasticsearchSync:
             except Exception as exc:
                 logger.warning(f"Failed to load existing IDs, continuing full indexing: {exc}")
 
-        if existing_ids:
-            df = df.filter(~F.col("chunk_id").isin(list(existing_ids)))
-            remaining = df.count()
-            if remaining == 0:
-                logger.info("No new chunks to index.")
-                return
-            logger.info(f"Incremental mode: {remaining:,} new chunks")
-
         logger.info(f"Loading embedding model: {self.model_name}")
+        import torch
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"Using device: {device}")
         model = _load_embedding_model(self.model_name)
+        if hasattr(model, '_target_device'):
+            model = model.to(device)
+        logger.info("Streaming chunks from Spark to driver in batches...")
 
-        rows = df.collect()
-        total = len(rows)
-        logger.info(f"Generating embeddings for {total:,} chunks...")
+        def row_batches() -> Any:
+            iterator = df.toLocalIterator()
+            while True:
+                batch = list(islice(iterator, self.batch_size))
+                if not batch:
+                    break
+                yield batch
 
         indexed_count = 0
-        for offset in range(0, total, self.batch_size):
-            batch_rows = rows[offset : offset + self.batch_size]
+        seen_count = 0
+        skipped_existing_count = 0
+        batch_number = 0
+
+        for batch_rows in row_batches():
+            batch_number += 1
+            seen_count += len(batch_rows)
+            batch_rows = [
+                row.asDict(recursive=True) if hasattr(row, "asDict") else row
+                for row in batch_rows
+            ]
+            if existing_ids:
+                original_batch_size = len(batch_rows)
+                batch_rows = [row for row in batch_rows if row["chunk_id"] not in existing_ids]
+                skipped_existing_count += original_batch_size - len(batch_rows)
+                if not batch_rows:
+                    if batch_number % 10 == 0:
+                        logger.info(
+                            f"Progress: scanned={seen_count:,}, indexed={indexed_count:,}, skipped_existing={skipped_existing_count:,}"
+                        )
+                    continue
+
             texts = [f"passage: {(r['chunk_text'] or '').strip()}" for r in batch_rows]
+            # Increase batch size for faster processing (reduce overhead)
             embeddings = model.encode(
                 texts,
                 normalize_embeddings=True,
                 show_progress_bar=False,
-                batch_size=32,
+                batch_size=64,  # Increased from 32 for better throughput
+                convert_to_numpy=True,
             )
 
             actions: List[Dict[str, Any]] = []
@@ -303,6 +417,11 @@ class ChatbotElasticsearchSync:
                             "resource_uid": row["resource_uid"],
                             "asset_uid": row["asset_uid"],
                             "source_system": row["source_system"],
+                            "title": row.get("title"),
+                            "source_url": row.get("source_url"),
+                            "asset_path": row.get("asset_path"),
+                            "file_name": row.get("file_name"),
+                            "minio_url": row.get("minio_url"),
                             "chunk_text": row["chunk_text"],
                             "page_no": row["page_no"],
                             "chunk_order": row["chunk_order"],
@@ -339,9 +458,15 @@ class ChatbotElasticsearchSync:
             )
             indexed_count += success
             if failed:
-                logger.warning(f"Batch {(offset // self.batch_size) + 1}: {failed} failures")
-            if (offset + self.batch_size) % 1000 == 0 or (offset + self.batch_size) >= total:
-                logger.info(f"Progress: {indexed_count:,}/{total:,}")
+                logger.warning(f"Batch {batch_number}: {failed} failures")
+            if batch_number % 10 == 0:
+                logger.info(
+                    f"Progress: scanned={seen_count:,}, indexed={indexed_count:,}, skipped_existing={skipped_existing_count:,}"
+                )
+
+        if indexed_count == 0 and skipped_existing_count > 0:
+            logger.info(f"No new chunks to index. Skipped {skipped_existing_count:,} existing documents.")
+            return
 
         logger.info(f"Indexed {indexed_count:,} chunks")
         self.es.indices.refresh(index=self.index_name)

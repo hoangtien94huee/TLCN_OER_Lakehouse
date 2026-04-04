@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import re
 from typing import Any, Dict, List
 
@@ -99,11 +100,15 @@ class MultilingualExtractiveSummarizer:
         max_chars: int = 1000,
     ) -> str:
         parts: List[str] = []
+        asset_title = self._derive_asset_title(resource)
         title = str(resource.get("title") or "").strip()
         description = str(resource.get("description") or "").strip()
 
+        if asset_title:
+            parts.append(asset_title)
         if title:
-            parts.append(title)
+            if not asset_title or self._normalize_label(asset_title) != self._normalize_label(title):
+                parts.append(f"Course: {title}")
         if description:
             parts.append(description[:350])
         if toc:
@@ -126,6 +131,21 @@ class MultilingualExtractiveSummarizer:
         joined = ". ".join([p for p in parts if p]).strip()
         return self._truncate(joined, max_chars)
 
+    def _derive_asset_title(self, resource: Dict[str, Any]) -> str:
+        file_name = str(resource.get("file_name") or "").strip()
+        asset_path = str(resource.get("asset_path") or "").strip()
+
+        candidate = file_name or os.path.basename(asset_path)
+        candidate = re.sub(r"\.[A-Za-z0-9]+$", "", candidate).strip()
+        candidate = candidate.replace("_", " ").replace("-", " ")
+        candidate = re.sub(r"%20", " ", candidate, flags=re.IGNORECASE)
+        candidate = re.sub(r"\s+", " ", candidate).strip(" .-_")
+        return candidate[:220]
+
+    def _normalize_label(self, value: str) -> str:
+        normalized = re.sub(r"[^a-z0-9]+", " ", value.lower())
+        return re.sub(r"\s+", " ", normalized).strip()
+
     def _truncate(self, text: str, max_chars: int) -> str:
         if len(text) <= max_chars:
             return text
@@ -135,4 +155,3 @@ class MultilingualExtractiveSummarizer:
         if boundary > max_chars // 2:
             return truncated[: boundary + 1].strip()
         return truncated
-

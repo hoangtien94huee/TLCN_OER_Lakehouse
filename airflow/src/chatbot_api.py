@@ -1,27 +1,24 @@
 """
-Chatbot API for OER RAG.
-
-Key behavior:
-- Hybrid retrieval (BM25 + kNN) with multilingual E5 embeddings.
-- Two-stage hierarchical retrieval (tier 1-2 -> tier 3 expansion).
-- Rescue branch that searches tier 3 globally to avoid missed answers.
+Chatbot-only API for OER RAG.
+Hybrid Search: BM25 (text) + kNN (vector) with keyword extraction.
 """
-
-from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import requests
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+# Lazy load embedding model
 _embedding_model = None
 
 ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200").rstrip("/")
 ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
+MINIO_BUCKET = os.getenv("MINIO_BUCKET", "oer-lakehouse")
+MINIO_PUBLIC_BASE_URL = os.getenv("MINIO_PUBLIC_BASE_URL", "http://localhost:19000").rstrip("/")
 
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
@@ -29,13 +26,18 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
+# Embedding config (same model as Silver layer) - E5-Base for cross-lingual
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
-USE_E5_PREFIXES = True
+EMBEDDING_DIM = 768
+USE_E5_PREFIXES = True  # E5 models need query: prefix
 
-STAGE1_MULTIPLIER = int(os.getenv("HIER_STAGE1_MULTIPLIER", "6"))
-STAGE2_CHAPTER_LIMIT = int(os.getenv("HIER_STAGE2_CHAPTER_LIMIT", "4"))
-STAGE2_DETAIL_PER_CHAPTER = int(os.getenv("HIER_STAGE2_DETAIL_PER_CHAPTER", "8"))
-RESCUE_TIER3_K = int(os.getenv("HIER_RESCUE_TIER3_K", "10"))
+# Hybrid search weights - adjusted per language
+# Vietnamese queries: rely more on kNN (multilingual embedding handles cross-language)
+# English queries: BM25 works well for exact text match
+BM25_WEIGHT_EN = float(os.getenv("BM25_WEIGHT_EN", "0.5"))
+KNN_WEIGHT_EN = float(os.getenv("KNN_WEIGHT_EN", "0.5"))
+BM25_WEIGHT_VI = float(os.getenv("BM25_WEIGHT_VI", "0.2"))  # Lower for cross-language
+KNN_WEIGHT_VI = float(os.getenv("KNN_WEIGHT_VI", "0.8"))    # Higher for semantic match
 
 app = FastAPI(title="OER Chatbot API")
 app.add_middleware(
@@ -52,502 +54,390 @@ class AskRequest(BaseModel):
     top_k: int = Field(5, ge=1, le=12)
     source_system: Optional[str] = None
     language: Optional[str] = None
-    use_hybrid: bool = Field(True)
-    use_hierarchical: bool = Field(True)
-
-
-VI_STOPWORDS = {
-    "à",
-    "ạ",
-    "ấy",
-    "bạn",
-    "bị",
-    "cho",
-    "chứ",
-    "có",
-    "cái",
-    "của",
-    "cùng",
-    "cũng",
-    "dạ",
-    "để",
-    "đi",
-    "đó",
-    "được",
-    "gì",
-    "hả",
-    "hay",
-    "hỏi",
-    "là",
-    "làm",
-    "lại",
-    "mà",
-    "mình",
-    "muốn",
-    "này",
-    "như",
-    "nhỉ",
-    "nhé",
-    "nào",
-    "nè",
-    "nha",
-    "ơi",
-    "rồi",
-    "sao",
-    "tôi",
-    "thì",
-    "thế",
-    "trên",
-    "trong",
-    "từ",
-    "và",
-    "vậy",
-    "về",
-    "với",
-    "ê",
-    "uhm",
-    "um",
-    "ừ",
-    "ờ",
-    "vâng",
-    "xin",
-    "giúp",
-    "biết",
-    "tui",
-}
-EN_STOPWORDS = {
-    "a",
-    "an",
-    "the",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "been",
-    "being",
-    "have",
-    "has",
-    "had",
-    "do",
-    "does",
-    "did",
-    "will",
-    "would",
-    "could",
-    "should",
-    "may",
-    "might",
-    "must",
-    "to",
-    "of",
-    "in",
-    "for",
-    "on",
-    "with",
-    "at",
-    "by",
-    "from",
-    "as",
-    "into",
-    "through",
-    "during",
-    "before",
-    "after",
-    "about",
-    "all",
-    "each",
-    "few",
-    "more",
-    "most",
-    "other",
-    "some",
-    "such",
-    "no",
-    "nor",
-    "not",
-    "only",
-    "own",
-    "same",
-    "so",
-    "than",
-    "too",
-    "very",
-    "i",
-    "me",
-    "my",
-    "we",
-    "our",
-    "you",
-    "your",
-    "he",
-    "she",
-    "it",
-    "they",
-    "them",
-    "what",
-    "which",
-    "who",
-    "this",
-    "that",
-    "these",
-    "those",
-    "please",
-    "help",
-    "want",
-    "know",
-    "tell",
-    "hey",
-    "hi",
-    "hello",
-}
+    use_hybrid: bool = Field(True, description="Use hybrid search (BM25 + kNN)")
 
 
 def _get_embedding_model():
+    """Lazy load embedding model."""
     global _embedding_model
     if _embedding_model is None:
         from sentence_transformers import SentenceTransformer
-
         _embedding_model = SentenceTransformer(EMBEDDING_MODEL)
     return _embedding_model
 
 
 def _detect_lang(text: str) -> str:
     vi_chars = set("àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
-    lowered = (text or "").lower()
-    return "vi" if any(ch in vi_chars for ch in lowered) else "en"
+    return "vi" if any(ch in vi_chars for ch in text.lower()) else "en"
+
+
+# Stopwords for keyword extraction
+VI_STOPWORDS = {
+    "à", "ạ", "ấy", "bạn", "bị", "cho", "chứ", "có", "cái", "của", "cùng", "cũng",
+    "dạ", "để", "đi", "đó", "được", "gì", "hả", "hay", "hỏi", "là", "làm", "lại",
+    "mà", "mình", "muốn", "này", "như", "nhỉ", "nhé", "nào", "nè", "nha", "ơi",
+    "rồi", "sao", "tôi", "thì", "thế", "trên", "trong", "từ", "và", "vậy", "về",
+    "với", "ê", "uhm", "um", "ừ", "ờ", "vâng", "dạ", "xin", "giúp", "biết", "tui",
+}
+EN_STOPWORDS = {
+    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have",
+    "has", "had", "do", "does", "did", "will", "would", "could", "should", "may",
+    "might", "must", "shall", "can", "need", "dare", "ought", "used", "to", "of",
+    "in", "for", "on", "with", "at", "by", "from", "as", "into", "through", "during",
+    "before", "after", "above", "below", "between", "under", "again", "further",
+    "then", "once", "here", "there", "when", "where", "why", "how", "all", "each",
+    "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only",
+    "own", "same", "so", "than", "too", "very", "just", "also", "now", "i", "me",
+    "my", "myself", "we", "our", "you", "your", "he", "him", "his", "she", "her",
+    "it", "its", "they", "them", "their", "what", "which", "who", "whom", "this",
+    "that", "these", "those", "am", "like", "um", "uh", "well", "please", "help",
+    "want", "know", "tell", "about", "hey", "hi", "hello",
+}
 
 
 def _extract_keywords(query: str) -> str:
+    """Extract meaningful keywords from query, removing filler words."""
+    # Skip keyword extraction for short queries (keep natural language)
+    if len(query.split()) <= 5:
+        return query
+    
     lang = _detect_lang(query)
     stopwords = VI_STOPWORDS if lang == "vi" else EN_STOPWORDS
-    tokens = re.findall(r"[\w\u00C0-\u024F\u1E00-\u1EFF]+", query.lower())
+    
+    # Normalize and tokenize
+    text = query.lower().strip()
+    # Keep alphanumeric and Vietnamese chars
+    tokens = re.findall(r'[\w\u00C0-\u024F\u1E00-\u1EFF]+', text)
+    
+    # Filter stopwords and short tokens
     keywords = [t for t in tokens if t not in stopwords and len(t) > 1]
+    
+    # If too aggressive, fallback to original
     if len(keywords) < 2:
-        return query.strip()
+        return query
+    
     return " ".join(keywords)
 
 
-def _translate_query_for_search(query: str) -> str:
-    if _detect_lang(query) != "vi":
-        return query
-    if LLM_PROVIDER == "groq" and not GROQ_API_KEY:
-        return query
-    if LLM_PROVIDER != "groq" and not GEMINI_API_KEY:
-        return query
+def _extract_source_url_from_text(text: str) -> Optional[str]:
+    if not text:
+        return None
+    m = re.search(r"Saylor URL:\s*(https?://[^\s]+)", text, flags=re.IGNORECASE)
+    if m:
+        return m.group(1).strip()
+    m = re.search(r"(https?://[^\s)]+)", text)
+    return m.group(1).strip() if m else None
 
-    prompt = (
-        "Translate this Vietnamese question to natural English for search retrieval.\n"
-        "Output only the translated question.\n\n"
-        f"Vietnamese: {query}\nEnglish:"
-    )
-    try:
-        if LLM_PROVIDER == "groq":
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={
-                    "model": GROQ_MODEL,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0,
-                    "max_tokens": 96,
-                },
-                timeout=6,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
 
-        resp = requests.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-            json={"contents": [{"parts": [{"text": prompt}]}]},
-            timeout=6,
-        )
-        resp.raise_for_status()
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception:
-        return query
+def _build_public_minio_url(asset_path: Optional[str]) -> Optional[str]:
+    if not asset_path:
+        return None
+    key = str(asset_path).strip().lstrip("/")
+    if not key:
+        return None
+    return f"{MINIO_PUBLIC_BASE_URL}/{MINIO_BUCKET}/{key}"
 
 
 def _embed_query(query: str) -> List[float]:
+    """Embed query using sentence-transformers.
+    
+    E5 models require 'query:' prefix for search queries.
+    See: https://huggingface.co/intfloat/multilingual-e5-base
+    """
     model = _get_embedding_model()
-    text = _extract_keywords(query)
+    # Extract keywords before embedding for better semantic match
+    clean_query = _extract_keywords(query)
+    
+    # Add E5 query prefix if using E5 model
     if USE_E5_PREFIXES and "e5" in EMBEDDING_MODEL.lower():
-        text = f"query: {text}"
-    vector = model.encode(text, convert_to_numpy=True, normalize_embeddings=True)
-    return vector.tolist()
-
-
-def _build_filters(
-    source_system: Optional[str],
-    language: Optional[str],
-    tiers: Optional[List[int]] = None,
-    chapter_ids: Optional[List[str]] = None,
-) -> List[Dict[str, Any]]:
-    filters: List[Dict[str, Any]] = []
-    if source_system:
-        filters.append({"term": {"source_system": source_system}})
-    if language:
-        filters.append({"term": {"lang": language}})
-    if tiers:
-        filters.append({"terms": {"chunk_tier": tiers}})
-    if chapter_ids:
-        filters.append({"terms": {"chapter_id": chapter_ids}})
-    return filters
-
-
-def _build_should_clauses(question: str, translated: str, keywords: str) -> List[Dict[str, Any]]:
-    clauses: List[Dict[str, Any]] = []
-    queries = []
-    if question.strip():
-        queries.append((question.strip(), 1.2))
-    if translated.strip() and translated.strip() != question.strip():
-        queries.append((translated.strip(), 1.0))
-    if keywords.strip():
-        queries.append((keywords.strip(), 0.8))
-
-    for q, boost in queries:
-        clauses.append(
-            {
-                "multi_match": {
-                    "query": q,
-                    "fields": ["chunk_text^1.0", "chapter_title^1.8", "section_title^1.5"],
-                    "fuzziness": "AUTO",
-                    "boost": boost,
-                }
-            }
-        )
-    return clauses
+        clean_query = f"query: {clean_query}"
+    
+    embedding = model.encode(clean_query, convert_to_numpy=True, normalize_embeddings=True)
+    return embedding.tolist()
 
 
 def _es_hybrid_search(
     question: str,
     top_k: int,
-    filters: List[Dict[str, Any]],
+    source_system: Optional[str],
+    language: Optional[str],
     use_hybrid: bool = True,
 ) -> List[Dict[str, Any]]:
-    query_lang = _detect_lang(question)
-    translated = _translate_query_for_search(question) if query_lang == "vi" else question
-    keywords = _extract_keywords(translated if translated != question else question)
+    """Hybrid search on flat chunk index.
 
-    should_clauses = _build_should_clauses(question, translated, keywords)
-    bool_query = {
+    - BM25 branch: lexical match on chunk text/title/chapter title.
+    - Vector branch: cosine similarity on embedding.
+    - Fusion: weighted score merge in application layer (no RRF license dependency).
+    """
+    # Query enhancement: extract subject keywords
+    search_query = question
+    if re.search(r'\b(book|textbook|sách|giáo trình|tài liệu)\b', question.lower()):
+        # Extract subject from "book of X" or "X textbook"
+        subject_match = re.search(r'\b(of|về|cho)\s+(\w+)', question.lower())
+        if subject_match:
+            subject = subject_match.group(2)
+            # Expand common subjects
+            expansions = {
+                'math': 'mathematics algebra calculus',
+                'toán': 'toán học mathematics algebra calculus',
+                'database': 'database SQL data management',
+            }
+            search_query = expansions.get(subject, question)
+    
+    query_lang = _detect_lang(question)
+    bm25_weight = BM25_WEIGHT_VI if query_lang == "vi" else BM25_WEIGHT_EN
+    knn_weight = KNN_WEIGHT_VI if query_lang == "vi" else KNN_WEIGHT_EN
+
+    source_fields = [
+        "chunk_id", "resource_uid", "asset_uid", "chunk_text", "page_no", "lang",
+        "title", "source_url", "minio_url", "asset_path", "chapter_title", "source_system",
+    ]
+
+    filters: List[Dict[str, Any]] = []
+    if language:
+        filters.append({"term": {"lang": language}})
+    if source_system:
+        filters.append({"term": {"source_system": source_system}})
+
+    bm25_query: Dict[str, Any] = {
         "bool": {
             "filter": filters,
-            "should": should_clauses,
-            "minimum_should_match": 1 if should_clauses else 0,
+            "should": [
+                {"match": {"chunk_text": {"query": search_query, "fuzziness": "AUTO"}}},
+                {"match": {"title": {"query": search_query, "boost": 10.0}}},
+                {"match": {"chapter_title": {"query": search_query, "boost": 5.0}}},
+            ],
+            "minimum_should_match": 1,
         }
     }
 
+    bm25_body = {"size": max(top_k * 3, top_k), "_source": source_fields, "query": bm25_query}
+    bm25_resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=bm25_body, timeout=20)
+    bm25_resp.raise_for_status()
+    bm25_hits = bm25_resp.json().get("hits", {}).get("hits", [])
+
     if not use_hybrid:
-        body = {
-            "size": top_k,
-            "_source": True,
-            "query": bool_query,
-        }
-        resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=body, timeout=25)
-        resp.raise_for_status()
-        return resp.json().get("hits", {}).get("hits", [])
+        return bm25_hits[:top_k]
 
-    try:
-        query_vector = _embed_query(question)
-        knn_k = max(top_k * 3, 20)
-        knn_candidates = 120 if query_lang == "vi" else 80
-        body: Dict[str, Any] = {
-            "size": top_k,
-            "_source": True,
-            "query": bool_query,
-            "knn": {
-                "field": "embedding",
-                "query_vector": query_vector,
-                "k": knn_k,
-                "num_candidates": knn_candidates,
-            },
-            "rank": {"rrf": {"window_size": 120 if query_lang == "vi" else 80, "rank_constant": 20}},
-        }
-        if filters:
-            body["knn"]["filter"] = filters
+    query_vector = _embed_query(question)
+    vector_base_query: Dict[str, Any] = {"match_all": {}}
+    if filters:
+        vector_base_query = {"bool": {"filter": filters}}
 
-        resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=body, timeout=35)
-        resp.raise_for_status()
-        return resp.json().get("hits", {}).get("hits", [])
-    except Exception:
-        body = {"size": top_k, "_source": True, "query": bool_query}
-        resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=body, timeout=25)
-        resp.raise_for_status()
-        return resp.json().get("hits", {}).get("hits", [])
+    vector_body = {
+        "size": max(top_k * 3, top_k),
+        "_source": source_fields,
+        "query": {
+            "script_score": {
+                "query": vector_base_query,
+                "script": {
+                    "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
+                    "params": {"query_vector": query_vector},
+                },
+            }
+        },
+    }
+    vector_resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=vector_body, timeout=30)
+    vector_resp.raise_for_status()
+    vector_hits = vector_resp.json().get("hits", {}).get("hits", [])
 
+    def _normalized_score_map(hits: List[Dict[str, Any]]) -> Dict[str, float]:
+        pairs: List[tuple[str, float]] = []
+        for h in hits:
+            doc_id = h.get("_id") or str(h.get("_source", {}).get("chunk_id") or "")
+            if not doc_id:
+                continue
+            raw = h.get("_score")
+            score = float(raw) if raw is not None else 0.0
+            pairs.append((doc_id, score))
+        if not pairs:
+            return {}
+        max_score = max(score for _, score in pairs)
+        if max_score <= 0:
+            return {doc_id: 0.0 for doc_id, _ in pairs}
+        return {doc_id: score / max_score for doc_id, score in pairs}
 
-def _extract_relevant_chapters(hits: List[Dict[str, Any]], limit: int = STAGE2_CHAPTER_LIMIT) -> List[str]:
-    chapters: List[Tuple[str, float]] = []
-    seen = set()
-    for hit in hits:
-        src = hit.get("_source", {})
-        chapter_id = src.get("chapter_id")
-        if not chapter_id or chapter_id in seen:
+    bm25_norm = _normalized_score_map(bm25_hits)
+    vector_norm = _normalized_score_map(vector_hits)
+
+    merged: Dict[str, Dict[str, Any]] = {}
+    for hit in bm25_hits + vector_hits:
+        doc_id = hit.get("_id") or str(hit.get("_source", {}).get("chunk_id") or "")
+        if not doc_id:
             continue
-        seen.add(chapter_id)
-        chapters.append((chapter_id, float(hit.get("_score", 0.0))))
-    chapters.sort(key=lambda x: x[1], reverse=True)
-    return [cid for cid, _ in chapters[:limit]]
+        if doc_id not in merged:
+            merged[doc_id] = hit
+        fused_score = (bm25_weight * bm25_norm.get(doc_id, 0.0)) + (knn_weight * vector_norm.get(doc_id, 0.0))
+        merged[doc_id]["_score"] = fused_score
 
-
-def _search_hierarchical(
-    question: str,
-    top_k: int,
-    source_system: Optional[str],
-    language: Optional[str],
-    use_hybrid: bool = True,
-) -> List[Dict[str, Any]]:
-    stage1_size = max(top_k * STAGE1_MULTIPLIER, 24)
-    stage1_filters = _build_filters(source_system, language, tiers=[1, 2])
-    stage1_hits = _es_hybrid_search(question, stage1_size, stage1_filters, use_hybrid=use_hybrid)
-
-    # Old flat indices may not have tier field; fallback if stage1 returns empty.
-    if not stage1_hits:
-        flat_filters = _build_filters(source_system, language, tiers=None)
-        stage1_hits = _es_hybrid_search(question, stage1_size, flat_filters, use_hybrid=use_hybrid)
-
-    chapter_ids = _extract_relevant_chapters(stage1_hits)
-    stage2_hits: List[Dict[str, Any]] = []
-    if chapter_ids:
-        stage2_filters = _build_filters(source_system, language, tiers=[3], chapter_ids=chapter_ids)
-        stage2_size = max(top_k * STAGE2_DETAIL_PER_CHAPTER, 16)
-        stage2_hits = _es_hybrid_search(question, stage2_size, stage2_filters, use_hybrid=use_hybrid)
-
-    rescue_filters = _build_filters(source_system, language, tiers=[3])
-    rescue_hits = _es_hybrid_search(question, RESCUE_TIER3_K, rescue_filters, use_hybrid=use_hybrid)
-
-    return _dedupe_hits(stage1_hits + stage2_hits + rescue_hits)
-
-
-def _search_flat(
-    question: str,
-    top_k: int,
-    source_system: Optional[str],
-    language: Optional[str],
-    use_hybrid: bool = True,
-) -> List[Dict[str, Any]]:
-    filters = _build_filters(source_system, language, tiers=None)
-    size = max(top_k * 4, 20)
-    return _es_hybrid_search(question, size, filters, use_hybrid=use_hybrid)
-
-
-def _dedupe_hits(hits: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    unique: Dict[str, Dict[str, Any]] = {}
-    for hit in hits:
-        src = hit.get("_source", {})
-        key = src.get("chunk_id") or hit.get("_id")
-        if not key:
-            continue
-        existing = unique.get(key)
-        if existing is None or float(hit.get("_score", 0.0)) > float(existing.get("_score", 0.0)):
-            unique[key] = hit
-    return list(unique.values())
-
-
-def _rank_hits_by_es_score(hits: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
-    if not hits:
-        return []
-    ranked = sorted(hits, key=lambda h: float(h.get("_score", 0.0)), reverse=True)
+    ranked = sorted(merged.values(), key=lambda h: h.get("_score", 0.0), reverse=True)
     return ranked[:top_k]
 
 
 def _build_context(question: str, hits: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
+    """Build context from flat chunk-level search results."""
     contexts: List[Dict[str, Any]] = []
+    noise_patterns = []
+    
+    # Generic titles to skip (metadata quality filter)
+    generic_titles = {"part 1", "part 2", "part 3", "part 4", "part 5", "part 6", 
+                      "chapter 1", "chapter 2", "section 1", "unknown", "unknown book"}
+    
     for hit in hits:
         src = hit.get("_source", {})
+        
+        # Flat structure: each hit is a chunk
         text = src.get("chunk_text", "")
         if not text:
             continue
-        contexts.append(
-            {
-                "text": text,
-                "chunk_id": src.get("chunk_id"),
-                "resource_uid": src.get("resource_uid"),
-                "page_no": src.get("page_no"),
-                "lang": src.get("lang"),
-                "chunk_tier": src.get("chunk_tier", 3),
-                "chapter_id": src.get("chapter_id"),
-                "chapter_title": src.get("chapter_title"),
-                "chapter_number": src.get("chapter_number"),
-                "section_id": src.get("section_id"),
-                "section_title": src.get("section_title"),
-                "section_number": src.get("section_number"),
-                "source_system": src.get("source_system"),
-            }
+        text_norm = text.strip().lower()
+        title_norm = str(src.get("title") or src.get("chapter_title") or "").strip().lower()
+
+        # Skip generic/low-quality titles
+        if title_norm in generic_titles:
+            continue
+        
+        # Skip code-heavy chunks (>50% looks like code)
+        code_indicators = len(re.findall(r'\b(do|enddo|call|function|return|sum=|def |class |import |#include)', text_norm))
+        if code_indicators > 5 or (code_indicators > 0 and len(text_norm) < 300):
+            continue
+
+        # Skip noisy/boilerplate chunks.
+        if len(text_norm) < 60:
+            continue
+        if any(re.search(p, text_norm) for p in noise_patterns):
+            continue
+        if title_norm and any(re.search(p, title_norm) for p in noise_patterns):
+            continue
+
+        source_url = (
+            src.get("source_url")
+            or src.get("minio_url")
+            or _build_public_minio_url(src.get("asset_path"))
+            or _extract_source_url_from_text(text)
         )
+        title = (
+            src.get("title")
+            or src.get("chapter_title")
+            or src.get("source_system")
+            or src.get("resource_uid")
+            or "Unknown"
+        )
+            
+        contexts.append({
+            "text": text,
+            "chunk_id": src.get("chunk_id"),
+            "resource_uid": src.get("resource_uid"),
+            "page_no": src.get("page_no"),
+            "lang": src.get("lang"),
+            "title": title,
+            "source_url": source_url,
+            "asset_uid": src.get("asset_uid"),
+            "minio_url": src.get("minio_url"),
+            "retrieval_score": hit.get("_score"),
+        })
+        
         if len(contexts) >= top_k:
             break
+    
     return contexts
 
 
 def _build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
     lang = _detect_lang(question)
-    refs = []
-    for idx, c in enumerate(contexts, start=1):
-        tier = c.get("chunk_tier")
-        chapter = c.get("chapter_title")
-        section = c.get("section_title")
-        page = c.get("page_no")
-        label = f"[Source {idx}]"
-        meta = []
-        if tier is not None:
-            meta.append(f"tier={tier}")
-        if chapter:
-            meta.append(f"chapter={chapter}")
-        if section:
-            meta.append(f"section={section}")
-        if page:
-            meta.append(f"page={page}")
-        refs.append(f"{label} ({', '.join(meta)})\n{c['text']}")
-    context = "\n\n".join(refs)
-
+    parts = []
+    for i, c in enumerate(contexts, 1):
+        # Simplified citation (no title/URL in flat structure yet)
+        cite = f"[Chunk {c.get('chunk_id', i)}]"
+        if c.get("page_no"):
+            cite += f" (Page {c['page_no']})"
+        parts.append(f"{cite}\n{c['text']}")
+    context = "\n\n".join(parts)
     if lang == "vi":
         return (
-            "Bạn là trợ lý học tập trong hệ thống thư viện OER.\n"
-            "Hãy trả lời chính xác theo tài liệu cung cấp, diễn giải rõ ràng, không chép nguyên văn dài.\n"
-            "Nếu thiếu dữ liệu, nêu rõ phần chưa đủ.\n\n"
+            "Bạn là trợ lý thư viện chỉ trả lời dựa HOÀN TOÀN trên tài liệu được cung cấp.\n\n"
+
+            "QUY TẮC BẮT BUỘC:\n"
+            "1. CHỈ sử dụng thông tin có trong CONTEXT dưới đây.\n"
+            "2. NẾU CONTEXT không liên quan đến câu hỏi, BẮT BUỘC trả lời ĐÚNG NGUYÊN VĂN:\n"
+            "   'Không tìm thấy thông tin phù hợp trong kho tài liệu. Vui lòng thử câu hỏi khác.'\n"
+            "3. KHÔNG suy đoán, KHÔNG thêm thông tin từ kiến thức chung.\n"
+            "4. KHÔNG cố gắng kết nối câu hỏi với context không liên quan.\n\n"
+
+            "CÁCH ĐÁNH GIÁ CONTEXT:\n"
+            "- Context CÓ LIÊN QUAN: Đề cập trực tiếp đến chủ đề câu hỏi\n"
+            "- Context KHÔNG LIÊN QUAN: Đề cập chủ đề khác hoàn toàn\n"
+            "  → Nếu không liên quan, dừng ngay và trả lời 'Không tìm thấy thông tin...'\n\n"
+
+            "NẾU CONTEXT CÓ LIÊN QUAN, hãy:\n"
+            "1. Tóm tắt thông tin chính từ context\n"
+            "2. Giải thích rõ ràng, dễ hiểu\n"
+            "3. Trích dẫn nguồn bằng [Nguồn X]\n\n"
+
             f"--- TÀI LIỆU ---\n{context}\n--- HẾT ---\n\n"
             f"Câu hỏi: {question}\n\n"
-            "Trả lời bằng tiếng Việt, có trích nguồn [Source X]."
+            "Trả lời (kiểm tra liên quan trước khi trả lời):"
         )
+    else:
+        return (
+            "You are an intelligent learning assistant in an Open Educational Resources (OER) library system.\n"
+            "Your goal is to help learners understand concepts clearly, simply, and in a structured way.\n\n"
 
-    return (
-        "You are a learning assistant for an OER library system.\n"
-        "Answer based on the provided sources, paraphrase clearly, avoid long verbatim copying.\n"
-        "If evidence is insufficient, explicitly say what is missing.\n\n"
-        f"--- SOURCES ---\n{context}\n--- END ---\n\n"
-        f"Question: {question}\n\n"
-        "Answer in English and cite sources as [Source X]."
-    )
+            "ANSWERING PRINCIPLES:\n"
+            "- Prioritize information from the provided documents\n"
+            "- Do NOT copy text verbatim from documents - paraphrase and synthesize in your own words\n"
+            "- STRICTLY do NOT add external knowledge beyond the provided documents\n"
+            "- If the documents are insufficient or not directly relevant, you MUST answer exactly: \"No relevant context found in the database.\"\n"
+            "- Ignore document fragments that are cut off mid-sentence or lack context\n\n"
+
+            "HOW TO RESPOND:\n"
+            "1. START with a general overview sentence about the topic\n"
+            "2. Explain concepts clearly as if teaching a beginner\n"
+            "3. Combine relevant information from multiple sources when available\n"
+            "4. Structure your answer logically with clear paragraphs\n"
+            "5. Include examples when helpful\n"
+            "6. Cite sources using [Source X] (do not include page numbers unless explicitly available)\n\n"
+
+            f"--- REFERENCE DOCUMENTS ---\n{context}\n--- END OF DOCUMENTS ---\n\n"
+            f"Question: {question}\n\n"
+            "Provide a detailed, clear answer in English (do NOT copy verbatim from documents):"
+        )
 
 
 def _generate_answer(prompt: str) -> str:
     provider = (LLM_PROVIDER or "gemini").lower()
+    
+    # Try Groq first, fallback to Gemini on rate limit
     if provider == "groq":
         if not GROQ_API_KEY:
             return "Missing GROQ_API_KEY."
-        resp = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": GROQ_MODEL,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 2048,
-            },
-            timeout=90,
-        )
-        resp.raise_for_status()
-        return resp.json()["choices"][0]["message"]["content"].strip()
-
+        try:
+            resp = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                json={"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 2048},
+                timeout=90,
+            )
+            resp.raise_for_status()
+            return resp.json()["choices"][0]["message"]["content"].strip()
+        except requests.HTTPError as e:
+            # Fallback to Gemini on rate limit (429) or server errors (5xx)
+            if e.response.status_code == 429 or e.response.status_code >= 500:
+                if GEMINI_API_KEY:
+                    provider = "gemini"  # Switch to Gemini
+                else:
+                    return f"Groq API rate limit exceeded. Please wait a moment and try again."
+            else:
+                raise  # Re-raise other errors
+    
+    # Gemini API (default or fallback)
     if not GEMINI_API_KEY:
         return "Missing GEMINI_API_KEY."
     resp = requests.post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
         json={
             "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 2048},
+            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
         },
         timeout=90,
     )
@@ -556,98 +446,55 @@ def _generate_answer(prompt: str) -> str:
     return cands[0]["content"]["parts"][0]["text"].strip() if cands else "No answer generated."
 
 
-def _search(
-    question: str,
-    top_k: int,
-    source_system: Optional[str],
-    language: Optional[str],
-    use_hybrid: bool,
-    use_hierarchical: bool,
-) -> List[Dict[str, Any]]:
-    if use_hierarchical:
-        return _search_hierarchical(question, top_k, source_system, language, use_hybrid=use_hybrid)
-    return _search_flat(question, top_k, source_system, language, use_hybrid=use_hybrid)
-
-
-def _search_expand_chapter(
-    chapter_id: str,
-    top_k: int = 20,
-    source_system: Optional[str] = None,
-    language: Optional[str] = None,
-) -> List[Dict[str, Any]]:
-    filters = _build_filters(source_system, language, tiers=[3], chapter_ids=[chapter_id])
-    body = {
-        "size": top_k,
-        "_source": True,
-        "query": {"bool": {"filter": filters, "must": [{"match_all": {}}]}},
-        "sort": [
-            {"section_page_start": {"order": "asc", "missing": "_last", "unmapped_type": "integer"}},
-            {"chunk_order": {"order": "asc", "missing": "_last", "unmapped_type": "integer"}},
-        ],
-    }
-    resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=body, timeout=20)
-    resp.raise_for_status()
-    return resp.json().get("hits", {}).get("hits", [])
-
-
 @app.get("/api/health")
 async def health() -> Dict[str, Any]:
     try:
         resp = requests.get(f"{ES_HOST}/_cluster/health", timeout=5)
         resp.raise_for_status()
-        es_health = resp.json().get("status", "unknown")
+        health = resp.json().get("status", "unknown")
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Elasticsearch unavailable: {exc}") from exc
-    return {
-        "status": "ok",
-        "elasticsearch": es_health,
-        "index": ES_INDEX,
-        "llm_provider": LLM_PROVIDER,
-        "hierarchical_search": True,
-    }
-
-
-@app.get("/api/expand/{chapter_id}")
-async def expand_chapter(chapter_id: str, top_k: int = 20) -> Dict[str, Any]:
-    try:
-        hits = _search_expand_chapter(chapter_id, top_k=max(1, min(top_k, 100)))
-        contexts = _build_context(chapter_id, hits, top_k=max(1, min(top_k, 100)))
-        return {"chapter_id": chapter_id, "results": contexts, "count": len(contexts)}
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"status": "ok", "elasticsearch": health, "index": ES_INDEX, "llm_provider": LLM_PROVIDER, "hybrid_search": True}
 
 
 @app.post("/api/ask")
 async def ask_api(payload: AskRequest) -> Dict[str, Any]:
     try:
-        hits = _search(
-            question=payload.question,
-            top_k=payload.top_k,
-            source_system=payload.source_system,
-            language=payload.language,
+        # Use hybrid search (BM25 + kNN) by default
+        hits = _es_hybrid_search(
+            payload.question,
+            payload.top_k,
+            payload.source_system,
+            payload.language,
             use_hybrid=payload.use_hybrid,
-            use_hierarchical=payload.use_hierarchical,
         )
-        ranked = _rank_hits_by_es_score(hits, top_k=max(payload.top_k * 3, payload.top_k))
-        contexts = _build_context(payload.question, ranked, payload.top_k)
+        contexts = _build_context(payload.question, hits, payload.top_k)
+        
+        # Check if retrieval quality is too low
         if not contexts:
             lang = _detect_lang(payload.question)
-            msg = "Không tìm thấy ngữ cảnh phù hợp trong kho dữ liệu." if lang == "vi" else "No relevant context found in the database."
-            return {
-                "question": payload.question,
-                "answer": msg,
-                "contexts": [],
-                "search_mode": "hierarchical" if payload.use_hierarchical else "flat",
-            }
-
+            no_result_msg = "Không tìm thấy ngữ cảnh phù hợp trong kho dữ liệu." if lang == "vi" else "No relevant context found in the database."
+            return {"question": payload.question, "answer": no_result_msg, "contexts": [], "search_mode": "hybrid" if payload.use_hybrid else "bm25"}
+        
+        # Check average retrieval score - reject if too low (likely irrelevant)
+        # Note: scores are normalized (0-1 range) after hybrid fusion
+        avg_score = sum(c.get("retrieval_score", 0) for c in contexts) / len(contexts)
+        if avg_score < 0.15:  # Threshold for minimum relevance (normalized score)
+            lang = _detect_lang(payload.question)
+            low_quality_msg = (
+                "Không tìm thấy tài liệu liên quan đến câu hỏi của bạn. Vui lòng thử câu hỏi cụ thể hơn hoặc sử dụng từ khóa tiếng Anh."
+                if lang == "vi" else
+                "No relevant documents found for your question. Please try a more specific query or use English keywords."
+            )
+            return {"question": payload.question, "answer": low_quality_msg, "contexts": contexts, "search_mode": "low_quality_retrieval"}
+        
         prompt = _build_prompt(payload.question, contexts)
         answer = _generate_answer(prompt)
         return {
             "question": payload.question,
             "answer": answer,
             "contexts": contexts,
-            "sources": contexts,
-            "search_mode": "hierarchical" if payload.use_hierarchical else "flat",
+            "search_mode": "hybrid" if payload.use_hybrid else "bm25",
         }
     except requests.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {exc}") from exc

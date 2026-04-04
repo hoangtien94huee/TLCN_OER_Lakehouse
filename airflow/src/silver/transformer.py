@@ -14,6 +14,7 @@ from io import BytesIO
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 try:
@@ -86,7 +87,7 @@ def clean_scalar(value: Any) -> Optional[str]:
         return None
     if isinstance(value, (dict, list, tuple, set)):
         return None
-    text = str(value).strip()
+    text = strip_surrogate_chars(str(value).strip())
     return text or None
 
 
@@ -110,6 +111,80 @@ def clean_string_list(value: Any) -> List[str]:
             seen.add(text)
             out.append(text)
     return out
+
+
+def strip_surrogate_chars(value: Optional[str]) -> str:
+    text = str(value or "")
+    # Remove invalid Unicode surrogate code points that can appear in noisy PDF extraction.
+    return "".join(ch for ch in text if not (0xD800 <= ord(ch) <= 0xDFFF))
+
+
+def sanitize_nested_strings(value: Any) -> Any:
+    if isinstance(value, str):
+        return strip_surrogate_chars(value)
+    if isinstance(value, list):
+        return [sanitize_nested_strings(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(sanitize_nested_strings(item) for item in value)
+    if isinstance(value, dict):
+        return {key: sanitize_nested_strings(item) for key, item in value.items()}
+    return value
+
+
+def normalize_minio_endpoint(endpoint: Any) -> str:
+    value = (clean_scalar(endpoint) or "minio:9000").strip()
+    value = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
+    return value.rstrip("/")
+
+
+def build_minio_object_candidates(asset_path: Any, bucket: Optional[str]) -> List[str]:
+    raw = clean_scalar(asset_path)
+    if not raw:
+        return []
+
+    bucket_name = (clean_scalar(bucket) or "").strip()
+    candidates: List[str] = []
+    seen: set[str] = set()
+
+    def push(candidate: Optional[str]) -> None:
+        text = (candidate or "").strip()
+        if not text:
+            return
+
+        if text.startswith(("s3://", "s3a://")):
+            parsed = urlparse(text)
+            key = (parsed.path or "").lstrip("/")
+            if key:
+                push(key)
+                if bucket_name and key.startswith(f"{bucket_name}/"):
+                    push(key[len(bucket_name) + 1 :])
+            return
+
+        if text.startswith(("http://", "https://")):
+            parsed = urlparse(text)
+            push((parsed.path or "").lstrip("/"))
+            return
+
+        text = text.lstrip("/")
+        text = text.split("?", 1)[0].split("#", 1)[0]
+        if bucket_name and text.startswith(f"{bucket_name}/"):
+            text = text[len(bucket_name) + 1 :]
+
+        if text and text not in seen:
+            seen.add(text)
+            candidates.append(text)
+
+        decoded = unquote(text) if text else ""
+        if decoded and decoded not in seen:
+            seen.add(decoded)
+            candidates.append(decoded)
+
+    push(raw)
+    return candidates
+
+
+def should_emit_hierarchical_summary_chunks(toc_method: Any) -> bool:
+    return str(toc_method or "").strip().lower() != "flat"
 
 
 def ensure_language_code(value: Any) -> str:
@@ -228,7 +303,8 @@ def select_identifier(record: Dict[str, Any], source_system: str) -> Optional[st
 
 
 def deterministic_hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+    safe_value = strip_surrogate_chars(value)
+    return hashlib.sha256(safe_value.encode("utf-8", errors="replace")).hexdigest()
 
 
 def compute_record_fingerprint(
@@ -500,13 +576,15 @@ def _enrich_document_with_client(row: Dict[str, Any], minio_client: Optional[Min
     last_modified = None
 
     if minio_client and asset_path:
-        try:
-            stat = minio_client.stat_object(bucket, asset_path)
-            etag = clean_scalar(getattr(stat, "etag", None))
-            size_bytes = int(getattr(stat, "size", 0) or 0)
-            last_modified = getattr(stat, "last_modified", None)
-        except Exception:
-            pass
+        for object_name in build_minio_object_candidates(asset_path, bucket):
+            try:
+                stat = minio_client.stat_object(bucket, object_name)
+                etag = clean_scalar(getattr(stat, "etag", None))
+                size_bytes = int(getattr(stat, "size", 0) or 0)
+                last_modified = getattr(stat, "last_modified", None)
+                break
+            except Exception:
+                continue
 
     return {
         "asset_uid": row.get("asset_uid"),
@@ -541,7 +619,8 @@ def _create_partition_minio_client(
     if not MINIO_AVAILABLE:
         return None
     try:
-        return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+        normalized_endpoint = normalize_minio_endpoint(endpoint)
+        return Minio(normalized_endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
     except Exception:
         return None
 
@@ -580,21 +659,35 @@ class _PartitionChunker:
         self.toc_extractor = toc_extractor
         self.summarizer = summarizer
 
-    def _get_pdf_bytes(self, asset_path: str) -> Optional[bytes]:
-        if not self.minio_client or not asset_path:
-            return None
+    def _get_pdf_bytes_with_status(self, asset_path: str) -> Tuple[Optional[bytes], str]:
+        if not self.minio_client:
+            return None, "no_minio_client"
+        object_candidates = build_minio_object_candidates(asset_path, self.bucket)
+        if not object_candidates:
+            return None, "pdf_bytes_missing"
+
         response = None
-        try:
-            response = self.minio_client.get_object(self.bucket, asset_path)
-            return response.read()
-        except Exception:
-            return None
-        finally:
-            if response is not None:
-                response.close()
-                response.release_conn()
+        for object_name in object_candidates:
+            try:
+                response = self.minio_client.get_object(self.bucket, object_name)
+                payload = response.read()
+                if payload:
+                    return payload, "ok"
+            except Exception:
+                pass
+            finally:
+                if response is not None:
+                    response.close()
+                    response.release_conn()
+                    response = None
+        return None, "pdf_get_failed"
+
+    def _get_pdf_bytes(self, asset_path: str) -> Optional[bytes]:
+        payload, _ = self._get_pdf_bytes_with_status(asset_path)
+        return payload
 
     def _normalize_pdf_text(self, text: str) -> str:
+        text = strip_surrogate_chars(text)
         text = re.sub(r"-\s*\n\s*", "", text)
         text = text.replace("\r", "\n")
         text = re.sub(r"[ \t]+", " ", text)
@@ -623,7 +716,7 @@ class _PartitionChunker:
         overlap_chars: Optional[int] = None,
     ) -> List[str]:
         chunks: List[str] = []
-        text = text.strip()
+        text = strip_surrogate_chars(text).strip()
         if not text:
             return chunks
 
@@ -661,6 +754,7 @@ class _PartitionChunker:
         min_chars: Optional[int] = None,
         overlap_chars: Optional[int] = None,
     ) -> List[str]:
+        text = strip_surrogate_chars(text)
         max_chars = int(max_chars or self.chunk_max_chars)
         min_chars = int(min_chars or self.chunk_min_chars)
         overlap_chars = int(overlap_chars if overlap_chars is not None else self.chunk_overlap_chars)
@@ -700,10 +794,18 @@ class _PartitionChunker:
         return chunks if chunks else self._split_long_segment(text, max_chars=max_chars, min_chars=min_chars, overlap_chars=overlap_chars)
 
     def _extract_pdf_pages(self, asset_path: str) -> List[Tuple[int, int, str]]:
-        pdf_bytes = self._get_pdf_bytes(asset_path)
+        pages, _ = self._extract_pdf_pages_with_status(asset_path)
+        return pages
+
+    def _extract_pdf_pages_with_status(self, asset_path: str) -> Tuple[List[Tuple[int, int, str]], str]:
+        pdf_bytes, read_status = self._get_pdf_bytes_with_status(asset_path)
         if not pdf_bytes:
-            return []
-        page_texts, _ = self._extract_pdf_page_texts(pdf_bytes)
+            return [], read_status
+        if not PYPDF_AVAILABLE:
+            return [], "pypdf_unavailable"
+        page_texts, total_pages = self._extract_pdf_page_texts(pdf_bytes)
+        if total_pages <= 0:
+            return [], "page_extract_failed"
         pages: List[Tuple[int, int, str]] = []
         for page_no in sorted(page_texts.keys()):
             page_text = page_texts[page_no]
@@ -712,7 +814,9 @@ class _PartitionChunker:
             for chunk_index, chunk in enumerate(self._chunk_text_smart(page_text), start=1):
                 if chunk:
                     pages.append((page_no, chunk_index, chunk))
-        return pages
+        if not pages:
+            return [], "empty_pdf_text"
+        return pages, "ok"
 
     def _build_flat_toc(self, total_pages: int) -> List[Dict[str, Any]]:
         chapter_size = max(10, self.toc_fallback_chapter_size)
@@ -734,19 +838,27 @@ class _PartitionChunker:
         return toc
 
     def chunk_document_record(self, row: Dict[str, Any]) -> List[Dict[str, Any]]:
+        records, _ = self.chunk_document_record_with_status(row)
+        return records
+
+    def chunk_document_record_with_status(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
         asset_path = clean_scalar(row.get("asset_path")) or ""
         if not asset_path.lower().endswith(".pdf"):
-            return []
+            return [], "non_pdf"
         resource_uid = clean_scalar(row.get("resource_uid"))
         asset_uid = clean_scalar(row.get("asset_uid"))
         if not resource_uid or not asset_uid:
-            return []
+            return [], "missing_keys"
 
         records: List[Dict[str, Any]] = []
         now = datetime.utcnow()
-        for page_no, chunk_order, chunk_text in self._extract_pdf_pages(asset_path):
-            token_count = len(re.findall(r"\w+", chunk_text))
-            chunk_id = deterministic_hash(f"{asset_uid}::{page_no}::{chunk_order}::{chunk_text[:128]}")
+        pages, page_status = self._extract_pdf_pages_with_status(asset_path)
+        if page_status != "ok":
+            return [], page_status
+        for page_no, chunk_order, chunk_text in pages:
+            chunk_text_safe = strip_surrogate_chars(chunk_text)
+            token_count = len(re.findall(r"\w+", chunk_text_safe))
+            chunk_id = deterministic_hash(f"{asset_uid}::{page_no}::{chunk_order}::{chunk_text_safe[:128]}")
             records.append(
                 {
                     "chunk_id": chunk_id,
@@ -754,7 +866,7 @@ class _PartitionChunker:
                     "asset_uid": asset_uid,
                     "page_no": int(page_no),
                     "chunk_order": int(chunk_order),
-                    "chunk_text": chunk_text,
+                    "chunk_text": chunk_text_safe,
                     "token_count": int(token_count),
                     "lang": ensure_language_code(row.get("language")),
                     "chunk_type": "section_detail",
@@ -776,24 +888,32 @@ class _PartitionChunker:
                     "updated_at": now,
                 }
             )
-        return records
+        if not records:
+            return [], "no_chunks"
+        return records, "ok"
 
     def chunk_document_hierarchical(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        chunks, structure_record, _ = self.chunk_document_hierarchical_with_status(row)
+        return chunks, structure_record
+
+    def chunk_document_hierarchical_with_status(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], str]:
         asset_path = clean_scalar(row.get("asset_path")) or ""
         if not asset_path.lower().endswith(".pdf"):
-            return [], None
+            return [], None, "non_pdf"
         resource_uid = clean_scalar(row.get("resource_uid"))
         asset_uid = clean_scalar(row.get("asset_uid"))
         if not resource_uid or not asset_uid:
-            return [], None
+            return [], None, "missing_keys"
 
-        pdf_bytes = self._get_pdf_bytes(asset_path)
+        pdf_bytes, read_status = self._get_pdf_bytes_with_status(asset_path)
         if not pdf_bytes:
-            return self.chunk_document_record(row), None
+            return [], None, read_status
+        if not PYPDF_AVAILABLE:
+            return [], None, "pypdf_unavailable"
 
         page_texts, total_pages = self._extract_pdf_page_texts(pdf_bytes)
         if total_pages <= 0:
-            return self.chunk_document_record(row), None
+            return [], None, "page_extract_failed"
 
         toc_result = {"method": "flat", "confidence": 0.5, "toc": [], "total_pages": total_pages, "structure_valid": False}
         if self.toc_enabled and self.toc_extractor:
@@ -817,10 +937,12 @@ class _PartitionChunker:
         lang = ensure_language_code(row.get("language"))
         chunk_records: List[Dict[str, Any]] = []
         section_global_order = 0
+        emit_summary_tiers = should_emit_hierarchical_summary_chunks(method)
 
         doc_summary = ""
-        if self.summarizer:
+        if emit_summary_tiers and self.summarizer:
             doc_summary = self.summarizer.generate_document_summary(row, toc, max_chars=self.doc_summary_max_chars)
+        doc_summary = strip_surrogate_chars(doc_summary)
         if doc_summary:
             doc_chunk_id = deterministic_hash(f"{asset_uid}::tier1::doc_summary")
             chunk_records.append(
@@ -867,42 +989,45 @@ class _PartitionChunker:
                 continue
 
             chapter_summary = chapter_title
-            if self.summarizer:
+            if emit_summary_tiers and self.summarizer:
                 chapter_summary = self.summarizer.generate_chapter_summary(
                     chapter_text,
                     chapter_title,
                     max_chars=self.chapter_summary_max_chars,
                 )
-            chapter_chunk_id = deterministic_hash(f"{asset_uid}::tier2::{chapter_id}")
-            chunk_records.append(
-                {
-                    "chunk_id": chapter_chunk_id,
-                    "resource_uid": resource_uid,
-                    "asset_uid": asset_uid,
-                    "page_no": chapter_start,
-                    "chunk_order": chapter_idx,
-                    "chunk_text": chapter_summary,
-                    "token_count": int(len(re.findall(r"\w+", chapter_summary))),
-                    "lang": lang,
-                    "chunk_type": "chapter_summary",
-                    "chunk_tier": 2,
-                    "chapter_id": chapter_id,
-                    "chapter_title": chapter_title,
-                    "chapter_number": chapter_number,
-                    "chapter_page_start": chapter_start,
-                    "chapter_page_end": chapter_end,
-                    "section_id": None,
-                    "section_title": None,
-                    "section_number": None,
-                    "section_page_start": None,
-                    "section_page_end": None,
-                    "parent_chunk_id": None,
-                    "has_children": True,
-                    "is_summary": True,
-                    "summary_method": "extractive",
-                    "updated_at": now,
-                }
-            )
+            chapter_summary = strip_surrogate_chars(chapter_summary)
+            chapter_chunk_id: Optional[str] = None
+            if emit_summary_tiers:
+                chapter_chunk_id = deterministic_hash(f"{asset_uid}::tier2::{chapter_id}")
+                chunk_records.append(
+                    {
+                        "chunk_id": chapter_chunk_id,
+                        "resource_uid": resource_uid,
+                        "asset_uid": asset_uid,
+                        "page_no": chapter_start,
+                        "chunk_order": chapter_idx,
+                        "chunk_text": chapter_summary,
+                        "token_count": int(len(re.findall(r"\w+", chapter_summary))),
+                        "lang": lang,
+                        "chunk_type": "chapter_summary",
+                        "chunk_tier": 2,
+                        "chapter_id": chapter_id,
+                        "chapter_title": chapter_title,
+                        "chapter_number": chapter_number,
+                        "chapter_page_start": chapter_start,
+                        "chapter_page_end": chapter_end,
+                        "section_id": None,
+                        "section_title": None,
+                        "section_number": None,
+                        "section_page_start": None,
+                        "section_page_end": None,
+                        "parent_chunk_id": None,
+                        "has_children": True,
+                        "is_summary": True,
+                        "summary_method": "extractive",
+                        "updated_at": now,
+                    }
+                )
 
             sections = chapter.get("sections") or []
             if not sections:
@@ -939,6 +1064,7 @@ class _PartitionChunker:
                 for local_idx, detail in enumerate(detail_chunks, start=1):
                     if not detail:
                         continue
+                    detail = strip_surrogate_chars(detail)
                     section_global_order += 1
                     detail_id = deterministic_hash(f"{asset_uid}::tier3::{section_id}::{local_idx}::{detail[:128]}")
                     chunk_records.append(
@@ -983,12 +1109,14 @@ class _PartitionChunker:
             "total_pages": total_pages,
             "total_chapters": len(toc),
             "total_sections": int(sum(len(ch.get("sections") or []) for ch in toc)),
-            "table_of_contents_json": json.dumps(toc, ensure_ascii=False),
+            "table_of_contents_json": json.dumps(sanitize_nested_strings(toc), ensure_ascii=False),
             "structure_valid": structure_valid,
             "created_at": now,
             "updated_at": now,
         }
-        return chunk_records, structure_record
+        if not chunk_records:
+            return [], structure_record, "no_chunks"
+        return chunk_records, structure_record, "ok"
 
 
 class SilverTransformer:
@@ -1014,6 +1142,7 @@ class SilverTransformer:
 
         self.run_reference_bootstrap_enabled = os.getenv("RUN_REFERENCE_BOOTSTRAP", "0").lower() in {"1", "true", "yes"}
         self.force_reference_refresh = os.getenv("FORCE_REFERENCE_REFRESH", "0").lower() in {"1", "true", "yes"}
+        self.force_reprocess = os.getenv("SILVER_FORCE_REPROCESS", "0").lower() in {"1", "true", "yes"}
         self.chunk_max_chars = int(os.getenv("SILVER_CHUNK_MAX_CHARS", "1800"))
         overlap_chars = (
             os.getenv("SILVER_CHUNK_OVERLAP_CHARS")
@@ -1101,7 +1230,7 @@ class SilverTransformer:
                     "spark.jars.packages",
                     ",".join(
                         [
-                            "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3",
+                            "org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2",
                             "org.apache.hadoop:hadoop-aws:3.3.4",
                             "com.amazonaws:aws-java-sdk-bundle:1.12.565",
                         ]
@@ -1134,11 +1263,14 @@ class SilverTransformer:
     def _create_minio_client(self) -> Optional[Minio]:
         if not MINIO_AVAILABLE:
             return None
-        endpoint = os.getenv("MINIO_ENDPOINT", "minio:9000")
+        endpoint = normalize_minio_endpoint(os.getenv("MINIO_ENDPOINT", "minio:9000"))
         access_key = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         secret_key = os.getenv("MINIO_SECRET_KEY", "minioadmin")
         secure = os.getenv("MINIO_SECURE", "false").lower() == "true"
-        return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+        try:
+            return Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
+        except Exception:
+            return None
 
     def _load_reference_json(self, name: str) -> List[Dict[str, Any]]:
         if self.reference_storage == "minio" and self.minio_client and self.reference_bucket:
@@ -1385,6 +1517,8 @@ class SilverTransformer:
     # Silver table builders
     # -----------------------------
     def _filter_incremental_resources(self, base_df: DataFrame) -> DataFrame:
+        if self.force_reprocess:
+            return base_df
         if not self._table_exists(self.resources_curated_table):
             return base_df
 
@@ -1527,6 +1661,8 @@ class SilverTransformer:
     def _filter_changed_documents(self, documents_df: DataFrame) -> DataFrame:
         if not self._has_rows(documents_df):
             return self._empty_asset_uid_df()
+        if self.force_reprocess:
+            return documents_df.select("asset_uid").dropDuplicates(["asset_uid"])
         if not self._table_exists(self.documents_table):
             return documents_df.select("asset_uid").dropDuplicates(["asset_uid"])
 
@@ -1615,6 +1751,7 @@ class SilverTransformer:
         return pages
 
     def _normalize_pdf_text(self, text: str) -> str:
+        text = strip_surrogate_chars(text)
         text = re.sub(r"-\s*\n\s*", "", text)
         text = text.replace("\r", "\n")
         text = re.sub(r"[ \t]+", " ", text)
@@ -1629,7 +1766,7 @@ class SilverTransformer:
         overlap_chars: Optional[int] = None,
     ) -> List[str]:
         chunks: List[str] = []
-        text = text.strip()
+        text = strip_surrogate_chars(text).strip()
         if not text:
             return chunks
 
@@ -1667,6 +1804,7 @@ class SilverTransformer:
         min_chars: Optional[int] = None,
         overlap_chars: Optional[int] = None,
     ) -> List[str]:
+        text = strip_surrogate_chars(text)
         max_chars = int(max_chars or self.chunk_max_chars)
         min_chars = int(min_chars or self.chunk_min_chars)
         overlap_chars = int(overlap_chars if overlap_chars is not None else self.chunk_overlap_chars)
@@ -1758,7 +1896,7 @@ class SilverTransformer:
             ]
         )
 
-    def _build_chunks_and_structure_df(self, documents_df: DataFrame) -> Tuple[DataFrame, DataFrame, Any]:
+    def _build_chunks_and_structure_df(self, documents_df: DataFrame) -> Tuple[DataFrame, DataFrame, Any, Dict[str, int]]:
         chunk_schema = self._build_chunk_schema()
         structure_schema = self._build_structure_schema()
         enable_hierarchical = bool(self.enable_hierarchical and HIERARCHICAL_AVAILABLE)
@@ -1807,25 +1945,183 @@ class SilverTransformer:
             )
 
             hierarchical_ready = bool(enable_hierarchical and toc_extractor and summarizer)
+            metrics: Dict[str, int] = {
+                "documents_seen": 0,
+                "pdf_candidate_docs": 0,
+                "chunked_docs": 0,
+                "chunks_emitted": 0,
+                "structures_emitted": 0,
+                "non_pdf_docs": 0,
+                "missing_key_docs": 0,
+                "no_minio_client_docs": 0,
+                "pdf_bytes_missing_docs": 0,
+                "pdf_get_failed_docs": 0,
+                "pypdf_unavailable_docs": 0,
+                "page_extract_failed_docs": 0,
+                "empty_pdf_text_docs": 0,
+                "no_chunks_docs": 0,
+                "unexpected_error_docs": 0,
+            }
+            status_map = {
+                "non_pdf": "non_pdf_docs",
+                "missing_keys": "missing_key_docs",
+                "no_minio_client": "no_minio_client_docs",
+                "pdf_bytes_missing": "pdf_bytes_missing_docs",
+                "pdf_get_failed": "pdf_get_failed_docs",
+                "pypdf_unavailable": "pypdf_unavailable_docs",
+                "page_extract_failed": "page_extract_failed_docs",
+                "empty_pdf_text": "empty_pdf_text_docs",
+                "no_chunks": "no_chunks_docs",
+            }
+            unexpected_error_logs = 0
             for row in rows:
                 record = row.asDict(recursive=True)
-                if hierarchical_ready:
-                    chunks, structure_record = worker.chunk_document_hierarchical(record)
-                    for chunk in chunks:
-                        yield ("chunk", chunk)
-                    if structure_record:
-                        yield ("structure", structure_record)
-                else:
-                    for chunk in worker.chunk_document_record(record):
-                        yield ("chunk", chunk)
+                metrics["documents_seen"] += 1
+                asset_path = (clean_scalar(record.get("asset_path")) or "").lower()
+                if asset_path.endswith(".pdf"):
+                    metrics["pdf_candidate_docs"] += 1
+                try:
+                    if hierarchical_ready:
+                        chunks, structure_record, status = worker.chunk_document_hierarchical_with_status(record)
+                        for chunk in chunks:
+                            yield ("chunk", sanitize_nested_strings(chunk))
+                        if structure_record:
+                            metrics["structures_emitted"] += 1
+                            yield ("structure", sanitize_nested_strings(structure_record))
+                    else:
+                        structure_record = None
+                        chunks, status = worker.chunk_document_record_with_status(record)
+                        for chunk in chunks:
+                            yield ("chunk", sanitize_nested_strings(chunk))
+                except Exception as exc:
+                    metrics["unexpected_error_docs"] += 1
+                    if unexpected_error_logs < 3:
+                        print(
+                            "[Chunk Partition Error] "
+                            f"asset_uid={clean_scalar(record.get('asset_uid'))} "
+                            f"asset_path={clean_scalar(record.get('asset_path'))} "
+                            f"error={exc.__class__.__name__}: {exc}"
+                        )
+                        unexpected_error_logs += 1
+                    continue
+                if status in status_map:
+                    metrics[status_map[status]] += 1
+                if chunks:
+                    metrics["chunked_docs"] += 1
+                    metrics["chunks_emitted"] += len(chunks)
+            yield ("metric", metrics)
 
         tagged_rdd = documents_df.rdd.mapPartitions(chunk_partition).persist(StorageLevel.MEMORY_AND_DISK)
         chunk_rdd = tagged_rdd.filter(lambda item: item[0] == "chunk").map(lambda item: item[1])
         structure_rdd = tagged_rdd.filter(lambda item: item[0] == "structure").map(lambda item: item[1])
+        metric_rows = tagged_rdd.filter(lambda item: item[0] == "metric").map(lambda item: item[1]).collect()
+        diagnostics: Dict[str, int] = {}
+        for metric in metric_rows:
+            for key, value in metric.items():
+                diagnostics[key] = diagnostics.get(key, 0) + int(value)
 
         chunks_df = self.spark.createDataFrame(chunk_rdd, schema=chunk_schema).dropDuplicates(["chunk_id"])
         structures_df = self.spark.createDataFrame(structure_rdd, schema=structure_schema).dropDuplicates(["structure_id"])
-        return chunks_df, structures_df, tagged_rdd
+        return chunks_df, structures_df, tagged_rdd, diagnostics
+
+    def _build_chunks_and_structure_df_driver(self, documents_df: DataFrame) -> Tuple[DataFrame, DataFrame, Dict[str, int]]:
+        chunk_schema = self._build_chunk_schema()
+        structure_schema = self._build_structure_schema()
+        enable_hierarchical = bool(self.enable_hierarchical and HIERARCHICAL_AVAILABLE and self.toc_extractor and self.summarizer)
+
+        worker = _PartitionChunker(
+            minio_client=self.minio_client,
+            bucket=self.bucket,
+            max_pages_per_pdf=int(self.max_pages_per_pdf),
+            chunk_max_chars=int(self.chunk_max_chars),
+            chunk_min_chars=int(self.chunk_min_chars),
+            chunk_overlap_chars=int(self.chunk_overlap_chars),
+            section_chunk_max_chars=int(self.section_chunk_max_chars),
+            toc_fallback_chapter_size=int(self.toc_fallback_chapter_size),
+            toc_min_confidence=float(self.toc_min_confidence),
+            toc_enabled=bool(self.toc_enabled),
+            doc_summary_max_chars=int(self.doc_summary_max_chars),
+            chapter_summary_max_chars=int(self.chapter_summary_max_chars),
+            toc_extractor=self.toc_extractor if enable_hierarchical else None,
+            summarizer=self.summarizer if enable_hierarchical else None,
+        )
+
+        diagnostics: Dict[str, int] = {
+            "documents_seen": 0,
+            "pdf_candidate_docs": 0,
+            "chunked_docs": 0,
+            "chunks_emitted": 0,
+            "structures_emitted": 0,
+            "non_pdf_docs": 0,
+            "missing_key_docs": 0,
+            "no_minio_client_docs": 0,
+            "pdf_bytes_missing_docs": 0,
+            "pdf_get_failed_docs": 0,
+            "pypdf_unavailable_docs": 0,
+            "page_extract_failed_docs": 0,
+            "empty_pdf_text_docs": 0,
+            "no_chunks_docs": 0,
+            "unexpected_error_docs": 0,
+        }
+        status_map = {
+            "non_pdf": "non_pdf_docs",
+            "missing_keys": "missing_key_docs",
+            "no_minio_client": "no_minio_client_docs",
+            "pdf_bytes_missing": "pdf_bytes_missing_docs",
+            "pdf_get_failed": "pdf_get_failed_docs",
+            "pypdf_unavailable": "pypdf_unavailable_docs",
+            "page_extract_failed": "page_extract_failed_docs",
+            "empty_pdf_text": "empty_pdf_text_docs",
+            "no_chunks": "no_chunks_docs",
+        }
+        unexpected_error_logs = 0
+
+        chunk_records: List[Dict[str, Any]] = []
+        structure_records: List[Dict[str, Any]] = []
+        for row in documents_df.toLocalIterator():
+            record = row.asDict(recursive=True)
+            diagnostics["documents_seen"] += 1
+            asset_path = (clean_scalar(record.get("asset_path")) or "").lower()
+            if asset_path.endswith(".pdf"):
+                diagnostics["pdf_candidate_docs"] += 1
+            try:
+                if enable_hierarchical:
+                    chunks, structure_record, status = worker.chunk_document_hierarchical_with_status(record)
+                    if structure_record:
+                        structure_records.append(sanitize_nested_strings(structure_record))
+                        diagnostics["structures_emitted"] += 1
+                else:
+                    chunks, status = worker.chunk_document_record_with_status(record)
+            except Exception as exc:
+                diagnostics["unexpected_error_docs"] += 1
+                if unexpected_error_logs < 3:
+                    print(
+                        "[Chunk Driver Error] "
+                        f"asset_uid={clean_scalar(record.get('asset_uid'))} "
+                        f"asset_path={clean_scalar(record.get('asset_path'))} "
+                        f"error={exc.__class__.__name__}: {exc}"
+                    )
+                    unexpected_error_logs += 1
+                continue
+
+            if status in status_map:
+                diagnostics[status_map[status]] += 1
+            if chunks:
+                chunk_records.extend([sanitize_nested_strings(chunk) for chunk in chunks])
+                diagnostics["chunked_docs"] += 1
+                diagnostics["chunks_emitted"] += len(chunks)
+
+        chunks_df = (
+            self.spark.createDataFrame(chunk_records, schema=chunk_schema).dropDuplicates(["chunk_id"])
+            if chunk_records
+            else self.spark.createDataFrame([], schema=chunk_schema)
+        )
+        structures_df = (
+            self.spark.createDataFrame(structure_records, schema=structure_schema).dropDuplicates(["structure_id"])
+            if structure_records
+            else self.spark.createDataFrame([], schema=structure_schema)
+        )
+        return chunks_df, structures_df, diagnostics
 
     def _chunk_document_record(self, row: Dict[str, Any]) -> List[Dict[str, Any]]:
         asset_path = clean_scalar(row.get("asset_path")) or ""
@@ -1839,8 +2135,9 @@ class SilverTransformer:
         records: List[Dict[str, Any]] = []
         now = datetime.utcnow()
         for page_no, chunk_order, chunk_text in self._extract_pdf_pages(asset_path):
-            token_count = len(re.findall(r"\w+", chunk_text))
-            chunk_id = deterministic_hash(f"{asset_uid}::{page_no}::{chunk_order}::{chunk_text[:128]}")
+            chunk_text_safe = strip_surrogate_chars(chunk_text)
+            token_count = len(re.findall(r"\w+", chunk_text_safe))
+            chunk_id = deterministic_hash(f"{asset_uid}::{page_no}::{chunk_order}::{chunk_text_safe[:128]}")
             records.append(
                 {
                     "chunk_id": chunk_id,
@@ -1848,7 +2145,7 @@ class SilverTransformer:
                     "asset_uid": asset_uid,
                     "page_no": int(page_no),
                     "chunk_order": int(chunk_order),
-                    "chunk_text": chunk_text,
+                    "chunk_text": chunk_text_safe,
                     "token_count": int(token_count),
                     "lang": ensure_language_code(row.get("language")),
                     "chunk_type": "section_detail",
@@ -1931,11 +2228,13 @@ class SilverTransformer:
         lang = ensure_language_code(row.get("language"))
         chunk_records: List[Dict[str, Any]] = []
         section_global_order = 0
+        emit_summary_tiers = should_emit_hierarchical_summary_chunks(method)
 
         # Tier 1: Document summary
         doc_summary = ""
-        if self.summarizer:
+        if emit_summary_tiers and self.summarizer:
             doc_summary = self.summarizer.generate_document_summary(row, toc, max_chars=self.doc_summary_max_chars)
+        doc_summary = strip_surrogate_chars(doc_summary)
         if doc_summary:
             doc_chunk_id = deterministic_hash(f"{asset_uid}::tier1::doc_summary")
             chunk_records.append(
@@ -1982,42 +2281,45 @@ class SilverTransformer:
                 continue
 
             chapter_summary = chapter_title
-            if self.summarizer:
+            if emit_summary_tiers and self.summarizer:
                 chapter_summary = self.summarizer.generate_chapter_summary(
                     chapter_text,
                     chapter_title,
                     max_chars=self.chapter_summary_max_chars,
                 )
-            chapter_chunk_id = deterministic_hash(f"{asset_uid}::tier2::{chapter_id}")
-            chunk_records.append(
-                {
-                    "chunk_id": chapter_chunk_id,
-                    "resource_uid": resource_uid,
-                    "asset_uid": asset_uid,
-                    "page_no": chapter_start,
-                    "chunk_order": chapter_idx,
-                    "chunk_text": chapter_summary,
-                    "token_count": int(len(re.findall(r"\w+", chapter_summary))),
-                    "lang": lang,
-                    "chunk_type": "chapter_summary",
-                    "chunk_tier": 2,
-                    "chapter_id": chapter_id,
-                    "chapter_title": chapter_title,
-                    "chapter_number": chapter_number,
-                    "chapter_page_start": chapter_start,
-                    "chapter_page_end": chapter_end,
-                    "section_id": None,
-                    "section_title": None,
-                    "section_number": None,
-                    "section_page_start": None,
-                    "section_page_end": None,
-                    "parent_chunk_id": None,
-                    "has_children": True,
-                    "is_summary": True,
-                    "summary_method": "extractive",
-                    "updated_at": now,
-                }
-            )
+            chapter_summary = strip_surrogate_chars(chapter_summary)
+            chapter_chunk_id: Optional[str] = None
+            if emit_summary_tiers:
+                chapter_chunk_id = deterministic_hash(f"{asset_uid}::tier2::{chapter_id}")
+                chunk_records.append(
+                    {
+                        "chunk_id": chapter_chunk_id,
+                        "resource_uid": resource_uid,
+                        "asset_uid": asset_uid,
+                        "page_no": chapter_start,
+                        "chunk_order": chapter_idx,
+                        "chunk_text": chapter_summary,
+                        "token_count": int(len(re.findall(r"\w+", chapter_summary))),
+                        "lang": lang,
+                        "chunk_type": "chapter_summary",
+                        "chunk_tier": 2,
+                        "chapter_id": chapter_id,
+                        "chapter_title": chapter_title,
+                        "chapter_number": chapter_number,
+                        "chapter_page_start": chapter_start,
+                        "chapter_page_end": chapter_end,
+                        "section_id": None,
+                        "section_title": None,
+                        "section_number": None,
+                        "section_page_start": None,
+                        "section_page_end": None,
+                        "parent_chunk_id": None,
+                        "has_children": True,
+                        "is_summary": True,
+                        "summary_method": "extractive",
+                        "updated_at": now,
+                    }
+                )
 
             sections = chapter.get("sections") or []
             if not sections:
@@ -2054,6 +2356,7 @@ class SilverTransformer:
                 for local_idx, detail in enumerate(detail_chunks, start=1):
                     if not detail:
                         continue
+                    detail = strip_surrogate_chars(detail)
                     section_global_order += 1
                     detail_id = deterministic_hash(f"{asset_uid}::tier3::{section_id}::{local_idx}::{detail[:128]}")
                     chunk_records.append(
@@ -2098,7 +2401,7 @@ class SilverTransformer:
             "total_pages": total_pages,
             "total_chapters": len(toc),
             "total_sections": int(sum(len(ch.get("sections") or []) for ch in toc)),
-            "table_of_contents_json": json.dumps(toc, ensure_ascii=False),
+            "table_of_contents_json": json.dumps(sanitize_nested_strings(toc), ensure_ascii=False),
             "structure_valid": structure_valid,
             "created_at": now,
             "updated_at": now,
@@ -2213,6 +2516,8 @@ class SilverTransformer:
         bronze_df.unpersist(False)
 
         print("Applying incremental resource filter...")
+        if self.force_reprocess:
+            print("SILVER_FORCE_REPROCESS enabled; rebuilding all resources and assets.")
         incremental_base_df = self._filter_incremental_resources(base_df).persist()
         incremental_count = int(incremental_base_df.count())
         base_df.unpersist(False)
@@ -2248,20 +2553,78 @@ class SilverTransformer:
         changed_documents_count = int(changed_documents_df.count())
         chunk_started = benchmark.start()
         print("Building silver chunks...")
-        chunks_df, structure_df, chunk_tagged_rdd = self._build_chunks_and_structure_df(changed_documents_df)
+        chunks_df, structure_df, chunk_tagged_rdd, chunk_diagnostics = self._build_chunks_and_structure_df(changed_documents_df)
         chunks_df = chunks_df.persist(StorageLevel.MEMORY_AND_DISK)
         structure_df = structure_df.persist(StorageLevel.MEMORY_AND_DISK)
         chunk_count = int(chunks_df.count())
         structure_count = int(structure_df.count())
+        distributed_diagnostics = dict(chunk_diagnostics)
+        print(f"[Chunk Diagnostics] {distributed_diagnostics}")
+
+        pdf_candidate_docs = int(distributed_diagnostics.get("pdf_candidate_docs", 0))
+        all_pdf_read_failures = (
+            pdf_candidate_docs > 0
+            and chunk_count == 0
+            and (
+                int(distributed_diagnostics.get("no_minio_client_docs", 0)) == pdf_candidate_docs
+                or int(distributed_diagnostics.get("pdf_bytes_missing_docs", 0)) == pdf_candidate_docs
+                or int(distributed_diagnostics.get("pdf_get_failed_docs", 0)) == pdf_candidate_docs
+                or int(distributed_diagnostics.get("pypdf_unavailable_docs", 0)) == pdf_candidate_docs
+            )
+        )
+        driver_fallback_enabled = os.getenv("SILVER_CHUNK_DRIVER_FALLBACK_ON_ZERO", "1").lower() in {"1", "true", "yes"}
+        driver_fallback_used = False
+        fallback_diagnostics: Dict[str, int] = {}
+
+        if all_pdf_read_failures and driver_fallback_enabled:
+            driver_fallback_used = True
+            print("[Chunk Fallback] Distributed chunking failed to read all PDF bytes; retrying on driver process.")
+            chunk_tagged_rdd.unpersist(False)
+            chunk_tagged_rdd = None
+            chunks_df.unpersist(False)
+            structure_df.unpersist(False)
+
+            chunks_df, structure_df, fallback_diagnostics = self._build_chunks_and_structure_df_driver(changed_documents_df)
+            chunks_df = chunks_df.persist(StorageLevel.MEMORY_AND_DISK)
+            structure_df = structure_df.persist(StorageLevel.MEMORY_AND_DISK)
+            chunk_count = int(chunks_df.count())
+            structure_count = int(structure_df.count())
+            chunk_diagnostics = {
+                "distributed": distributed_diagnostics,
+                "driver_fallback": fallback_diagnostics,
+            }
+            print(f"[Chunk Diagnostics][Driver Fallback] {fallback_diagnostics}")
+        else:
+            chunk_tagged_rdd.unpersist(False)
+            chunk_tagged_rdd = None
+
         benchmark.finish(
             stage="chunk",
             started_at=chunk_started,
             input_records=changed_documents_count,
             output_records=chunk_count,
-            extra={"structure_records": structure_count},
+            extra={
+                "structure_records": structure_count,
+                "driver_fallback_used": driver_fallback_used,
+                "diagnostics": chunk_diagnostics,
+            },
         )
         has_chunk_rows = chunk_count > 0
         has_structure_rows = structure_count > 0
+        if driver_fallback_used:
+            pdf_candidate_docs = max(
+                int(distributed_diagnostics.get("pdf_candidate_docs", 0)),
+                int(fallback_diagnostics.get("pdf_candidate_docs", 0)),
+            )
+        else:
+            pdf_candidate_docs = int(chunk_diagnostics.get("pdf_candidate_docs", 0))
+        if pdf_candidate_docs > 0 and chunk_count == 0:
+            for df in [structure_df, chunks_df, changed_documents_df, affected_assets_df, deleted_assets_df, changed_assets_df, documents_df, resources_curated_df, incremental_base_df]:
+                df.unpersist(False)
+            raise RuntimeError(
+                "Chunk generation produced 0 chunks despite PDF candidates. "
+                f"pdf_candidate_docs={pdf_candidate_docs}, diagnostics={chunk_diagnostics}"
+            )
 
         print("Writing Iceberg tables...")
         self._merge_into(resources_curated_df, self.resources_curated_table, ["resource_uid"], partition_columns=["source_system", "days(ingested_at)"])
@@ -2276,7 +2639,8 @@ class SilverTransformer:
         if has_structure_rows:
             self._merge_into(structure_df, self.document_structure_table, ["structure_id"], partition_columns=["source_system", "days(updated_at)"])
 
-        chunk_tagged_rdd.unpersist(False)
+        if chunk_tagged_rdd is not None:
+            chunk_tagged_rdd.unpersist(False)
         for df in [structure_df, chunks_df, changed_documents_df, affected_assets_df, deleted_assets_df, changed_assets_df, documents_df, resources_curated_df, incremental_base_df]:
             df.unpersist(False)
 

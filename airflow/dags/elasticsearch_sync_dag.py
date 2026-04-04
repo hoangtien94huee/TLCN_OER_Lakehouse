@@ -35,7 +35,7 @@ default_args = {
     'email_on_retry': False,
     'retries': 2,
     'retry_delay': timedelta(minutes=10),
-    'execution_timeout': timedelta(hours=3),  # PDF extraction can be slow
+    'execution_timeout': timedelta(hours=48),  # Embedding generation is CPU-intensive
 }
 
 dag = DAG(

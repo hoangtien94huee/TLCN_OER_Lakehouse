@@ -75,7 +75,6 @@ services:
       - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
-      - AIRFLOW__CORE__PARALLELISM=8
       - AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG=1
       - PYTHONPATH=/opt/airflow:/opt/airflow/dags
       # Java configuration for PySpark
@@ -89,6 +88,8 @@ services:
       - MINIO_BUCKET=oer-lakehouse
       # Google Gemini API for subject translation
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - SILVER_CHUNK_DRIVER_FALLBACK_ON_ZERO=0
+      - SILVER_FORCE_REPROCESS=0
       # Bronze layer PDF processing configuration
       - DOWNLOAD_STRATEGY=selective
       - MAX_PDF_SIZE_MB=20
@@ -111,10 +112,10 @@ services:
       # Spark cluster configuration - connect to Spark cluster
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_DEPLOY_MODE=client
-      - PYSPARK_PYTHON=python3
-      - PYSPARK_DRIVER_PYTHON=python3
+      - PYSPARK_PYTHON=python
+      - PYSPARK_DRIVER_PYTHON=python
       # Use local JARs instead of downloading from Maven
-      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.4.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
+      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.9.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
       # Spark Memory Configuration
       - SPARK_DRIVER_MEMORY=4g
       - SPARK_EXECUTOR_MEMORY=2g
@@ -131,9 +132,11 @@ services:
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=oer_resources
       - ELASTICSEARCH_BATCH_SIZE=300
-      - ELASTICSEARCH_RECREATE=0
+      - ELASTICSEARCH_RECREATE=1
       - ELASTICSEARCH_INCREMENTAL=1
       - ELASTICSEARCH_TIMEOUT=180
+      - ELASTICSEARCH_STREAM_PARTITIONS=32
+      - ELASTICSEARCH_SPARK_MASTER=local[*]
       # Embedding pipeline configuration
       - EMBEDDING_INCREMENTAL=1
       # Chatbot API configuration
@@ -169,12 +172,37 @@ services:
       retries: 3
       start_period: 60s
 
+  spark-python-deps:
+    profiles:
+      - etl
+    image: bitnamilegacy/spark:3.5.4
+    container_name: oer-spark-python-deps
+    user: "0:0"
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        PY_BIN=$$(command -v python3 || command -v python || true)
+        if [ -z "$$PY_BIN" ] && [ -x /opt/bitnami/python/bin/python3 ]; then PY_BIN=/opt/bitnami/python/bin/python3; fi
+        if [ -z "$$PY_BIN" ] && [ -x /opt/bitnami/python/bin/python ]; then PY_BIN=/opt/bitnami/python/bin/python; fi
+        if [ -z "$$PY_BIN" ]; then echo "No Python interpreter found in spark image"; exit 1; fi
+        $$PY_BIN -m pip --version || $$PY_BIN -m ensurepip --upgrade
+        $$PY_BIN -m pip install --no-cache-dir --upgrade pip
+        $$PY_BIN -m pip install --no-cache-dir --target /opt/spark/python-deps minio==7.1.17 PyPDF2==3.0.1 numpy==1.26.4 scikit-learn==1.3.2
+        $$PY_BIN -c "import sys; sys.path.insert(0, '/opt/spark/python-deps'); import minio, PyPDF2, numpy, sklearn; print('spark python deps ready')"
+    volumes:
+      - spark_python_deps:/opt/spark/python-deps
+    restart: "no"
+
   # Spark Master — chỉ cần khi chạy ETL pipeline
   spark-master:
     profiles:
       - etl
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-master
+    depends_on:
+      spark-python-deps:
+        condition: service_completed_successfully
     deploy:
       resources:
         limits:
@@ -182,18 +210,18 @@ services:
           cpus: '4'
     environment:
       - SPARK_MODE=master
-      - PYSPARK_PYTHON=python3
-      - PYSPARK_DRIVER_PYTHON=python3
+      - PYSPARK_PYTHON=python
+      - PYSPARK_DRIVER_PYTHON=python
       - SPARK_DRIVER_MEMORY=4g
       - SPARK_EXECUTOR_MEMORY=2g
       - SPARK_DRIVER_MAXRESULTSIZE=1g
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags
+      - PYTHONPATH=/opt/spark/python-deps:/opt/airflow:/opt/airflow/dags
       # Iceberg Hadoop Catalog support (NO REST needed!)
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dcom.amazonaws.sdk.disableEc2Metadata=true
     ports:
@@ -204,6 +232,7 @@ services:
       - ./data/iceberg-jars:/opt/spark/jars/iceberg
       - ./airflow/src:/opt/airflow/src
       - ./airflow/dags:/opt/airflow/dags
+      - spark_python_deps:/opt/spark/python-deps
     restart: unless-stopped
     healthcheck:
       test: [ "CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'" ]
@@ -225,18 +254,18 @@ services:
           cpus: '4'
     environment:
       - SPARK_MODE=worker
-      - PYSPARK_PYTHON=python3
-      - PYSPARK_DRIVER_PYTHON=python3
+      - PYSPARK_PYTHON=python
+      - PYSPARK_DRIVER_PYTHON=python
       - SPARK_MASTER_URL=spark://spark-master:7077
       - SPARK_WORKER_MEMORY=4g
       - SPARK_WORKER_CORES=4
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags
+      - PYTHONPATH=/opt/spark/python-deps:/opt/airflow:/opt/airflow/dags
     ports:
       - "8082:8081" # Spark Worker Web UI
     volumes:
@@ -244,7 +273,10 @@ services:
       - ./data/iceberg-jars:/opt/spark/jars/iceberg
       - ./airflow/src:/opt/airflow/src
       - ./airflow/dags:/opt/airflow/dags
+      - spark_python_deps:/opt/spark/python-deps
     depends_on:
+      spark-python-deps:
+        condition: service_completed_successfully
       spark-master:
         condition: service_healthy
     restart: unless-stopped
@@ -408,7 +440,7 @@ services:
 volumes:
   postgres_data:
   minio_data:
-  spark_data:
+  spark_python_deps:
   dremio_data:
   es_data:
   dspace_assetstore:

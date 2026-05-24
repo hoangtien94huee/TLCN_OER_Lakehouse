@@ -380,7 +380,7 @@
                 if (response.ok) {
                     const data = await response.json();
                     apiStatus.className = 'api-status connected';
-                    apiStatus.title = `Connected - ES: ${data.elasticsearch}, LLM: ${data.llm_provider}`;
+                    apiStatus.title = `Connected - mode: ${data.retrieval_mode || 'unknown'}, vector_db: ${data.vector_db_enabled ? 'on' : 'off'}, engine: ${data.engine_initialized ? 'ready' : 'cold'}`;
                 } else {
                     throw new Error('API not healthy');
                 }
@@ -405,7 +405,7 @@
             sendMessage();
         }
 
-        function addMessage(content, isUser, contexts = null, searchMode = null) {
+        function addMessage(content, isUser, extraData = null, searchMode = null) {
             if (isFirstMessage) {
                 chatMessages.innerHTML = '';
                 isFirstMessage = false;
@@ -420,17 +420,22 @@
                     ${formatText(content)}
             `;
 
-            if (contexts && contexts.length > 0) {
+            const sources = extraData?.sources || [];
+            if (sources.length > 0) {
                 html += `
                     <div class="contexts">
-                        <div class="contexts-title">📖 Nguồn tham khảo (${contexts.length})</div>
-                        ${contexts.map((ctx, i) => `
+                        <div class="contexts-title">📖 Nguồn tham khảo (${sources.length})</div>
+                        ${sources.map((src, i) => `
                             <div class="context-item">
-                                <div class="context-text">${escapeHtml(ctx.text?.substring(0, 200) || '')}...</div>
+                                ${src.snippet ? `<div class="context-text">${escapeHtml(src.snippet)}</div>` : ''}
                                 <div class="context-source">
-                                    <strong>${escapeHtml(ctx.title || 'Unknown')}</strong>
-                                    ${ctx.page_no ? ` - Trang ${ctx.page_no}` : ''}
-                                    ${ctx.source_url ? ` | <a href="${ctx.source_url}" target="_blank">Xem nguồn</a>` : ''}
+                                    ${src.url
+                                        ? `<a href="${src.url}" target="_blank" rel="noopener"><strong>${escapeHtml(src.title || 'Tài liệu')}</strong></a>`
+                                        : `<strong>${escapeHtml(src.title || 'Tài liệu')}</strong>`
+                                    }
+                                    ${src.page ? ` - Trang ${src.page}` : ''}
+                                    ${src.section ? ` | ${escapeHtml(src.section)}` : ''}
+                                    ${src.url ? ` | <a href="${src.url}" target="_blank" rel="noopener">📄 Xem PDF</a>` : ''}
                                 </div>
                             </div>
                         `).join('')}
@@ -467,9 +472,18 @@
             if (typing) typing.remove();
         }
 
+        function cleanAnswerText(text) {
+            if (!text) return '';
+            // Strip "3) Nguồn: ..." or "3) Sources: ..." since sources are shown separately
+            text = text.replace(/\n?\s*3\)\s*(Nguồn|Sources?)\s*[:：].*/is, '');
+            // Format section headers for readability
+            text = text.replace(/^1\)\s*(Trả lời|Answer)\s*[:：]\s*/im, '**Định nghĩa:**\n');
+            text = text.replace(/^2\)\s*(Chi tiết|Details?)\s*[:：]\s*/im, '\n**Chi tiết:**\n');
+            return text.trim();
+        }
+
         function formatText(text) {
-            // Basic formatting: newlines to <br>, bold, etc.
-            return escapeHtml(text)
+            return escapeHtml(cleanAnswerText(text))
                 .replace(/\n/g, '<br>')
                 .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
         }
@@ -479,6 +493,12 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function detectInputLanguage(text) {
+            const lower = (text || '').toLowerCase();
+            const viChars = /[àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ]/;
+            return viChars.test(lower) ? 'vi' : 'en';
         }
 
         async function sendMessage() {
@@ -496,17 +516,22 @@
             addTypingIndicator();
 
             try {
+                const controller = new AbortController();
+                const timeoutMs = 90000;
+                const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
                 const response = await fetch(`${apiUrl}/ask`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
+                    signal: controller.signal,
                     body: JSON.stringify({
                         question: question,
                         top_k: 5,
-                        use_hybrid: true
+                        language: detectInputLanguage(question)
                     }),
                 });
+                clearTimeout(timeoutId);
 
                 removeTypingIndicator();
 
@@ -519,14 +544,17 @@
                 addMessage(
                     data.answer || 'Không có câu trả lời.',
                     false,
-                    data.contexts,
+                    data,
                     data.search_mode
                 );
 
             } catch (error) {
                 removeTypingIndicator();
+                const message = error.name === 'AbortError'
+                    ? 'Quá thời gian chờ phản hồi (90s). Hệ thống retrieval/LLM đang bận hoặc chưa kết nối.'
+                    : error.message;
                 addMessage(
-                    `❌ Lỗi: ${error.message}\n\nHãy kiểm tra:\n1. API URL có đúng không\n2. Chatbot API đang chạy không\n3. CORS đã được cấu hình chưa`,
+                    `❌ Lỗi: ${message}\n\nHãy kiểm tra:\n1. API URL có đúng không\n2. Chatbot API đang chạy không\n3. Spark/LLM có đang sẵn sàng không`,
                     false
                 );
             }

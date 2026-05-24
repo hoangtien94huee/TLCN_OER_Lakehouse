@@ -1,502 +1,310 @@
 """
-Chatbot-only API for OER RAG.
-Hybrid Search: BM25 (text) + kNN (vector) with keyword extraction.
+Chatbot API - PageIndex only mode.
+
+This service intentionally disables vector database / embedding retrieval.
 """
 
+from __future__ import annotations
+
+import logging
 import os
-import re
 from typing import Any, Dict, List, Optional
 
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-# Lazy load embedding model
-_embedding_model = None
+try:
+    from pageindex import PageIndexEngine, PageIndexError
+except ImportError:
+    try:
+        from src.pageindex import PageIndexEngine, PageIndexError  # type: ignore
+    except ImportError:
+        PageIndexEngine = None  # type: ignore
 
-ES_HOST = os.getenv("ELASTICSEARCH_HOST", "http://localhost:9200").rstrip("/")
-ES_INDEX = os.getenv("ELASTICSEARCH_INDEX", "oer_resources")
-MINIO_BUCKET = os.getenv("MINIO_BUCKET", "oer-lakehouse")
-MINIO_PUBLIC_BASE_URL = os.getenv("MINIO_PUBLIC_BASE_URL", "http://localhost:19000").rstrip("/")
+        class PageIndexError(RuntimeError):
+            pass
 
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "gemini")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
-# Embedding config (same model as Silver layer) - E5-Base for cross-lingual
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "intfloat/multilingual-e5-base")
-EMBEDDING_DIM = 768
-USE_E5_PREFIXES = True  # E5 models need query: prefix
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Hybrid search weights - adjusted per language
-# Vietnamese queries: rely more on kNN (multilingual embedding handles cross-language)
-# English queries: BM25 works well for exact text match
-BM25_WEIGHT_EN = float(os.getenv("BM25_WEIGHT_EN", "0.5"))
-KNN_WEIGHT_EN = float(os.getenv("KNN_WEIGHT_EN", "0.5"))
-BM25_WEIGHT_VI = float(os.getenv("BM25_WEIGHT_VI", "0.2"))  # Lower for cross-language
-KNN_WEIGHT_VI = float(os.getenv("KNN_WEIGHT_VI", "0.8"))    # Higher for semantic match
+_pageindex_engine = None
 
-app = FastAPI(title="OER Chatbot API")
+
+app = FastAPI(title="OER Chatbot API (PageIndex)")
+allowed_origins_env = os.getenv("CHATBOT_API_ALLOWED_ORIGINS", "*").strip()
+api_key_required = os.getenv("CHATBOT_API_KEY", "").strip()
+allowed_origins: List[str]
+if allowed_origins_env == "*":
+    allowed_origins = ["*"]
+else:
+    allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
+    if not allowed_origins:
+        allowed_origins = ["*"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins,
+    allow_credentials=allowed_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
 class AskRequest(BaseModel):
+    question: str = Field(..., min_length=1)
+    top_k: int = Field(5, ge=1, le=12)
+    source_system: Optional[str] = None
+    language: Optional[str] = None
+    course_id: Optional[int] = None
+    section_id: Optional[int] = None
+    activity_id: Optional[int] = None
+    role: Optional[str] = None
+    course_name: Optional[str] = None
+    section_name: Optional[str] = None
+    activity_name: Optional[str] = None
+    page_url: Optional[str] = None
+
+
+def _contextualize_question(payload: AskRequest) -> str:
+    context_lines: List[str] = []
+    if payload.course_id is not None:
+        context_lines.append(f"course_id={payload.course_id}")
+    if payload.course_name:
+        context_lines.append(f"course_name={payload.course_name}")
+    if payload.section_id is not None:
+        context_lines.append(f"section_id={payload.section_id}")
+    if payload.section_name:
+        context_lines.append(f"section_name={payload.section_name}")
+    if payload.activity_id is not None:
+        context_lines.append(f"activity_id={payload.activity_id}")
+    if payload.activity_name:
+        context_lines.append(f"activity_name={payload.activity_name}")
+    if payload.role:
+        context_lines.append(f"role={payload.role}")
+    if payload.page_url:
+        context_lines.append(f"page_url={payload.page_url}")
+
+    if not context_lines:
+        return payload.question
+    return (
+        f"{payload.question}\n\n"
+        "[Moodle context]\n"
+        + "\n".join(f"- {line}" for line in context_lines)
+    )
+
+
+class DebugGetDocumentRequest(BaseModel):
     question: str = Field(..., min_length=3)
     top_k: int = Field(5, ge=1, le=12)
     source_system: Optional[str] = None
     language: Optional[str] = None
-    use_hybrid: bool = Field(True, description="Use hybrid search (BM25 + kNN)")
+    reason: str = Field("Debug retrieval: chọn tài liệu ứng viên từ metadata và TOC.")
 
 
-def _get_embedding_model():
-    """Lazy load embedding model."""
-    global _embedding_model
-    if _embedding_model is None:
-        from sentence_transformers import SentenceTransformer
-        _embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-    return _embedding_model
+class DebugGetDocumentStructureRequest(BaseModel):
+    asset_uid: str = Field(..., min_length=8)
+    reason: str = Field("Debug retrieval: đọc cấu trúc tài liệu để khoanh vùng section.")
 
 
-def _detect_lang(text: str) -> str:
-    vi_chars = set("àáâãèéêìíòóôõùúýăđơưạảấầẩẫậắằẳẵặẹẻẽếềểễệỉịọỏốồổỗộớờởỡợụủứừửữựỳỵỷỹ")
-    return "vi" if any(ch in vi_chars for ch in text.lower()) else "en"
+class DebugGetPageContentRequest(BaseModel):
+    asset_uid: str = Field(..., min_length=8)
+    pages: str = Field(..., description='Page expression: "x-y" | "x,y" | "x"')
+    reason: str = Field("Debug retrieval: đọc range trang hẹp để lấy bằng chứng trực tiếp.")
 
 
-# Stopwords for keyword extraction
-VI_STOPWORDS = {
-    "à", "ạ", "ấy", "bạn", "bị", "cho", "chứ", "có", "cái", "của", "cùng", "cũng",
-    "dạ", "để", "đi", "đó", "được", "gì", "hả", "hay", "hỏi", "là", "làm", "lại",
-    "mà", "mình", "muốn", "này", "như", "nhỉ", "nhé", "nào", "nè", "nha", "ơi",
-    "rồi", "sao", "tôi", "thì", "thế", "trên", "trong", "từ", "và", "vậy", "về",
-    "với", "ê", "uhm", "um", "ừ", "ờ", "vâng", "dạ", "xin", "giúp", "biết", "tui",
-}
-EN_STOPWORDS = {
-    "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "have",
-    "has", "had", "do", "does", "did", "will", "would", "could", "should", "may",
-    "might", "must", "shall", "can", "need", "dare", "ought", "used", "to", "of",
-    "in", "for", "on", "with", "at", "by", "from", "as", "into", "through", "during",
-    "before", "after", "above", "below", "between", "under", "again", "further",
-    "then", "once", "here", "there", "when", "where", "why", "how", "all", "each",
-    "few", "more", "most", "other", "some", "such", "no", "nor", "not", "only",
-    "own", "same", "so", "than", "too", "very", "just", "also", "now", "i", "me",
-    "my", "myself", "we", "our", "you", "your", "he", "him", "his", "she", "her",
-    "it", "its", "they", "them", "their", "what", "which", "who", "whom", "this",
-    "that", "these", "those", "am", "like", "um", "uh", "well", "please", "help",
-    "want", "know", "tell", "about", "hey", "hi", "hello",
-}
+def _get_pageindex_engine():
+    global _pageindex_engine
+    if _pageindex_engine is None:
+        if PageIndexEngine is None:
+            raise PageIndexError("PageIndex engine chưa khả dụng trong môi trường hiện tại.")
+        _pageindex_engine = PageIndexEngine()
+    return _pageindex_engine
 
 
-def _extract_keywords(query: str) -> str:
-    """Extract meaningful keywords from query, removing filler words."""
-    # Skip keyword extraction for short queries (keep natural language)
-    if len(query.split()) <= 5:
-        return query
-    
-    lang = _detect_lang(query)
-    stopwords = VI_STOPWORDS if lang == "vi" else EN_STOPWORDS
-    
-    # Normalize and tokenize
-    text = query.lower().strip()
-    # Keep alphanumeric and Vietnamese chars
-    tokens = re.findall(r'[\w\u00C0-\u024F\u1E00-\u1EFF]+', text)
-    
-    # Filter stopwords and short tokens
-    keywords = [t for t in tokens if t not in stopwords and len(t) > 1]
-    
-    # If too aggressive, fallback to original
-    if len(keywords) < 2:
-        return query
-    
-    return " ".join(keywords)
+def _api_base_url() -> str:
+    return os.getenv("CHATBOT_PUBLIC_BASE_URL", "http://localhost:18088").rstrip("/")
 
 
-def _extract_source_url_from_text(text: str) -> Optional[str]:
-    if not text:
-        return None
-    m = re.search(r"Saylor URL:\s*(https?://[^\s]+)", text, flags=re.IGNORECASE)
-    if m:
-        return m.group(1).strip()
-    m = re.search(r"(https?://[^\s)]+)", text)
-    return m.group(1).strip() if m else None
-
-
-def _build_public_minio_url(asset_path: Optional[str]) -> Optional[str]:
-    if not asset_path:
-        return None
-    key = str(asset_path).strip().lstrip("/")
-    if not key:
-        return None
-    return f"{MINIO_PUBLIC_BASE_URL}/{MINIO_BUCKET}/{key}"
-
-
-def _embed_query(query: str) -> List[float]:
-    """Embed query using sentence-transformers.
-    
-    E5 models require 'query:' prefix for search queries.
-    See: https://huggingface.co/intfloat/multilingual-e5-base
-    """
-    model = _get_embedding_model()
-    # Extract keywords before embedding for better semantic match
-    clean_query = _extract_keywords(query)
-    
-    # Add E5 query prefix if using E5 model
-    if USE_E5_PREFIXES and "e5" in EMBEDDING_MODEL.lower():
-        clean_query = f"query: {clean_query}"
-    
-    embedding = model.encode(clean_query, convert_to_numpy=True, normalize_embeddings=True)
-    return embedding.tolist()
-
-
-def _es_hybrid_search(
-    question: str,
-    top_k: int,
-    source_system: Optional[str],
-    language: Optional[str],
-    use_hybrid: bool = True,
-) -> List[Dict[str, Any]]:
-    """Hybrid search on flat chunk index.
-
-    - BM25 branch: lexical match on chunk text/title/chapter title.
-    - Vector branch: cosine similarity on embedding.
-    - Fusion: weighted score merge in application layer (no RRF license dependency).
-    """
-    # Query enhancement: extract subject keywords
-    search_query = question
-    if re.search(r'\b(book|textbook|sách|giáo trình|tài liệu)\b', question.lower()):
-        # Extract subject from "book of X" or "X textbook"
-        subject_match = re.search(r'\b(of|về|cho)\s+(\w+)', question.lower())
-        if subject_match:
-            subject = subject_match.group(2)
-            # Expand common subjects
-            expansions = {
-                'math': 'mathematics algebra calculus',
-                'toán': 'toán học mathematics algebra calculus',
-                'database': 'database SQL data management',
-            }
-            search_query = expansions.get(subject, question)
-    
-    query_lang = _detect_lang(question)
-    bm25_weight = BM25_WEIGHT_VI if query_lang == "vi" else BM25_WEIGHT_EN
-    knn_weight = KNN_WEIGHT_VI if query_lang == "vi" else KNN_WEIGHT_EN
-
-    source_fields = [
-        "chunk_id", "resource_uid", "asset_uid", "chunk_text", "page_no", "lang",
-        "title", "source_url", "minio_url", "asset_path", "chapter_title", "source_system",
-    ]
-
-    filters: List[Dict[str, Any]] = []
-    if language:
-        filters.append({"term": {"lang": language}})
-    if source_system:
-        filters.append({"term": {"source_system": source_system}})
-
-    bm25_query: Dict[str, Any] = {
-        "bool": {
-            "filter": filters,
-            "should": [
-                {"match": {"chunk_text": {"query": search_query, "fuzziness": "AUTO"}}},
-                {"match": {"title": {"query": search_query, "boost": 10.0}}},
-                {"match": {"chapter_title": {"query": search_query, "boost": 5.0}}},
-            ],
-            "minimum_should_match": 1,
-        }
-    }
-
-    bm25_body = {"size": max(top_k * 3, top_k), "_source": source_fields, "query": bm25_query}
-    bm25_resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=bm25_body, timeout=20)
-    bm25_resp.raise_for_status()
-    bm25_hits = bm25_resp.json().get("hits", {}).get("hits", [])
-
-    if not use_hybrid:
-        return bm25_hits[:top_k]
-
-    query_vector = _embed_query(question)
-    vector_base_query: Dict[str, Any] = {"match_all": {}}
-    if filters:
-        vector_base_query = {"bool": {"filter": filters}}
-
-    vector_body = {
-        "size": max(top_k * 3, top_k),
-        "_source": source_fields,
-        "query": {
-            "script_score": {
-                "query": vector_base_query,
-                "script": {
-                    "source": "cosineSimilarity(params.query_vector, 'embedding') + 1.0",
-                    "params": {"query_vector": query_vector},
-                },
-            }
-        },
-    }
-    vector_resp = requests.post(f"{ES_HOST}/{ES_INDEX}/_search", json=vector_body, timeout=30)
-    vector_resp.raise_for_status()
-    vector_hits = vector_resp.json().get("hits", {}).get("hits", [])
-
-    def _normalized_score_map(hits: List[Dict[str, Any]]) -> Dict[str, float]:
-        pairs: List[tuple[str, float]] = []
-        for h in hits:
-            doc_id = h.get("_id") or str(h.get("_source", {}).get("chunk_id") or "")
-            if not doc_id:
-                continue
-            raw = h.get("_score")
-            score = float(raw) if raw is not None else 0.0
-            pairs.append((doc_id, score))
-        if not pairs:
-            return {}
-        max_score = max(score for _, score in pairs)
-        if max_score <= 0:
-            return {doc_id: 0.0 for doc_id, _ in pairs}
-        return {doc_id: score / max_score for doc_id, score in pairs}
-
-    bm25_norm = _normalized_score_map(bm25_hits)
-    vector_norm = _normalized_score_map(vector_hits)
-
-    merged: Dict[str, Dict[str, Any]] = {}
-    for hit in bm25_hits + vector_hits:
-        doc_id = hit.get("_id") or str(hit.get("_source", {}).get("chunk_id") or "")
-        if not doc_id:
-            continue
-        if doc_id not in merged:
-            merged[doc_id] = hit
-        fused_score = (bm25_weight * bm25_norm.get(doc_id, 0.0)) + (knn_weight * vector_norm.get(doc_id, 0.0))
-        merged[doc_id]["_score"] = fused_score
-
-    ranked = sorted(merged.values(), key=lambda h: h.get("_score", 0.0), reverse=True)
-    return ranked[:top_k]
-
-
-def _build_context(question: str, hits: List[Dict[str, Any]], top_k: int) -> List[Dict[str, Any]]:
-    """Build context from flat chunk-level search results."""
-    contexts: List[Dict[str, Any]] = []
-    noise_patterns = []
-    
-    # Generic titles to skip (metadata quality filter)
-    generic_titles = {"part 1", "part 2", "part 3", "part 4", "part 5", "part 6", 
-                      "chapter 1", "chapter 2", "section 1", "unknown", "unknown book"}
-    
-    for hit in hits:
-        src = hit.get("_source", {})
-        
-        # Flat structure: each hit is a chunk
-        text = src.get("chunk_text", "")
-        if not text:
-            continue
-        text_norm = text.strip().lower()
-        title_norm = str(src.get("title") or src.get("chapter_title") or "").strip().lower()
-
-        # Skip generic/low-quality titles
-        if title_norm in generic_titles:
-            continue
-        
-        # Skip code-heavy chunks (>50% looks like code)
-        code_indicators = len(re.findall(r'\b(do|enddo|call|function|return|sum=|def |class |import |#include)', text_norm))
-        if code_indicators > 5 or (code_indicators > 0 and len(text_norm) < 300):
-            continue
-
-        # Skip noisy/boilerplate chunks.
-        if len(text_norm) < 60:
-            continue
-        if any(re.search(p, text_norm) for p in noise_patterns):
-            continue
-        if title_norm and any(re.search(p, title_norm) for p in noise_patterns):
-            continue
-
-        source_url = (
-            src.get("source_url")
-            or src.get("minio_url")
-            or _build_public_minio_url(src.get("asset_path"))
-            or _extract_source_url_from_text(text)
-        )
-        title = (
-            src.get("title")
-            or src.get("chapter_title")
-            or src.get("source_system")
-            or src.get("resource_uid")
-            or "Unknown"
-        )
-            
-        contexts.append({
-            "text": text,
-            "chunk_id": src.get("chunk_id"),
-            "resource_uid": src.get("resource_uid"),
-            "page_no": src.get("page_no"),
-            "lang": src.get("lang"),
-            "title": title,
-            "source_url": source_url,
-            "asset_uid": src.get("asset_uid"),
-            "minio_url": src.get("minio_url"),
-            "retrieval_score": hit.get("_score"),
-        })
-        
-        if len(contexts) >= top_k:
-            break
-    
-    return contexts
-
-
-def _build_prompt(question: str, contexts: List[Dict[str, Any]]) -> str:
-    lang = _detect_lang(question)
-    parts = []
-    for i, c in enumerate(contexts, 1):
-        # Simplified citation (no title/URL in flat structure yet)
-        cite = f"[Chunk {c.get('chunk_id', i)}]"
-        if c.get("page_no"):
-            cite += f" (Page {c['page_no']})"
-        parts.append(f"{cite}\n{c['text']}")
-    context = "\n\n".join(parts)
-    if lang == "vi":
-        return (
-            "Bạn là trợ lý thư viện chỉ trả lời dựa HOÀN TOÀN trên tài liệu được cung cấp.\n\n"
-
-            "QUY TẮC BẮT BUỘC:\n"
-            "1. CHỈ sử dụng thông tin có trong CONTEXT dưới đây.\n"
-            "2. NẾU CONTEXT không liên quan đến câu hỏi, BẮT BUỘC trả lời ĐÚNG NGUYÊN VĂN:\n"
-            "   'Không tìm thấy thông tin phù hợp trong kho tài liệu. Vui lòng thử câu hỏi khác.'\n"
-            "3. KHÔNG suy đoán, KHÔNG thêm thông tin từ kiến thức chung.\n"
-            "4. KHÔNG cố gắng kết nối câu hỏi với context không liên quan.\n\n"
-
-            "CÁCH ĐÁNH GIÁ CONTEXT:\n"
-            "- Context CÓ LIÊN QUAN: Đề cập trực tiếp đến chủ đề câu hỏi\n"
-            "- Context KHÔNG LIÊN QUAN: Đề cập chủ đề khác hoàn toàn\n"
-            "  → Nếu không liên quan, dừng ngay và trả lời 'Không tìm thấy thông tin...'\n\n"
-
-            "NẾU CONTEXT CÓ LIÊN QUAN, hãy:\n"
-            "1. Tóm tắt thông tin chính từ context\n"
-            "2. Giải thích rõ ràng, dễ hiểu\n"
-            "3. Trích dẫn nguồn bằng [Nguồn X]\n\n"
-
-            f"--- TÀI LIỆU ---\n{context}\n--- HẾT ---\n\n"
-            f"Câu hỏi: {question}\n\n"
-            "Trả lời (kiểm tra liên quan trước khi trả lời):"
-        )
-    else:
-        return (
-            "You are an intelligent learning assistant in an Open Educational Resources (OER) library system.\n"
-            "Your goal is to help learners understand concepts clearly, simply, and in a structured way.\n\n"
-
-            "ANSWERING PRINCIPLES:\n"
-            "- Prioritize information from the provided documents\n"
-            "- Do NOT copy text verbatim from documents - paraphrase and synthesize in your own words\n"
-            "- STRICTLY do NOT add external knowledge beyond the provided documents\n"
-            "- If the documents are insufficient or not directly relevant, you MUST answer exactly: \"No relevant context found in the database.\"\n"
-            "- Ignore document fragments that are cut off mid-sentence or lack context\n\n"
-
-            "HOW TO RESPOND:\n"
-            "1. START with a general overview sentence about the topic\n"
-            "2. Explain concepts clearly as if teaching a beginner\n"
-            "3. Combine relevant information from multiple sources when available\n"
-            "4. Structure your answer logically with clear paragraphs\n"
-            "5. Include examples when helpful\n"
-            "6. Cite sources using [Source X] (do not include page numbers unless explicitly available)\n\n"
-
-            f"--- REFERENCE DOCUMENTS ---\n{context}\n--- END OF DOCUMENTS ---\n\n"
-            f"Question: {question}\n\n"
-            "Provide a detailed, clear answer in English (do NOT copy verbatim from documents):"
-        )
-
-
-def _generate_answer(prompt: str) -> str:
-    provider = (LLM_PROVIDER or "gemini").lower()
-    
-    # Try Groq first, fallback to Gemini on rate limit
-    if provider == "groq":
-        if not GROQ_API_KEY:
-            return "Missing GROQ_API_KEY."
-        try:
-            resp = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
-                json={"model": GROQ_MODEL, "messages": [{"role": "user", "content": prompt}], "temperature": 0.3, "max_tokens": 2048},
-                timeout=90,
-            )
-            resp.raise_for_status()
-            return resp.json()["choices"][0]["message"]["content"].strip()
-        except requests.HTTPError as e:
-            # Fallback to Gemini on rate limit (429) or server errors (5xx)
-            if e.response.status_code == 429 or e.response.status_code >= 500:
-                if GEMINI_API_KEY:
-                    provider = "gemini"  # Switch to Gemini
-                else:
-                    return f"Groq API rate limit exceeded. Please wait a moment and try again."
-            else:
-                raise  # Re-raise other errors
-    
-    # Gemini API (default or fallback)
-    if not GEMINI_API_KEY:
-        return "Missing GEMINI_API_KEY."
-    resp = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}",
-        json={
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {"temperature": 0.3, "maxOutputTokens": 2048},
-        },
-        timeout=90,
-    )
-    resp.raise_for_status()
-    cands = resp.json().get("candidates", [])
-    return cands[0]["content"]["parts"][0]["text"].strip() if cands else "No answer generated."
+def _build_proxy_pdf_url(asset_uid: str, page: Optional[int] = None) -> str:
+    base = f"{_api_base_url()}/api/pdf/{asset_uid}"
+    if page is not None and page > 0:
+        return f"{base}#page={int(page)}"
+    return base
 
 
 @app.get("/api/health")
 async def health() -> Dict[str, Any]:
-    try:
-        resp = requests.get(f"{ES_HOST}/_cluster/health", timeout=5)
-        resp.raise_for_status()
-        health = resp.json().get("status", "unknown")
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Elasticsearch unavailable: {exc}") from exc
-    return {"status": "ok", "elasticsearch": health, "index": ES_INDEX, "llm_provider": LLM_PROVIDER, "hybrid_search": True}
+    if PageIndexEngine is None:
+        raise HTTPException(status_code=503, detail="PageIndex engine unavailable in current environment.")
+    return {
+        "status": "ok",
+        "retrieval_mode": "pageindex",
+        "vector_db_enabled": False,
+        "engine_initialized": _pageindex_engine is not None,
+        "api_key_required": bool(api_key_required),
+    }
 
 
 @app.post("/api/ask")
-async def ask_api(payload: AskRequest) -> Dict[str, Any]:
+async def ask_api(payload: AskRequest, x_api_key: Optional[str] = Header(default=None, alias="X-API-Key")) -> Dict[str, Any]:
     try:
-        # Use hybrid search (BM25 + kNN) by default
-        hits = _es_hybrid_search(
-            payload.question,
-            payload.top_k,
-            payload.source_system,
-            payload.language,
-            use_hybrid=payload.use_hybrid,
+        if api_key_required and x_api_key != api_key_required:
+            raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+        engine = _get_pageindex_engine()
+        result = engine.ask(
+            question=_contextualize_question(payload),
+            top_k=payload.top_k,
+            source_system=payload.source_system,
+            language=payload.language,
         )
-        contexts = _build_context(payload.question, hits, payload.top_k)
-        
-        # Check if retrieval quality is too low
-        if not contexts:
-            lang = _detect_lang(payload.question)
-            no_result_msg = "Không tìm thấy ngữ cảnh phù hợp trong kho dữ liệu." if lang == "vi" else "No relevant context found in the database."
-            return {"question": payload.question, "answer": no_result_msg, "contexts": [], "search_mode": "hybrid" if payload.use_hybrid else "bm25"}
-        
-        # Check average retrieval score - reject if too low (likely irrelevant)
-        # Note: scores are normalized (0-1 range) after hybrid fusion
-        avg_score = sum(c.get("retrieval_score", 0) for c in contexts) / len(contexts)
-        if avg_score < 0.15:  # Threshold for minimum relevance (normalized score)
-            lang = _detect_lang(payload.question)
-            low_quality_msg = (
-                "Không tìm thấy tài liệu liên quan đến câu hỏi của bạn. Vui lòng thử câu hỏi cụ thể hơn hoặc sử dụng từ khóa tiếng Anh."
-                if lang == "vi" else
-                "No relevant documents found for your question. Please try a more specific query or use English keywords."
-            )
-            return {"question": payload.question, "answer": low_quality_msg, "contexts": contexts, "search_mode": "low_quality_retrieval"}
-        
-        prompt = _build_prompt(payload.question, contexts)
-        answer = _generate_answer(prompt)
-        return {
-            "question": payload.question,
-            "answer": answer,
-            "contexts": contexts,
-            "search_mode": "hybrid" if payload.use_hybrid else "bm25",
+        result["moodle_context"] = {
+            "course_id": payload.course_id,
+            "section_id": payload.section_id,
+            "activity_id": payload.activity_id,
+            "role": payload.role,
+            "course_name": payload.course_name,
+            "section_name": payload.section_name,
+            "activity_name": payload.activity_name,
+            "page_url": payload.page_url,
         }
+        if "sources" not in result:
+            result["sources"] = engine._build_sources(result.get("contexts") or [])
+        normalized_sources: List[Dict[str, Any]] = []
+        for src in result.get("sources") or []:
+            src_obj = dict(src or {})
+            asset_uid = str(src_obj.get("asset_uid") or "").strip()
+            page_no = src_obj.get("page")
+            if asset_uid:
+                src_obj["url"] = _build_proxy_pdf_url(asset_uid, page_no if isinstance(page_no, int) else None)
+            normalized_sources.append(src_obj)
+        result["sources"] = normalized_sources
+        return result
     except requests.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {exc}") from exc
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/pdf/{asset_uid}")
+async def pdf_proxy_api(asset_uid: str, page: Optional[int] = None) -> Response:
+    try:
+        engine = _get_pageindex_engine()
+        meta = engine._get_document_meta(asset_uid)  # pylint: disable=protected-access
+        if not meta:
+            raise HTTPException(status_code=404, detail="asset_uid not found.")
+        asset_path = str(meta.get("asset_path") or "").strip()
+        if not asset_path:
+            raise HTTPException(status_code=404, detail="asset_path missing for asset_uid.")
+        pdf_bytes = engine._get_pdf_bytes(asset_path)  # pylint: disable=protected-access
+        filename = os.path.basename(asset_path) or f"{asset_uid}.pdf"
+        headers = {
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "private, max-age=300",
+        }
+        if page is not None and page > 0:
+            headers["X-PDF-Page"] = str(int(page))
+        return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+    except HTTPException:
+        raise
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/debug/get_document")
+async def debug_get_document_api(payload: DebugGetDocumentRequest) -> Dict[str, Any]:
+    try:
+        engine = _get_pageindex_engine()
+        return engine.get_document(
+            question=payload.question,
+            top_k=payload.top_k,
+            source_system=payload.source_system,
+            language=payload.language,
+            reason=payload.reason,
+        )
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/debug/tier1_candidates")
+async def debug_tier1_candidates_api(payload: DebugGetDocumentRequest) -> Dict[str, Any]:
+    try:
+        engine = _get_pageindex_engine()
+        result = engine.get_document(
+            question=payload.question,
+            top_k=payload.top_k,
+            source_system=payload.source_system,
+            language=payload.language,
+            reason=payload.reason,
+        )
+        return {
+            "tool": "tier1_candidates",
+            "reason": payload.reason,
+            "query_bundle": result.get("query_bundle"),
+            "subject_hints": result.get("subject_hints"),
+            "tier1": result.get("tier1"),
+            "documents": result.get("documents"),
+        }
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/debug/get_document_structure")
+async def debug_get_document_structure_api(payload: DebugGetDocumentStructureRequest) -> Dict[str, Any]:
+    try:
+        engine = _get_pageindex_engine()
+        return engine.get_document_structure(
+            asset_uid=payload.asset_uid,
+            reason=payload.reason,
+        )
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post("/api/debug/get_page_content")
+async def debug_get_page_content_api(payload: DebugGetPageContentRequest) -> Dict[str, Any]:
+    try:
+        engine = _get_pageindex_engine()
+        return engine.get_page_content(
+            asset_uid=payload.asset_uid,
+            pages=payload.pages,
+            reason=payload.reason,
+        )
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/debug/pageindex_config")
+async def debug_pageindex_config_api() -> Dict[str, Any]:
+    try:
+        engine = _get_pageindex_engine()
+        return engine.get_runtime_config()
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.get("/api/debug/local_llm")
+async def debug_local_llm_api() -> Dict[str, Any]:
+    try:
+        engine = _get_pageindex_engine()
+        return engine.debug_local_llm()
+    except PageIndexError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc

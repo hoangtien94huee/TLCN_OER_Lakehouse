@@ -9,10 +9,12 @@ Uses the DSpace REST API to create items and upload bitstreams (PDFs).
 
 import os
 import json
-import requests
 import logging
-from typing import Dict, Any, Optional, List
 from io import BytesIO
+from typing import Dict, Any, Optional, List
+from urllib.parse import urlparse, unquote
+
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,6 +48,8 @@ class DSpaceSynchronizer:
         # Spark Config
         self.gold_catalog = os.getenv("ICEBERG_GOLD_CATALOG", "gold")
         self.gold_db = os.getenv("GOLD_DATABASE", "analytics")
+        self.silver_catalog = os.getenv("ICEBERG_SILVER_CATALOG", "silver")
+        self.silver_db = os.getenv("SILVER_DATABASE", "default")
         
         # Table names
         self.fact_table = f"{self.gold_catalog}.{self.gold_db}.fact_oer_resources"
@@ -53,6 +57,7 @@ class DSpaceSynchronizer:
         self.dim_sources_table = f"{self.gold_catalog}.{self.gold_db}.dim_sources"
         self.dim_languages_table = f"{self.gold_catalog}.{self.gold_db}.dim_languages"
         self.dim_date_table = f"{self.gold_catalog}.{self.gold_db}.dim_date"
+        self.documents_table = f"{self.silver_catalog}.{self.silver_db}.oer_documents"
         
         # State
         self.session = requests.Session()
@@ -87,6 +92,9 @@ class DSpaceSynchronizer:
                 .config("spark.sql.catalog.gold", "org.apache.iceberg.spark.SparkCatalog")
                 .config("spark.sql.catalog.gold.type", "hadoop")
                 .config("spark.sql.catalog.gold.warehouse", f"s3a://{self.bucket}/gold")
+                .config("spark.sql.catalog.silver", "org.apache.iceberg.spark.SparkCatalog")
+                .config("spark.sql.catalog.silver.type", "hadoop")
+                .config("spark.sql.catalog.silver.warehouse", f"s3a://{self.bucket}/silver")
                 .config("spark.hadoop.fs.s3a.endpoint", os.getenv("MINIO_ENDPOINT", "http://minio:9000"))
                 .config("spark.hadoop.fs.s3a.access.key", self.minio_access)
                 .config("spark.hadoop.fs.s3a.secret.key", self.minio_secret)
@@ -311,10 +319,11 @@ class DSpaceSynchronizer:
 
         try:
             # 1. Get file stream from MinIO
-            bucket, key = self._parse_s3_path(pdf_path)
-            if not bucket or not key: return
-            
-            response = self.minio_client.get_object(bucket, key)
+            key = self._resolve_minio_key(pdf_path)
+            if not key:
+                return
+
+            response = self.minio_client.get_object(self.bucket, key)
             file_content = response.read()
             filename = os.path.basename(key)
             
@@ -354,12 +363,21 @@ class DSpaceSynchronizer:
             logger.error(f"Error depositing item {wsi_id}: {e}")
             if 'resp' in locals(): logger.error(resp.text)
 
-    def _parse_s3_path(self, path: str) -> tuple:
-        clean = path.replace("s3a://", "").replace("s3://", "")
-        parts = clean.split("/", 1)
-        if len(parts) == 2:
-            return parts[0], parts[1]
-        return None, None
+    def _resolve_minio_key(self, path: str) -> Optional[str]:
+        raw = str(path or "").strip()
+        if not raw:
+            return None
+
+        if raw.startswith(("s3://", "s3a://", "http://", "https://")):
+            parsed = urlparse(raw)
+            key = (parsed.path or "").lstrip("/")
+        else:
+            key = raw
+
+        key = unquote(key).lstrip("/")
+        if key.startswith(f"{self.bucket}/"):
+            key = key[len(self.bucket) + 1 :]
+        return key or None
 
     def run(self):
         """Main execution flow."""
@@ -376,6 +394,13 @@ class DSpaceSynchronizer:
         dim_sources_df = self.spark.table(self.dim_sources_table)
         dim_languages_df = self.spark.table(self.dim_languages_table)
         dim_date_df = self.spark.table(self.dim_date_table)
+        documents_df = None
+
+        try:
+            if self.spark.catalog.tableExists(self.documents_table):
+                documents_df = self.spark.table(self.documents_table)
+        except Exception as e:
+            logger.warning(f"Could not read documents table {self.documents_table}: {e}")
         
         # JOIN fact with dimensions to get complete information
         df = (
@@ -421,6 +446,40 @@ class DSpaceSynchronizer:
                 F.col("fact.data_quality_score"),
             )
         )
+
+        if documents_df is not None:
+            docs = (
+                documents_df
+                .select("resource_uid", "asset_order", "asset_path", "asset_extension")
+                .filter(F.col("asset_path").isNotNull())
+                .withColumn(
+                    "is_pdf",
+                    F.when(
+                        F.col("asset_extension").isNotNull(),
+                        F.lower(F.col("asset_extension")) == "pdf",
+                    ).otherwise(F.lower(F.col("asset_path")).endswith(".pdf")),
+                )
+                .filter(F.col("is_pdf"))
+                .drop("is_pdf")
+            )
+
+            docs_agg = (
+                docs.groupBy("resource_uid")
+                .agg(
+                    F.sort_array(
+                        F.collect_list(
+                            F.struct(F.col("asset_order"), F.col("asset_path"))
+                        )
+                    ).alias("asset_entries")
+                )
+                .withColumn("asset_paths", F.expr("transform(asset_entries, x -> x.asset_path)"))
+                .drop("asset_entries")
+            )
+
+            df = (
+                df.join(docs_agg, df.resource_key == docs_agg.resource_uid, "left")
+                .drop("resource_uid")
+            )
         
         # Collect to driver (Batch processing)
         # For very large datasets, this should be distributed, but REST API calls are usually sequential or limited rate
@@ -442,13 +501,15 @@ class DSpaceSynchronizer:
                 wsi_id = self.create_workspace_item(metadata)
                 
                 if wsi_id:
-                    # Upload PDF (assuming 'pdf_files' is a list of s3 paths in the row)
-                    # You might need to adjust this field name based on your Gold schema
-                    # For now, let's assume we look up PDFs similar to Elasticsearch sync or if stored in row
-                    pass 
-                    # TODO: Implement PDF path lookup if not directly in Gold table
-                    # If Gold table has 'pdf_path' or similar:
-                    # self.upload_bitstream(wsi_id, row.pdf_path)
+                    # Upload all PDF assets (if available from Silver documents)
+                    asset_paths = []
+                    try:
+                        asset_paths = list(row.asset_paths or [])
+                    except Exception:
+                        asset_paths = []
+
+                    for asset_path in asset_paths:
+                        self.upload_bitstream(wsi_id, asset_path)
                     
                     # Deposit
                     self.deposit_item(wsi_id)

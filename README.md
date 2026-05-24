@@ -240,6 +240,91 @@ Chạy DAG `dspace_saf_import_dag` để:
 
 ---
 
+## Tích hợp Moodle LMS local (context-aware chatbot)
+
+Repository đã bổ sung plugin mẫu tại `moodle/local/oerchatbot` để hiển thị chatbot nổi trong Moodle và gửi ngữ cảnh trang hiện tại (`course`, `section`, `activity`, `role`) về API.
+
+### 1. Kiểm tra cổng local trước khi chạy
+
+```bash
+ss -ltnp | grep -E ':8000|:8080|:18088|:18080|:8085|:8090'
+```
+
+Nếu cổng đã bị chiếm, dùng cổng khác cho Moodle/API (ví dụ Moodle `8085`, API `18088` hoặc `8090`).
+
+### 2. Cấu hình CORS cho Chatbot API
+
+Trong service chạy `chatbot_api.py`, đặt biến môi trường:
+
+```bash
+CHATBOT_API_ALLOWED_ORIGINS=http://localhost:8085
+CHATBOT_API_KEY=your_strong_key
+```
+
+Có thể khai báo nhiều origin bằng dấu phẩy.
+
+### 3. Cài plugin vào Moodle local
+
+1. Chép thư mục `moodle/local/oerchatbot` vào `<moodle_root>/local/oerchatbot`
+2. Vào Moodle Site administration để hoàn tất bước upgrade plugin
+3. Vào `Site administration -> Plugins -> Local plugins -> OER Chatbot` và đặt:
+   - `Chatbot API URL`: ví dụ `http://127.0.0.1:18088/api/ask`
+   - `Chatbot API key`: cùng giá trị với `CHATBOT_API_KEY` ở backend
+   - `Widget position`: right/left
+   - `Enable widget`: bật
+
+### 4. Dữ liệu context gửi lên API `/api/ask`
+
+Widget gửi thêm các trường:
+
+- `course_id`, `course_name`
+- `section_id`, `section_name`
+- `activity_id`, `activity_name`
+- `role`
+- `page_url`
+
+API sẽ gắn context này vào truy vấn để ưu tiên câu trả lời theo môn/chương/bài hiện tại.
+
+---
+
+## Chạy Moodle bằng Docker Compose (bản đã kiểm tra chạy)
+
+`docker-compose.yml` đã có profile `lms` với 2 service:
+
+- `moodle-db` (MariaDB 10.11)
+- `moodle` (bitnamilegacy/moodle:latest) map cổng `18085`
+
+Khởi chạy:
+
+```bash
+docker compose --profile lms up -d moodle-db moodle
+```
+
+Truy cập:
+
+- URL: `http://localhost:18085`
+- User: `admin`
+- Password: `Admin@12345`
+
+Plugin chatbot đã được mount sẵn từ repo:
+
+- `./moodle/local/oerchatbot` -> `/opt/bitnami/moodle/local/oerchatbot`
+
+Để plugin hoạt động với API hiện có:
+
+- API chatbot: `http://localhost:18088/api/ask`
+- Trong Moodle container, URL tương ứng tới host: `http://host.docker.internal:18088/api/ask`
+
+Sau lần chạy đầu, vào:
+
+`Site administration -> Plugins -> Local plugins -> OER Chatbot`
+
+và đặt `Chatbot API URL` thành:
+
+`http://host.docker.internal:18088/api/ask`
+
+---
+
 ## Chạy DSpace Angular (Development)
 
 DSpace Angular chạy riêng để tiết kiệm tài nguyên:

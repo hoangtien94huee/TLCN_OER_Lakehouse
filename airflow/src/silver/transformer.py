@@ -41,6 +41,25 @@ except ImportError:
     PYPDF_AVAILABLE = False
 
 try:
+    from pypdf import PdfReader as PyPDFReader
+    PYPDF_NEW_AVAILABLE = True
+except ImportError:
+    try:
+        import pypdf
+        PyPDFReader = pypdf.PdfReader
+        PYPDF_NEW_AVAILABLE = True
+    except ImportError:
+        PyPDFReader = None  # type: ignore
+        PYPDF_NEW_AVAILABLE = False
+
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    pdfplumber = None  # type: ignore
+    PDFPLUMBER_AVAILABLE = False
+
+try:
     from src.hierarchical import MultilingualExtractiveSummarizer, TOCExtractor
 
     HIERARCHICAL_AVAILABLE = True
@@ -512,6 +531,11 @@ def _normalize_record_with_matcher(
             for pid in programs_by_subject.get(int(subj["subject_id"]), [])
         }
     )
+    subject_match_confidence = float(max([float(s.get("similarity") or 0.0) for s in matched_subjects], default=0.0))
+    uncertain_threshold = float(os.getenv("SUBJECT_UNCERTAIN_THRESHOLD", "0.70"))
+    subject_match_uncertain = len(matched_subjects) == 0 or subject_match_confidence < uncertain_threshold
+    subject_match_status = "uncertain" if subject_match_uncertain else "matched"
+    subject_match_method = "tfidf_lexical"
 
     data_quality_score = compute_quality_score(
         title=title,
@@ -561,6 +585,10 @@ def _normalize_record_with_matcher(
         "has_assets": has_assets,
         "matched_subjects": matched_subjects,
         "program_ids": program_ids,
+        "subject_match_confidence": subject_match_confidence,
+        "subject_match_uncertain": subject_match_uncertain,
+        "subject_match_status": subject_match_status,
+        "subject_match_method": subject_match_method,
         "record_fingerprint": record_fingerprint,
         "data_quality_score": data_quality_score,
         "ingested_at": now,
@@ -693,8 +721,75 @@ class _PartitionChunker:
         text = re.sub(r"[ \t]+", " ", text)
         text = re.sub(r"\n{3,}", "\n\n", text)
         return text.strip()
+    
+    def _is_corrupt_text(self, text: str) -> bool:
+        """Check if extracted text contains corrupt glyph IDs."""
+        if not text:
+            return False
+        # Pattern: /gXX indicates glyph ID (corrupt font encoding)
+        glyph_pattern = r'/g\d{2}'
+        matches = re.findall(glyph_pattern, text)
+        # If more than 5% of text is glyph IDs, consider it corrupt
+        return len(matches) > len(text) * 0.05 / 5  # ~5 chars per match
 
     def _extract_pdf_page_texts(self, pdf_bytes: bytes) -> Tuple[Dict[int, str], int]:
+        """Extract PDF text with fallback strategy for better font handling.
+        
+        Priority:
+        1. pdfplumber (best for custom fonts)
+        2. pypdf (newer, better than PyPDF2)
+        3. PyPDF2 (fallback)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Try pdfplumber first (best handling of custom fonts)
+        if PDFPLUMBER_AVAILABLE:
+            try:
+                with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+                    max_pages = min(len(pdf.pages), self.max_pages_per_pdf)
+                    page_texts: Dict[int, str] = {}
+                    for idx in range(max_pages):
+                        raw = pdf.pages[idx].extract_text() or ""
+                        # Check if text looks corrupt (glyph IDs)
+                        if not self._is_corrupt_text(raw):
+                            page_texts[idx + 1] = self._normalize_pdf_text(raw)
+                        else:
+                            logger.warning(f"Page {idx+1} has corrupt text from pdfplumber, will try pypdf")
+                            page_texts[idx + 1] = ""
+                    
+                    # If we got valid text, return it
+                    if any(page_texts.values()):
+                        logger.debug(f"Successfully extracted {len(page_texts)} pages with pdfplumber")
+                        return page_texts, max_pages
+            except Exception as e:
+                logger.warning(f"pdfplumber extraction failed: {e}, trying pypdf")
+        
+        # Try pypdf (newer version, better than PyPDF2)
+        if PYPDF_NEW_AVAILABLE:
+            try:
+                reader = PyPDFReader(BytesIO(pdf_bytes))
+                max_pages = min(len(reader.pages), self.max_pages_per_pdf)
+                page_texts: Dict[int, str] = {}
+                for idx in range(max_pages):
+                    # Try layout mode first (better text extraction)
+                    try:
+                        raw = reader.pages[idx].extract_text(extraction_mode="layout") or ""
+                    except:
+                        raw = reader.pages[idx].extract_text() or ""
+                    
+                    if not self._is_corrupt_text(raw):
+                        page_texts[idx + 1] = self._normalize_pdf_text(raw)
+                    else:
+                        page_texts[idx + 1] = ""
+                
+                if any(page_texts.values()):
+                    logger.debug(f"Successfully extracted {len(page_texts)} pages with pypdf")
+                    return page_texts, max_pages
+            except Exception as e:
+                logger.warning(f"pypdf extraction failed: {e}, falling back to PyPDF2")
+        
+        # Fallback to PyPDF2 (old but stable)
         if not PYPDF_AVAILABLE:
             return {}, 0
         try:
@@ -704,8 +799,10 @@ class _PartitionChunker:
             for idx in range(max_pages):
                 raw = clean_scalar(reader.pages[idx].extract_text()) or ""
                 page_texts[idx + 1] = self._normalize_pdf_text(raw)
+            logger.debug(f"Extracted {len(page_texts)} pages with PyPDF2 (fallback)")
             return page_texts, max_pages
-        except Exception:
+        except Exception as e:
+            logger.error(f"All PDF extraction methods failed: {e}")
             return {}, 0
 
     def _split_long_segment(
@@ -1139,6 +1236,7 @@ class SilverTransformer:
         self.reference_program_subject_links_table = f"{self.catalog_name}.{self.database_name}.reference_program_subject_links"
         self.pipeline_state_table = f"{self.catalog_name}.{self.database_name}.pipeline_state"
         self.reference_state_key = "reference_bootstrap"
+        self.resource_state_prefix = "resource_fingerprint::"
 
         self.run_reference_bootstrap_enabled = os.getenv("RUN_REFERENCE_BOOTSTRAP", "0").lower() in {"1", "true", "yes"}
         self.force_reference_refresh = os.getenv("FORCE_REFERENCE_REFRESH", "0").lower() in {"1", "true", "yes"}
@@ -1361,6 +1459,99 @@ class SilverTransformer:
         )
         self._merge_into(state_df, self.pipeline_state_table, ["state_key"])
 
+    def _build_resource_state_hash_expr(self, *, alias_prefix: Optional[str] = None) -> Any:
+        def col(name: str) -> Any:
+            return F.col(f"{alias_prefix}.{name}") if alias_prefix else F.col(name)
+
+        return F.coalesce(
+            col("record_fingerprint"),
+            F.sha2(
+                F.concat_ws(
+                    "||",
+                    F.coalesce(col("resource_uid"), F.lit("")),
+                    F.coalesce(col("scraped_at").cast("string"), F.lit("")),
+                    F.coalesce(col("last_updated_at").cast("string"), F.lit("")),
+                    F.coalesce(col("ingested_at").cast("string"), F.lit("")),
+                ),
+                256,
+            ),
+        )
+
+    def _load_resource_state_df(self) -> DataFrame:
+        schema = T.StructType(
+            [
+                T.StructField("resource_uid", T.StringType(), False),
+                T.StructField("state_record_fingerprint", T.StringType(), False),
+            ]
+        )
+        if not self._table_exists(self.pipeline_state_table):
+            return self.spark.createDataFrame([], schema=schema)
+
+        prefix_len = len(self.resource_state_prefix)
+        return (
+            self.spark.table(self.pipeline_state_table)
+            .where(F.col("state_key").startswith(self.resource_state_prefix))
+            .select(
+                F.substring(F.col("state_key"), prefix_len + 1, 512).alias("resource_uid"),
+                F.col("state_hash").alias("state_record_fingerprint"),
+            )
+            .where(F.col("resource_uid").isNotNull() & (F.length(F.col("resource_uid")) > 0))
+            .dropDuplicates(["resource_uid"])
+        )
+
+    def _backfill_resource_state_from_resources_table(self) -> None:
+        if not self._table_exists(self.resources_curated_table):
+            return
+        existing_df = self.spark.table(self.resources_curated_table)
+        if "resource_uid" not in existing_df.columns:
+            return
+
+        existing_has_fingerprint = "record_fingerprint" in existing_df.columns
+        state_hash_expr = (
+            F.coalesce(F.col("record_fingerprint"), F.sha2(F.coalesce(F.col("resource_uid"), F.lit("")), 256))
+            if existing_has_fingerprint
+            else F.sha2(
+                F.concat_ws(
+                    "||",
+                    F.coalesce(F.col("resource_uid"), F.lit("")),
+                    F.coalesce(F.col("scraped_at").cast("string"), F.lit("")),
+                    F.coalesce(F.col("last_updated_at").cast("string"), F.lit("")),
+                    F.coalesce(F.col("ingested_at").cast("string"), F.lit("")),
+                ),
+                256,
+            )
+        )
+        state_df = (
+            existing_df
+            .where(F.col("resource_uid").isNotNull())
+            .select(
+                F.concat(F.lit(self.resource_state_prefix), F.col("resource_uid")).alias("state_key"),
+                state_hash_expr.alias("state_hash"),
+                F.current_timestamp().alias("updated_at"),
+            )
+            .dropDuplicates(["state_key"])
+        )
+        if not self._has_rows(state_df):
+            return
+        self._ensure_pipeline_state_table()
+        self._merge_into(state_df, self.pipeline_state_table, ["state_key"])
+
+    def _update_resource_pipeline_state(self, resources_df: DataFrame) -> None:
+        state_df = (
+            resources_df
+            .where(F.col("resource_uid").isNotNull())
+            .select(
+                F.concat(F.lit(self.resource_state_prefix), F.col("resource_uid")).alias("state_key"),
+                self._build_resource_state_hash_expr().alias("state_hash"),
+                F.current_timestamp().alias("updated_at"),
+            )
+            .dropDuplicates(["state_key"])
+        )
+        if not self._has_rows(state_df):
+            return
+        self._ensure_pipeline_state_table()
+        self._merge_into(state_df, self.pipeline_state_table, ["state_key"])
+
     def _write_reference_tables(self) -> None:
         def create_df(records: List[Dict[str, Any]], integer_cols: Optional[List[str]] = None) -> Optional[DataFrame]:
             if not records:
@@ -1481,6 +1672,10 @@ class SilverTransformer:
                 T.StructField("has_assets", T.BooleanType(), True),
                 T.StructField("matched_subjects", T.ArrayType(matched_struct), True),
                 T.StructField("program_ids", T.ArrayType(T.IntegerType()), True),
+                T.StructField("subject_match_confidence", T.DoubleType(), True),
+                T.StructField("subject_match_uncertain", T.BooleanType(), True),
+                T.StructField("subject_match_status", T.StringType(), True),
+                T.StructField("subject_match_method", T.StringType(), True),
                 T.StructField("record_fingerprint", T.StringType(), False),
                 T.StructField("data_quality_score", T.DoubleType(), True),
                 T.StructField("ingested_at", T.TimestampType(), False),
@@ -1519,38 +1714,50 @@ class SilverTransformer:
     def _filter_incremental_resources(self, base_df: DataFrame) -> DataFrame:
         if self.force_reprocess:
             return base_df
-        if not self._table_exists(self.resources_curated_table):
+
+        # Guardrail: pipeline_state can outlive serving tables (manual cleanup, migration, or failed writes).
+        # If serving tables are missing/empty, force rebuild from current Bronze slice instead of skipping everything.
+        required_tables = [
+            self.resources_curated_table,
+            self.documents_table,
+            self.chunks_table,
+        ]
+        missing_tables = [table for table in required_tables if not self._table_exists(table)]
+        if missing_tables:
+            print(
+                "Silver serving tables missing; bypassing incremental state filter "
+                f"and rebuilding from Bronze input slice. missing={missing_tables}"
+            )
+            return base_df
+        if not self._has_rows(self.spark.table(self.resources_curated_table)):
+            print(
+                "Silver resources table is empty while pipeline_state exists; "
+                "bypassing incremental state filter to rebuild serving tables."
+            )
             return base_df
 
-        existing_table_df = self.spark.table(self.resources_curated_table)
-        existing_has_fingerprint = "record_fingerprint" in existing_table_df.columns
-        existing_df = existing_table_df.select(
-            "resource_uid",
-            F.col("scraped_at").alias("existing_scraped_at"),
-            F.col("last_updated_at").alias("existing_last_updated_at"),
-            F.col("ingested_at").alias("existing_ingested_at"),
-            (
-                F.col("record_fingerprint")
-                if existing_has_fingerprint
-                else F.lit(None).cast("string")
-            ).alias("existing_record_fingerprint"),
-        )
+        self._ensure_pipeline_state_table()
+        resource_state_df = self._load_resource_state_df()
+        has_resource_state = self._has_rows(resource_state_df)
+
+        if not has_resource_state and self._table_exists(self.resources_curated_table):
+            print("pipeline_state has no resource fingerprints; bootstrapping from oer_resources_curated...")
+            self._backfill_resource_state_from_resources_table()
+            resource_state_df = self._load_resource_state_df()
+            has_resource_state = self._has_rows(resource_state_df)
+
+        if not has_resource_state:
+            # First run and no previous state to compare against.
+            return base_df
+
         filtered = (
             base_df.alias("n")
-            .join(existing_df.alias("e"), on="resource_uid", how="left")
+            .join(resource_state_df.alias("s"), on="resource_uid", how="left")
             .filter(
-                F.col("e.resource_uid").isNull()
+                F.col("s.resource_uid").isNull()
                 | (
-                    F.coalesce(F.col("n.scraped_at"), F.col("n.ingested_at"))
-                    > F.coalesce(F.col("e.existing_scraped_at"), F.col("e.existing_ingested_at"))
-                )
-                | (
-                    F.coalesce(F.col("n.last_updated_at"), F.col("n.ingested_at"))
-                    > F.coalesce(F.col("e.existing_last_updated_at"), F.col("e.existing_ingested_at"))
-                )
-                | (
-                    F.coalesce(F.col("n.record_fingerprint"), F.lit(""))
-                    != F.coalesce(F.col("e.existing_record_fingerprint"), F.lit(""))
+                    self._build_resource_state_hash_expr(alias_prefix="n")
+                    != F.coalesce(F.col("s.state_record_fingerprint"), F.lit(""))
                 )
             )
             .select("n.*")
@@ -1580,6 +1787,10 @@ class SilverTransformer:
             "has_assets",
             "matched_subjects",
             "program_ids",
+            "subject_match_confidence",
+            "subject_match_uncertain",
+            "subject_match_status",
+            "subject_match_method",
             "record_fingerprint",
             "data_quality_score",
             "ingested_at",
@@ -1722,6 +1933,48 @@ class SilverTransformer:
                 response.release_conn()
 
     def _extract_pdf_page_texts(self, pdf_bytes: bytes) -> Tuple[Dict[int, str], int]:
+        """Extract PDF text with fallback strategy - same as OERTransformer."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Try pdfplumber first
+        if PDFPLUMBER_AVAILABLE:
+            try:
+                with pdfplumber.open(BytesIO(pdf_bytes)) as pdf:
+                    max_pages = min(len(pdf.pages), self.max_pages_per_pdf)
+                    page_texts: Dict[int, str] = {}
+                    for idx in range(max_pages):
+                        raw = pdf.pages[idx].extract_text() or ""
+                        if not self._is_corrupt_text(raw):
+                            page_texts[idx + 1] = self._normalize_pdf_text(raw)
+                        else:
+                            page_texts[idx + 1] = ""
+                    if any(page_texts.values()):
+                        return page_texts, max_pages
+            except Exception as e:
+                logger.warning(f"pdfplumber failed: {e}")
+        
+        # Try pypdf
+        if PYPDF_NEW_AVAILABLE:
+            try:
+                reader = PyPDFReader(BytesIO(pdf_bytes))
+                max_pages = min(len(reader.pages), self.max_pages_per_pdf)
+                page_texts: Dict[int, str] = {}
+                for idx in range(max_pages):
+                    try:
+                        raw = reader.pages[idx].extract_text(extraction_mode="layout") or ""
+                    except:
+                        raw = reader.pages[idx].extract_text() or ""
+                    if not self._is_corrupt_text(raw):
+                        page_texts[idx + 1] = self._normalize_pdf_text(raw)
+                    else:
+                        page_texts[idx + 1] = ""
+                if any(page_texts.values()):
+                    return page_texts, max_pages
+            except Exception as e:
+                logger.warning(f"pypdf failed: {e}")
+        
+        # Fallback to PyPDF2
         if not PYPDF_AVAILABLE:
             return {}, 0
         try:
@@ -1734,6 +1987,14 @@ class SilverTransformer:
             return page_texts, max_pages
         except Exception:
             return {}, 0
+    
+    def _is_corrupt_text(self, text: str) -> bool:
+        """Check if extracted text contains corrupt glyph IDs."""
+        if not text:
+            return False
+        glyph_pattern = r'/g\d{2}'
+        matches = re.findall(glyph_pattern, text)
+        return len(matches) > len(text) * 0.05 / 5
 
     def _extract_pdf_pages(self, asset_path: str) -> List[Tuple[int, int, str]]:
         pdf_bytes = self._get_pdf_bytes(asset_path)
@@ -1896,6 +2157,122 @@ class SilverTransformer:
             ]
         )
 
+    def _with_chunk_metadata(self, chunks_df: DataFrame) -> DataFrame:
+        text_col = F.coalesce(F.col("chunk_text"), F.lit(""))
+        text_lower = F.lower(text_col)
+        chunk_type_lower = F.lower(F.coalesce(F.col("chunk_type"), F.lit("")))
+
+        code_like = (
+            (F.instr(text_lower, "def ") > 0)
+            | (F.instr(text_lower, "class ") > 0)
+            | (F.instr(text_lower, "import ") > 0)
+            | (F.instr(text_lower, "select ") > 0)
+            | (F.instr(text_lower, " from ") > 0)
+            | (F.instr(text_lower, " where ") > 0)
+            | (F.instr(text_lower, "function ") > 0)
+        )
+        formula_like = (
+            (F.instr(text_lower, "formula") > 0)
+            | (F.instr(text_lower, "equation") > 0)
+            | (F.instr(text_lower, "=") > 0)
+            | (F.instr(text_lower, "\\frac") > 0)
+            | (F.instr(text_lower, "\\sum") > 0)
+        )
+        definition_like = (
+            (F.instr(text_lower, "định nghĩa") > 0)
+            | (F.instr(text_lower, "là gì") > 0)
+            | (F.instr(text_lower, "is defined as") > 0)
+            | (F.instr(text_lower, "refers to") > 0)
+        )
+        example_like = (
+            (F.instr(text_lower, "ví dụ") > 0)
+            | (F.instr(text_lower, "for example") > 0)
+            | (F.instr(text_lower, "example") > 0)
+        )
+        exercise_like = (
+            (F.instr(text_lower, "bài tập") > 0)
+            | (F.instr(text_lower, "exercise") > 0)
+            | (F.instr(text_lower, "practice question") > 0)
+        )
+        review_like = (
+            (F.instr(text_lower, "câu hỏi ôn tập") > 0)
+            | (F.instr(text_lower, "review question") > 0)
+        )
+
+        semantic_chunk_type = (
+            F.when(chunk_type_lower.isin("definition", "explanation", "example", "code_example", "formula", "exercise", "review_question"), chunk_type_lower)
+            .when(chunk_type_lower.isin("doc_summary", "chapter_summary"), F.lit("explanation"))
+            .when(review_like, F.lit("review_question"))
+            .when(exercise_like, F.lit("exercise"))
+            .when(code_like, F.lit("code_example"))
+            .when(formula_like, F.lit("formula"))
+            .when(example_like, F.lit("example"))
+            .when(definition_like, F.lit("definition"))
+            .otherwise(F.lit("explanation"))
+        )
+
+        retrieval_ready = (
+            (F.length(F.trim(text_col)) >= 60)
+            & F.col("semantic_chunk_type").isin(
+                "definition",
+                "explanation",
+                "example",
+                "code_example",
+                "formula",
+                "exercise",
+                "review_question",
+            )
+        )
+        difficulty = (
+            F.when(F.col("semantic_chunk_type").isin("formula", "code_example"), F.lit("hard"))
+            .when(F.coalesce(F.col("token_count"), F.lit(0)) < 120, F.lit("easy"))
+            .when(F.coalesce(F.col("token_count"), F.lit(0)) < 320, F.lit("medium"))
+            .otherwise(F.lit("hard"))
+        )
+        topic = F.coalesce(F.col("section_title"), F.col("chapter_title"), F.lit("General"))
+        topic_vi = F.coalesce(F.col("section_title"), F.col("chapter_title"), F.lit("Tổng quan"))
+
+        return (
+            chunks_df
+            .withColumn("semantic_chunk_type", semantic_chunk_type)
+            .withColumn("retrieval_ready", retrieval_ready)
+            .withColumn("difficulty", difficulty)
+            .withColumn("topic", topic)
+            .withColumn("topic_vi", topic_vi)
+        )
+
+    def _chunks_metadata_needs_backfill(self) -> bool:
+        if not self._table_exists(self.chunks_table):
+            return False
+        chunk_df = self.spark.table(self.chunks_table)
+        required_cols = {"semantic_chunk_type", "retrieval_ready", "difficulty", "topic", "topic_vi"}
+        missing = required_cols.difference(set(chunk_df.columns))
+        if missing:
+            return True
+        if not self._has_rows(chunk_df):
+            return False
+        return not self._has_rows(chunk_df.where(F.col("retrieval_ready").isNotNull()))
+
+    def _backfill_chunks_metadata(self) -> None:
+        if not self._table_exists(self.chunks_table):
+            return
+        chunk_df = self.spark.table(self.chunks_table)
+        if not self._has_rows(chunk_df):
+            return
+        metadata_df = (
+            self._with_chunk_metadata(chunk_df)
+            .select(
+                "chunk_id",
+                "semantic_chunk_type",
+                "retrieval_ready",
+                "difficulty",
+                "topic",
+                "topic_vi",
+            )
+            .dropDuplicates(["chunk_id"])
+        )
+        self._merge_into(metadata_df, self.chunks_table, ["chunk_id"])
+
     def _build_chunks_and_structure_df(self, documents_df: DataFrame) -> Tuple[DataFrame, DataFrame, Any, Dict[str, int]]:
         chunk_schema = self._build_chunk_schema()
         structure_schema = self._build_structure_schema()
@@ -2021,6 +2398,7 @@ class SilverTransformer:
                 diagnostics[key] = diagnostics.get(key, 0) + int(value)
 
         chunks_df = self.spark.createDataFrame(chunk_rdd, schema=chunk_schema).dropDuplicates(["chunk_id"])
+        chunks_df = self._with_chunk_metadata(chunks_df)
         structures_df = self.spark.createDataFrame(structure_rdd, schema=structure_schema).dropDuplicates(["structure_id"])
         return chunks_df, structures_df, tagged_rdd, diagnostics
 
@@ -2116,6 +2494,7 @@ class SilverTransformer:
             if chunk_records
             else self.spark.createDataFrame([], schema=chunk_schema)
         )
+        chunks_df = self._with_chunk_metadata(chunks_df)
         structures_df = (
             self.spark.createDataFrame(structure_records, schema=structure_schema).dropDuplicates(["structure_id"])
             if structure_records
@@ -2523,6 +2902,10 @@ class SilverTransformer:
         base_df.unpersist(False)
         if incremental_count == 0:
             print("No new or updated resources after incremental filter; exiting.")
+            backfill_on_idle = os.getenv("SILVER_BACKFILL_CHUNK_METADATA_ON_IDLE", "1").lower() in {"1", "true", "yes"}
+            if backfill_on_idle and self._chunks_metadata_needs_backfill():
+                print("Applying one-time chunk metadata backfill on existing Silver chunks...")
+                self._backfill_chunks_metadata()
             incremental_base_df.unpersist(False)
             return
 
@@ -2638,6 +3021,7 @@ class SilverTransformer:
             self._merge_into(chunks_df, self.chunks_table, ["chunk_id"], partition_columns=["chunk_tier", "days(updated_at)"])
         if has_structure_rows:
             self._merge_into(structure_df, self.document_structure_table, ["structure_id"], partition_columns=["source_system", "days(updated_at)"])
+        self._update_resource_pipeline_state(incremental_base_df)
 
         if chunk_tagged_rdd is not None:
             chunk_tagged_rdd.unpersist(False)

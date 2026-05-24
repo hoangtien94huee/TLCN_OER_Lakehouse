@@ -39,6 +39,22 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # Local LLM runtime for PageIndex reasoning
+  ollama:
+    image: ollama/ollama:latest
+    container_name: oer-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
   # Airflow Scraper — chỉ cần khi chạy ETL pipeline
   # Khởi động: docker compose --profile etl up -d
   oer-scraper:
@@ -140,12 +156,57 @@ services:
       # Embedding pipeline configuration
       - EMBEDDING_INCREMENTAL=1
       # Chatbot API configuration
-      - LLM_PROVIDER=groq
-      - GROQ_API_KEY=${GROQ_API_KEY}
-      - GROQ_MODEL=llama-3.1-8b-instant
-      - GEMINI_API_KEY=${GOOGLE_API_KEY}
-      - GEMINI_MODEL=gemini-2.0-flash
-      - EMBEDDING_MODEL=intfloat/multilingual-e5-base
+      # LLM quality tiers (choose one backend):
+      #   groq     → llama-3.3-70b-versatile (best Vietnamese, free tier)
+      #   gemini   → gemini-2.0-flash (very good, needs GOOGLE_API_KEY)
+      #   ollama   → qwen2.5:7b-instruct (offline, needs GPU, pull: ollama pull qwen2.5:7b-instruct)
+      - ENABLE_CHATBOT_API=1
+      - CHATBOT_API_HOST=0.0.0.0
+      - CHATBOT_API_PORT=8088
+      - LOCAL_LLM_BACKEND=${LOCAL_LLM_BACKEND:-groq}
+      - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-}
+      - LOCAL_LLM_API_URL=${LOCAL_LLM_API_URL:-}
+      - LOCAL_LLM_HEALTH_URL=${LOCAL_LLM_HEALTH_URL:-}
+      - LOCAL_LLM_PROBE_REQUIRED=${LOCAL_LLM_PROBE_REQUIRED:-0}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
+      - LOCAL_LLM_API_KEY=${LOCAL_LLM_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - LOCAL_LLM_GROQ_BASE_URL=${LOCAL_LLM_GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      - LOCAL_LLM_GROQ_MODEL=${LOCAL_LLM_GROQ_MODEL:-llama-3.3-70b-versatile}
+      - LOCAL_LLM_GEMINI_MODEL=${LOCAL_LLM_GEMINI_MODEL:-gemini-2.0-flash}
+      - LOCAL_LLM_GEMINI_BASE_URL=${LOCAL_LLM_GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      - LOCAL_LLM_TIMEOUT=${LOCAL_LLM_TIMEOUT:-120}
+      - LOCAL_LLM_CONNECT_TIMEOUT=${LOCAL_LLM_CONNECT_TIMEOUT:-1}
+      - LOCAL_LLM_PROBE_TIMEOUT=${LOCAL_LLM_PROBE_TIMEOUT:-1}
+      - LOCAL_LLM_FALLBACK_BASE_URLS=${LOCAL_LLM_FALLBACK_BASE_URLS:-http://ollama:11434,http://host.docker.internal:11434,http://172.17.0.1:11434,http://localhost:11434}
+      - PAGEINDEX_ASK_TIMEOUT=${PAGEINDEX_ASK_TIMEOUT:-75}
+      - PAGEINDEX_TIER1_TIMEOUT=${PAGEINDEX_TIER1_TIMEOUT:-6}
+      - PAGEINDEX_TIER2_MIN_BUDGET=${PAGEINDEX_TIER2_MIN_BUDGET:-10}
+      - PAGEINDEX_LLM_JSON_TIMEOUT=${PAGEINDEX_LLM_JSON_TIMEOUT:-20}
+      - PAGEINDEX_LLM_ANSWER_TIMEOUT=${PAGEINDEX_LLM_ANSWER_TIMEOUT:-90}
+      - PAGEINDEX_LLM_CONTEXT_MAX_CHARS=${PAGEINDEX_LLM_CONTEXT_MAX_CHARS:-7000}
+      - PAGEINDEX_DISABLE_FALLBACK=${PAGEINDEX_DISABLE_FALLBACK:-0}
+      - PAGEINDEX_TIER1_BACKEND=${PAGEINDEX_TIER1_BACKEND:-elasticsearch}
+      - PAGEINDEX_TIER1_ES_ENABLED=${PAGEINDEX_TIER1_ES_ENABLED:-1}
+      - PAGEINDEX_TIER1_ES_HOST=${PAGEINDEX_TIER1_ES_HOST:-http://elasticsearch:9200}
+      - PAGEINDEX_TIER1_ES_INDEX=${PAGEINDEX_TIER1_ES_INDEX:-oer_resources_tier1}
+      - PAGEINDEX_TIER1_ES_USERNAME=${PAGEINDEX_TIER1_ES_USERNAME:-}
+      - PAGEINDEX_TIER1_ES_PASSWORD=${PAGEINDEX_TIER1_ES_PASSWORD:-}
+      - PAGEINDEX_TIER1_ES_TIMEOUT=${PAGEINDEX_TIER1_ES_TIMEOUT:-4}
+      - PAGEINDEX_TIER1_ES_CANDIDATE_POOL=${PAGEINDEX_TIER1_ES_CANDIDATE_POOL:-36}
+      - PAGEINDEX_TIER1_ES_TOPK_BUFFER=${PAGEINDEX_TIER1_ES_TOPK_BUFFER:-4}
+      - PAGEINDEX_TIER1_BM25_BONUS_WEIGHT=${PAGEINDEX_TIER1_BM25_BONUS_WEIGHT:-0.35}
+      - PAGEINDEX_TIER1_BM25_BONUS_CAP=${PAGEINDEX_TIER1_BM25_BONUS_CAP:-8.0}
+      - PAGEINDEX_USE_QUERY_LANGUAGE_AS_DOC_FILTER=${PAGEINDEX_USE_QUERY_LANGUAGE_AS_DOC_FILTER:-0}
+      - PAGEINDEX_CACHE_ENABLED=${PAGEINDEX_CACHE_ENABLED:-1}
+      - PAGEINDEX_CACHE_MAX_ITEMS=${PAGEINDEX_CACHE_MAX_ITEMS:-256}
+      - PAGEINDEX_INITIAL_PAGE_WINDOW=${PAGEINDEX_INITIAL_PAGE_WINDOW:-4}
+      - PAGEINDEX_PAGE_EXPAND_STEP=${PAGEINDEX_PAGE_EXPAND_STEP:-2}
+      - PAGEINDEX_PAGE_EXPAND_ACCELERATION=${PAGEINDEX_PAGE_EXPAND_ACCELERATION:-1}
+      - PAGEINDEX_PAGE_MAX_WINDOW=${PAGEINDEX_PAGE_MAX_WINDOW:-12}
+      - PAGEINDEX_MAX_ROUNDS=${PAGEINDEX_MAX_ROUNDS:-3}
+      - PAGEINDEX_MAX_DOCUMENT_CANDIDATES=${PAGEINDEX_MAX_DOCUMENT_CANDIDATES:-3}
+      - PAGEINDEX_MAX_PAGES_PER_CALL=${PAGEINDEX_MAX_PAGES_PER_CALL:-6}
       # Chatbot-optimized: use silver chunks, avoid re-parsing PDFs
       - ELASTICSEARCH_INDEX_PDF_CONTENT=0
       - ELASTICSEARCH_MAX_PDF_PER_RESOURCE=1
@@ -337,6 +398,56 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # --- Moodle LMS (Isolated for this project) ---
+  # Start with: docker compose --profile lms up -d moodle-db moodle
+  moodle-db:
+    profiles:
+      - lms
+    image: mariadb:10.11
+    container_name: oer-moodle-db
+    environment:
+      - MARIADB_ROOT_PASSWORD=secret
+      - MARIADB_DATABASE=bitnami_moodle
+      - MARIADB_USER=bn_moodle
+      - MARIADB_PASSWORD=secret
+      - MARIADB_CHARACTER_SET_SERVER=utf8mb4
+      - MARIADB_COLLATION_SERVER=utf8mb4_unicode_ci
+    volumes:
+      - moodle_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-psecret"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  moodle:
+    profiles:
+      - lms
+    image: bitnamilegacy/moodle:latest
+    container_name: oer-moodle
+    depends_on:
+      moodle-db:
+        condition: service_healthy
+    ports:
+      - "18085:8080"
+    environment:
+      - MOODLE_DATABASE_TYPE=mariadb
+      - MOODLE_DATABASE_HOST=moodle-db
+      - MOODLE_DATABASE_PORT_NUMBER=3306
+      - MOODLE_DATABASE_USER=bn_moodle
+      - MOODLE_DATABASE_PASSWORD=secret
+      - MOODLE_DATABASE_NAME=bitnami_moodle
+      - MOODLE_DATABASE_MIN_VERSION=10.6
+      - MOODLE_USERNAME=admin
+      - MOODLE_PASSWORD=Admin@12345
+      - MOODLE_EMAIL=admin@example.com
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - moodle_data:/bitnami
+    restart: unless-stopped
+
   # --- DSpace Services (Official Setup) ---
 
   # DSpace Solr
@@ -447,3 +558,6 @@ volumes:
   dspace_solr_data:
   saf_import:
   airflow_logs:
+  ollama_data:
+  moodle_data:
+  moodle_db_data:

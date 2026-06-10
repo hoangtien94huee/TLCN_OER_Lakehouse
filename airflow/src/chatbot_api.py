@@ -38,16 +38,22 @@ app = FastAPI(title="OER Chatbot API (PageIndex)")
 allowed_origins_env = os.getenv("CHATBOT_API_ALLOWED_ORIGINS", "*").strip()
 api_key_required = os.getenv("CHATBOT_API_KEY", "").strip()
 allowed_origins: List[str]
+allow_origin_regex: Optional[str] = None
 if allowed_origins_env == "*":
-    allowed_origins = ["*"]
+    # Frontend sends withCredentials=true, so wildcard ACAO is invalid.
+    # Use regex mode to reflect request Origin instead of returning "*".
+    allowed_origins = []
+    allow_origin_regex = r"^https?://.+$"
 else:
     allowed_origins = [origin.strip() for origin in allowed_origins_env.split(",") if origin.strip()]
     if not allowed_origins:
-        allowed_origins = ["*"]
+        allowed_origins = []
+        allow_origin_regex = r"^https?://.+$"
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allowed_origins,
-    allow_credentials=allowed_origins != ["*"],
+    allow_origin_regex=allow_origin_regex,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )

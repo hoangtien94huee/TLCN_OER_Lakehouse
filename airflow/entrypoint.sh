@@ -33,13 +33,20 @@ airflow users create \
 echo "Starting Airflow scheduler..."
 airflow scheduler &
 
-# Start PageIndex chatbot API in background
+# Start PageIndex chatbot API after Airflow/Spark warm-up (early start can hang uvicorn).
 ENABLE_CHATBOT_API=${ENABLE_CHATBOT_API:-1}
 if [ "$ENABLE_CHATBOT_API" = "1" ]; then
     CHATBOT_API_HOST=${CHATBOT_API_HOST:-0.0.0.0}
     CHATBOT_API_PORT=${CHATBOT_API_PORT:-8088}
-    echo "Starting PageIndex chatbot API on ${CHATBOT_API_HOST}:${CHATBOT_API_PORT}..."
-    python3 -m uvicorn chatbot_api:app --app-dir /opt/airflow/src --host "${CHATBOT_API_HOST}" --port "${CHATBOT_API_PORT}" &
+    (
+        sleep 20
+        echo "Starting PageIndex chatbot API on ${CHATBOT_API_HOST}:${CHATBOT_API_PORT}..."
+        exec python3 -m uvicorn chatbot_api:app \
+            --app-dir /opt/airflow/src \
+            --host "${CHATBOT_API_HOST}" \
+            --port "${CHATBOT_API_PORT}" \
+            >> /opt/airflow/logs/chatbot-api.log 2>&1
+    ) &
 else
     echo "ENABLE_CHATBOT_API=0 -> skipping chatbot API startup"
 fi

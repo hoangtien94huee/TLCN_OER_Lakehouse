@@ -120,6 +120,10 @@ class GoldAnalyticsBuilder:
         session.sparkContext.setLogLevel("WARN")
         return session
 
+    @staticmethod
+    def _has_rows(df: DataFrame) -> bool:
+        return len(df.take(1)) > 0
+
     def run(self) -> None:
         """Build all Gold layer tables."""
        
@@ -188,12 +192,15 @@ class GoldAnalyticsBuilder:
     def _load_table(self, table_name: str, description: str) -> Optional[DataFrame]:
         """Load a table from Silver catalog."""
         try:
+            if not self.spark.catalog.tableExists(table_name):
+                print(f"  {description}: Table not found ({table_name})")
+                return None
+
             df = self.spark.table(table_name)
-            if df.rdd.isEmpty():
+            if not self._has_rows(df):
                 print(f"  {description}: Table empty")
                 return None
-            count = df.count()
-            print(f" {description}: Loaded {count:,} records")
+            print(f" {description}: Loaded successfully")
             
             # Verify data distribution by source_system (for OER table)
             if "oer_resources" in table_name:
@@ -452,7 +459,7 @@ class GoldAnalyticsBuilder:
             F.col("ingested_at"),
         )
 
-        if documents_df is not None and not documents_df.rdd.isEmpty():
+        if documents_df is not None and self._has_rows(documents_df):
             doc_stats = (
                 documents_df.groupBy("resource_uid")
                 .agg(
@@ -469,7 +476,7 @@ class GoldAnalyticsBuilder:
         else:
             dim = dim.withColumn("document_count", F.lit(0)).withColumn("documents_updated_at", F.lit(None).cast("timestamp"))
 
-        if chunks_df is not None and not chunks_df.rdd.isEmpty():
+        if chunks_df is not None and self._has_rows(chunks_df):
             chunk_stats = (
                 chunks_df.groupBy("resource_uid")
                 .agg(
@@ -667,7 +674,7 @@ class GoldAnalyticsBuilder:
             "left"
         )
 
-        if documents_df is not None and not documents_df.rdd.isEmpty():
+        if documents_df is not None and self._has_rows(documents_df):
             document_counts = (
                 documents_df.groupBy("resource_uid")
                 .agg(F.countDistinct("asset_uid").alias("document_count"))
@@ -681,7 +688,7 @@ class GoldAnalyticsBuilder:
         else:
             fact = fact.withColumn("document_count", F.lit(0))
 
-        if chunks_df is not None and not chunks_df.rdd.isEmpty():
+        if chunks_df is not None and self._has_rows(chunks_df):
             chunk_counts = (
                 chunks_df.groupBy("resource_uid")
                 .agg(F.countDistinct("chunk_id").alias("chunk_count"))
@@ -775,7 +782,7 @@ class GoldAnalyticsBuilder:
 
     def _write_table(self, df: DataFrame, table_name: str, description: str) -> None:
         """Write DataFrame to Gold Iceberg table - full refresh strategy with cleanup."""
-        if df is None or df.rdd.isEmpty():
+        if df is None or not self._has_rows(df):
             print(f" {description}: No data to write")
             return
 

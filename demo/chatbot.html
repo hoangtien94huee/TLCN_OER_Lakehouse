@@ -332,7 +332,7 @@
 
         <div class="api-config">
             <span>API:</span>
-            <input type="text" id="apiUrl" value="http://localhost:18088/api" placeholder="API URL">
+            <input type="text" id="apiUrl" value="" placeholder="API URL">
             <div class="api-status" id="apiStatus" title="Checking..."></div>
         </div>
 
@@ -369,9 +369,13 @@
 
         let isFirstMessage = true;
 
+        const defaultApiUrl = `${window.location.protocol}//${window.location.hostname}:18088/api`;
+        apiUrlInput.value = localStorage.getItem('chatbotApiUrl') || defaultApiUrl;
+
         // Check API health on load and when URL changes
         async function checkApiHealth() {
             const apiUrl = apiUrlInput.value.trim();
+            localStorage.setItem('chatbotApiUrl', apiUrl);
             try {
                 const response = await fetch(`${apiUrl}/health`, {
                     method: 'GET',

@@ -46,6 +46,14 @@ class SAFExporter:
     def init_spark(self):
         """Initialize Spark session for reading Iceberg tables."""
         if self.spark is None:
+            java_home = os.getenv("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+            os.environ.setdefault("JAVA_HOME", java_home)
+            os.environ["PATH"] = f"{java_home}/bin:{os.environ.get('PATH', '')}"
+            os.environ.pop("JAVA_TOOL_OPTIONS", None)
+            os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
+            os.environ.setdefault("SPARK_DRIVER_HOST", "oer-airflow-scraper")
+            os.environ.setdefault("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0")
+            
             jars_dir = os.getenv("SPARK_JARS_DIR", "/opt/airflow/jars")
             
             # Iceberg 1.9.2 JAR files
@@ -55,12 +63,16 @@ class SAFExporter:
                 f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
             ]
             
+            local_jars = ",".join(jar_files)
+            logger.info(f"[Spark] Using local JARs: {local_jars}")
+            
             self.spark = (
                 SparkSession.builder
                 .appName("SAF_Exporter_Iceberg")
                 .master("local[*]")
-                .config("spark.jars", ",".join(jar_files))
-                .config("spark.driver.extraClassPath", ",".join(jar_files))
+                .config("spark.jars", local_jars)
+                .config("spark.driver.extraClassPath", local_jars)
+                .config("spark.executor.extraClassPath", local_jars)
                 # Iceberg Catalog config
                 .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
                 .config("spark.sql.catalog.gold", "org.apache.iceberg.spark.SparkCatalog")
@@ -79,6 +91,9 @@ class SAFExporter:
                 # Memory settings
                 .config("spark.driver.memory", "2g")
                 .config("spark.executor.memory", "2g")
+                .config("spark.driver.maxResultSize", "1g")
+                .config("spark.driver.host", os.getenv("SPARK_DRIVER_HOST", "oer-airflow-scraper"))
+                .config("spark.driver.bindAddress", os.getenv("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0"))
                 .getOrCreate()
             )
             logger.info(f"Spark {self.spark.version} initialized with Iceberg 1.9.2")

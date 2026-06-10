@@ -1,0 +1,123 @@
+=== GLOBAL METRICS ===
+metric,value,rating
+Hit Rate (Evidence),0.8534,Rất tốt
+Tier-1 Recall@K,0.9367,Rất tốt
+Faithfulness (PageIndex),0.9114,Rất tốt
+Faithfulness (Groq LLM judge),,
+OOS Detection Rate,1.0000,Rất tốt
+Avg Latency (ms),2736.2000,—
+P50 Latency (ms),2353.4000,—
+P95 Latency (ms),8518.1000,—
+Error Rate,0.0200,—
+Total Questions,100,
+
+=== BY QUESTION TYPE ===
+question_type,count,hit_rate / oos_detection,tier1_recall_at_k,grounded_rate,faithfulness,avg_latency_ms
+definition,20,0.7036,0.7500,0.7000,—,4319.5
+find_material,20,0.8969,1.0000,1.0000,—,3683.2
+comparison,20,0.8757,1.0000,0.9500,—,2861.9
+multi_step,19,0.9418,1.0000,1.0000,—,2534.1
+out_of_scope,19,1.0000,N/A,N/A,—,142.3
+
+=== PER QUESTION SCORES ===
+id,question_type,difficulty,hit,tier1_recall_at_k,grounded_answer_rate,faithfulness,latency_ms,confidence,has_error
+Q001,definition,easy,1.0000,1.0000,1.0000,—,4443.8,medium,False
+Q002,definition,medium,0.5000,1.0000,1.0000,—,3429.5,low,False
+Q003,definition,easy,0.8235,1.0000,1.0000,—,3028.7,medium,False
+Q004,definition,easy,0.2222,0.0000,0.0000,—,1738.1,low,False
+Q005,definition,medium,0.6429,1.0000,1.0000,—,15743.7,medium,False
+Q006,definition,easy,0.1515,0.0000,0.0000,—,3193.0,low,False
+Q007,definition,easy,1.0000,1.0000,1.0000,—,2362.7,medium,False
+Q008,definition,medium,0.2941,1.0000,1.0000,—,3032.7,medium,False
+Q009,definition,easy,1.0000,1.0000,1.0000,—,3141.0,medium,False
+Q010,definition,easy,0.4800,0.0000,0.0000,—,953.6,low,False
+Q011,definition,medium,1.0000,1.0000,1.0000,—,3540.6,medium,False
+Q012,definition,easy,0.6154,1.0000,1.0000,—,4730.8,medium,False
+Q013,definition,easy,1.0000,1.0000,1.0000,—,3416.7,medium,False
+Q014,definition,easy,0.3000,1.0000,1.0000,—,11885.7,low,False
+Q015,definition,easy,1.0000,1.0000,1.0000,—,4127.8,medium,False
+Q016,definition,easy,1.0000,1.0000,1.0000,—,8984.6,medium,False
+Q017,definition,medium,0.1667,0.0000,0.0000,—,2611.3,low,False
+Q018,definition,easy,1.0000,1.0000,1.0000,—,2327.6,medium,False
+Q019,definition,medium,1.0000,0.0000,0.0000,—,1579.1,low,False
+Q020,definition,easy,0.8750,1.0000,0.0000,—,2119.9,low,False
+Q021,find_material,medium,1.0000,1.0000,1.0000,—,1841.2,medium,False
+Q022,find_material,medium,1.0000,1.0000,1.0000,—,1675.1,medium,False
+Q023,find_material,medium,1.0000,1.0000,1.0000,—,4870.4,medium,False
+Q024,find_material,medium,0.5455,1.0000,1.0000,—,2647.5,medium,False
+Q025,find_material,medium,0.8571,1.0000,1.0000,—,9792.0,medium,False
+Q026,find_material,medium,0.9032,1.0000,1.0000,—,8518.1,medium,False
+Q027,find_material,medium,1.0000,1.0000,1.0000,—,2958.8,medium,False
+Q028,find_material,medium,0.7500,1.0000,1.0000,—,1735.4,medium,False
+Q029,find_material,medium,0.7500,1.0000,1.0000,—,2739.7,medium,False
+Q030,find_material,medium,1.0000,1.0000,1.0000,—,1836.1,medium,False
+Q031,find_material,medium,1.0000,1.0000,1.0000,—,2841.9,medium,False
+Q032,find_material,medium,1.0000,1.0000,1.0000,—,2854.5,medium,False
+Q033,find_material,medium,1.0000,1.0000,1.0000,—,1733.5,medium,False
+Q034,find_material,medium,1.0000,1.0000,1.0000,—,1881.1,medium,False
+Q035,find_material,medium,0.8750,1.0000,1.0000,—,6666.2,medium,False
+Q036,find_material,medium,1.0000,1.0000,1.0000,—,2379.7,medium,False
+Q037,find_material,medium,0.7568,1.0000,1.0000,—,6283.9,medium,False
+Q038,find_material,medium,1.0000,1.0000,1.0000,—,3009.5,medium,False
+Q039,find_material,medium,1.0000,1.0000,1.0000,—,2005.1,medium,False
+Q040,find_material,medium,0.5000,1.0000,1.0000,—,5394.9,medium,False
+Q041,comparison,medium,1.0000,1.0000,1.0000,—,1600.8,medium,False
+Q042,comparison,medium,1.0000,1.0000,1.0000,—,2364.4,medium,False
+Q043,comparison,medium,1.0000,1.0000,1.0000,—,1578.8,medium,False
+Q044,comparison,medium,1.0000,1.0000,1.0000,—,3591.4,medium,False
+Q045,comparison,hard,0.5385,1.0000,1.0000,—,2377.5,medium,False
+Q046,comparison,medium,0.6000,1.0000,1.0000,—,2904.9,medium,False
+Q047,comparison,medium,1.0000,1.0000,1.0000,—,2485.3,medium,False
+Q048,comparison,medium,0.5556,1.0000,1.0000,—,4220.5,medium,False
+Q049,comparison,medium,1.0000,1.0000,1.0000,—,3326.4,medium,False
+Q050,comparison,medium,0.7667,1.0000,1.0000,—,5780.4,medium,False
+Q051,comparison,hard,0.6486,1.0000,1.0000,—,4198.6,medium,False
+Q052,comparison,easy,0.9091,1.0000,1.0000,—,2350.8,medium,False
+Q053,comparison,medium,0.8966,1.0000,1.0000,—,4043.0,medium,False
+Q054,comparison,medium,0.8889,1.0000,0.0000,—,924.0,low,False
+Q055,comparison,medium,1.0000,1.0000,1.0000,—,4906.2,medium,False
+Q056,comparison,medium,1.0000,1.0000,1.0000,—,1179.2,medium,False
+Q057,comparison,medium,0.7105,1.0000,1.0000,—,3342.9,medium,False
+Q058,comparison,medium,1.0000,1.0000,1.0000,—,2568.5,medium,False
+Q059,comparison,medium,1.0000,1.0000,1.0000,—,1747.0,medium,False
+Q060,comparison,medium,1.0000,1.0000,1.0000,—,1748.3,medium,False
+Q061,multi_step,hard,1.0000,1.0000,1.0000,—,2159.3,medium,False
+Q062,multi_step,hard,1.0000,1.0000,1.0000,—,3111.8,medium,False
+Q063,multi_step,medium,0.9375,1.0000,1.0000,—,2991.7,medium,False
+Q064,multi_step,medium,1.0000,1.0000,1.0000,—,1531.8,medium,False
+Q065,multi_step,hard,0.0000,0.0000,0.0000,—,-1,error,True
+Q066,multi_step,hard,0.6000,1.0000,1.0000,—,1691.8,medium,False
+Q067,multi_step,medium,0.8000,1.0000,1.0000,—,3655.9,medium,False
+Q068,multi_step,hard,1.0000,1.0000,1.0000,—,4265.7,medium,False
+Q069,multi_step,medium,1.0000,1.0000,1.0000,—,2081.7,medium,False
+Q070,multi_step,hard,1.0000,1.0000,1.0000,—,1567.3,medium,False
+Q071,multi_step,hard,1.0000,1.0000,1.0000,—,2353.4,medium,False
+Q072,multi_step,medium,1.0000,1.0000,1.0000,—,2148.0,medium,False
+Q073,multi_step,hard,1.0000,1.0000,1.0000,—,1892.0,medium,False
+Q074,multi_step,hard,1.0000,1.0000,1.0000,—,2117.3,medium,False
+Q075,multi_step,hard,0.7500,1.0000,1.0000,—,2267.4,medium,False
+Q076,multi_step,medium,1.0000,1.0000,1.0000,—,3852.4,medium,False
+Q077,multi_step,hard,1.0000,1.0000,1.0000,—,4180.1,medium,False
+Q078,multi_step,medium,0.8065,1.0000,1.0000,—,2304.1,medium,False
+Q079,multi_step,hard,1.0000,1.0000,1.0000,—,1757.8,medium,False
+Q080,multi_step,hard,1.0000,1.0000,1.0000,—,2218.0,medium,False
+Q081,out_of_scope,easy,0.0000,0.0000,0.0000,—,7.9,low,False
+Q082,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.1,low,False
+Q083,out_of_scope,easy,0.0000,0.0000,0.0000,—,2601.0,low,False
+Q084,out_of_scope,easy,0.0000,0.0000,0.0000,—,-1,error,True
+Q085,out_of_scope,easy,0.0000,0.0000,0.0000,—,4.5,low,False
+Q086,out_of_scope,easy,0.0000,0.0000,0.0000,—,4.8,low,False
+Q087,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.4,low,False
+Q088,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.2,low,False
+Q089,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.0,low,False
+Q090,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.2,low,False
+Q091,out_of_scope,easy,0.0000,0.0000,0.0000,—,7.9,low,False
+Q092,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.8,low,False
+Q093,out_of_scope,easy,0.0000,0.0000,0.0000,—,6.1,low,False
+Q094,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.6,low,False
+Q095,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.8,low,False
+Q096,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.8,low,False
+Q097,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.5,low,False
+Q098,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.6,low,False
+Q099,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.3,low,False
+Q100,out_of_scope,easy,0.0000,0.0000,0.0000,—,5.4,low,False

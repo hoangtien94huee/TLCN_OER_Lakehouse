@@ -860,6 +860,52 @@ def _message_insufficient_scope(answer_language: str, course_name: str = "") -> 
     )
 
 
+def _is_obviously_out_of_scope(question: str) -> bool:
+    """
+    Fast keyword check for questions that are clearly non-academic.
+    Returns True → skip PageIndex entirely, saves 5-9s latency.
+    Intentionally conservative: only blocks obvious lifestyle/entertainment/personal questions.
+    """
+    import re
+    q = question.lower()
+    # Non-academic topic signals
+    _OOS_PATTERNS = [
+        # Food / cooking / calories
+        r"\b(recipe|nấu|công thức nấu|món ăn|calo trong)\b",
+        r"(calories?\s+(are\s+)?in|how\s+many\s+calories|big\s+mac|mcdonald)",
+        # Sports scores / entertainment news
+        r"\b(score of|kết quả trận|vô địch .{0,20}năm|fifa|world cup|v-league|aff cup)\b",
+        r"\b(best.*series|netflix|phim.*hay|gợi ý phim)\b",
+        # Personal lifestyle / shopping
+        r"\b(lose weight|tăng cân|giảm cân nhanh|bằng lái xe|visa du lịch|đặt vé)\b",
+        r"\b(best.*laptop.*buy|laptop gaming.*giá|stock price of|giá vàng hôm nay)\b",
+        r"\b(birthday poem|thiệp chúc mừng|lyrics to|lời bài hát)\b",
+        # Current events / personal advice
+        r"\b(current president|thủ tướng.*hiện tại|thủ tướng.*là ai)\b",
+        r"\b(tiktok account|tạo tài khoản tiktok)\b",
+        r"\b(symptoms of.*cold|triệu chứng.*cảm|điều trị tại nhà)\b",
+        r"\b(invest.*crypto|bitcoin|cryptocurrency|ethereum.*năm nay)\b",
+        r"\b(tourist attractions|địa điểm du lịch)\b",
+        r"\b(dog.*sit|train.*dog|chăm sóc cây|mai vàng)\b",
+        # Travel / personal documents
+        r"\b(visa\s+requirements?|travel\s+visa|tourist\s+visa|du\s+lịch\s+\S+\s+visa)",
+        r"(driver.s\s+licen|driving\s+licen|\bbằng\s+lái\s+xe\b)",
+        # Creative writing / entertainment
+        r"\b(write\s+(me\s+)?(a\s+)?(lyrics?|poem|song|story|joke)|lyrics?\s+for)",
+        r"\b(book\s+(a\s+)?flight|flight\s+to\s+\w+\s+(from|booking)|đặt\s+vé\s+máy\s+bay)\b",
+        # Commodity / real-time prices
+        r"\b(price\s+of\s+(gold|silver|oil)\s+(today|now|hôm nay))\b",
+        # Personal fitness / bodybuilding
+        r"\b(build\s+muscle|muscle\s+(gain|building)|diet\s+(plan\s+)?to\s+(lose|build|gain))\b",
+        # Current leaders (English)
+        r"\b(current\s+(prime\s+minister|president|chancellor)\s+of\b)",
+    ]
+    for pattern in _OOS_PATTERNS:
+        if re.search(pattern, q):
+            return True
+    return False
+
+
 def _message_no_document(answer_language: str, course_name: str = "") -> str:
     cn = course_name.strip()
     if answer_language == "en":
@@ -4138,7 +4184,13 @@ class PageIndexEngine:
         is_listing = query_intent == "listing"
 
         base_rules_en = (
-            "You are a PageIndex learning assistant for open educational resources.\n"
+            "You are a PageIndex learning assistant for open educational resources (OER).\n"
+            "You ONLY answer questions about academic subjects: mathematics, science, engineering, "
+            "computer science, economics, history, literature, and other university-level disciplines.\n"
+            "SCOPE RULE: If the question is about cooking, sports scores, entertainment, personal health "
+            "advice, news, weather, shopping, travel tips, or ANY non-academic topic, you MUST respond "
+            "ONLY with: 'This question is outside the scope of the OER academic library. "
+            "I can only help with academic and educational topics.'\n"
             "You must answer strictly from the provided VALID_CONTEXT extracted from document pages.\n"
             "Answer in English.\n"
             "If context is in another language, translate accurately without adding external facts.\n"
@@ -4147,7 +4199,13 @@ class PageIndexEngine:
             "Be concise. Do NOT repeat yourself. Each idea should appear ONCE.\n"
         )
         base_rules_vi = (
-            "Bạn là trợ lý học tập PageIndex cho học liệu mở.\n"
+            "Bạn là trợ lý học tập PageIndex cho học liệu mở (OER).\n"
+            "Bạn CHỈ trả lời các câu hỏi về học thuật: toán học, khoa học, kỹ thuật, công nghệ thông tin, "
+            "kinh tế, lịch sử, văn học và các môn học đại học khác.\n"
+            "QUY TẮC PHẠM VI: Nếu câu hỏi về nấu ăn, kết quả thể thao, giải trí, sức khỏe cá nhân, "
+            "tin tức, thời tiết, mua sắm, du lịch hoặc BẤT KỲ chủ đề phi học thuật nào, "
+            "bạn PHẢI trả lời DUY NHẤT: 'Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. "
+            "Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục.'\n"
             "Chỉ được trả lời dựa trên VALID_CONTEXT đã lấy trực tiếp từ các trang tài liệu.\n"
             "Trả lời bằng tiếng Việt.\n"
             "Nếu context gốc là tiếng Anh thì DỊCH NGHĨA chính xác sang tiếng Việt, diễn đạt tự nhiên như giáo trình Việt.\n"
@@ -4473,6 +4531,38 @@ class PageIndexEngine:
                     "tier1_recall_at_k": 0.0,
                     "tier1_recall_at_k_type": "proxy",
                     "tier1_k": int(self.max_document_candidates),
+                    "evidence_hit_rate": 0.0,
+                    "grounded_answer_rate": 0.0,
+                    "pages_loaded_total": 0,
+                    "pages_hit_total": 0,
+                },
+            }
+
+        # Fast OOS pre-filter: skip PageIndex tree traversal for obviously non-academic questions.
+        # Saves ~5-9s latency by returning immediately before get_document().
+        if _is_obviously_out_of_scope(question):
+            oos_answer = (
+                "This question is outside the scope of the OER academic library. "
+                "I can only help with academic and educational topics."
+                if answer_language == "en" else
+                "Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. "
+                "Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục."
+            )
+            return {
+                "question": question,
+                "answer": oos_answer,
+                "contexts": [],
+                "confidence": "low",
+                "search_mode": "pageindex",
+                "pageindex_trace": trace,
+                "query_bundle": {
+                    "intent": "off_topic",
+                    "language": answer_language,
+                },
+                "metrics": {
+                    "tier1_recall_at_k": 0.0,
+                    "tier1_recall_at_k_type": "proxy",
+                    "tier1_k": 0,
                     "evidence_hit_rate": 0.0,
                     "grounded_answer_rate": 0.0,
                     "pages_loaded_total": 0,

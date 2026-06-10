@@ -59,3 +59,7 @@ docs/_build/
 # Java/Scala artifacts
 **/*.jar
 lakehouse/data/iceberg-jars/
+
+saf_import
+
+saf_export.zip

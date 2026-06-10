@@ -110,6 +110,7 @@ def validate_silver_layer_availability(**context):
             'execution_date': execution_date,
             'tables_checked': len(required_tables),
             'validation_details': validation_results,
+            'available_source_names': list(required_tables.keys()),
             'ready_for_gold_processing': all_available
         }
 

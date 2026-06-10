@@ -332,6 +332,50 @@ define([], function() {
         return url;
     }
 
+    function trimTrailingSlash(url) {
+        return String(url || '').replace(/\/+$/, '');
+    }
+
+    function buildApiCandidates(apiUrl) {
+        var raw = String(apiUrl || '').trim();
+        var candidates = [];
+        var seen = {};
+
+        function addCandidate(url) {
+            var normalized = trimTrailingSlash(url);
+            if (!normalized || seen[normalized]) {
+                return;
+            }
+            seen[normalized] = true;
+            candidates.push(normalized);
+        }
+
+        if (raw) {
+            addCandidate(raw);
+            addCandidate(raw.replace('127.0.0.1', window.location.hostname || 'localhost'));
+            addCandidate(raw.replace('localhost', window.location.hostname || 'localhost'));
+            addCandidate(raw.replace('127.0.0.1', 'host.docker.internal'));
+            addCandidate(raw.replace('localhost', 'host.docker.internal'));
+        }
+
+        var protocol = window.location.protocol || 'http:';
+        var hostname = window.location.hostname || 'localhost';
+        addCandidate(protocol + '//' + hostname + ':18088/api/ask');
+
+        return candidates;
+    }
+
+    function fetchWithTimeout(url, options, timeoutMs) {
+        var controller = new AbortController();
+        var timer = setTimeout(function() {
+            controller.abort();
+        }, timeoutMs || 12000);
+        var opts = Object.assign({}, options || {}, {signal: controller.signal});
+        return fetch(url, opts).finally(function() {
+            clearTimeout(timer);
+        });
+    }
+
     function checkHealth(config, statusNode) {
         var healthUrl = healthUrlFromApiUrl(config.apiUrl);
         if (!healthUrl) {
@@ -448,22 +492,49 @@ define([], function() {
                 headers['X-API-Key'] = config.apiKey;
             }
 
-            fetch(config.apiUrl, {
-                method: 'POST',
-                headers: headers,
-                body: JSON.stringify(payload)
-            }).then(function(resp) {
-                if (!resp.ok) {
-                    return resp.json()
-                        .then(function(err) {
-                            throw new Error((err && (err.detail || err.message)) ? (err.detail || err.message) : ('HTTP ' + resp.status));
-                        })
-                        .catch(function() {
-                            throw new Error('HTTP ' + resp.status);
-                        });
+            var apiCandidates = buildApiCandidates(config.apiUrl);
+
+            function tryApiAt(index, lastError) {
+                if (index >= apiCandidates.length) {
+                    throw lastError || new Error('Không tìm thấy endpoint API khả dụng');
                 }
-                return resp.json();
-            }).then(function(data) {
+
+                var currentApiUrl = apiCandidates[index];
+                return fetchWithTimeout(currentApiUrl, {
+                    method: 'POST',
+                    headers: headers,
+                    body: JSON.stringify(payload)
+                }, 15000).then(function(resp) {
+                    if (!resp.ok) {
+                        return resp.json()
+                            .then(function(err) {
+                                throw new Error((err && (err.detail || err.message)) ? (err.detail || err.message) : ('HTTP ' + resp.status));
+                            })
+                            .catch(function() {
+                                throw new Error('HTTP ' + resp.status);
+                            });
+                    }
+                    // Persist a working endpoint to reduce future retries.
+                    if (currentApiUrl !== config.apiUrl) {
+                        config.apiUrl = currentApiUrl;
+                    }
+                    return resp.json();
+                }).catch(function(err) {
+                    // Retry only for network/connection type failures.
+                    var message = String((err && err.message) || '');
+                    var shouldRetry =
+                        message.indexOf('Failed to fetch') !== -1 ||
+                        message.indexOf('NetworkError') !== -1 ||
+                        message.indexOf('ERR_CONNECTION_REFUSED') !== -1 ||
+                        message.indexOf('aborted') !== -1;
+                    if (shouldRetry) {
+                        return tryApiAt(index + 1, err);
+                    }
+                    throw err;
+                });
+            }
+
+            tryApiAt(0).then(function(data) {
                 var answer = (data && data.answer) ? data.answer : 'Mình chưa có câu trả lời phù hợp. Bạn thử diễn đạt lại chi tiết hơn nhé.';
                 var sources = (data && data.sources) ? data.sources : [];
                 appendMessage(msgs, 'bot', answer, sources);

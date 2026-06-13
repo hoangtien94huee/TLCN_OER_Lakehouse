@@ -44,7 +44,7 @@ services:
     image: ollama/ollama:latest
     container_name: oer-ollama
     ports:
-      - "11434:11434"
+      - "11435:11434"
     volumes:
       - ollama_data:/root/.ollama
     restart: unless-stopped
@@ -228,6 +228,8 @@ services:
       - DSPACE_USER=admin@dspace.org
       - DSPACE_PASSWORD=dspace
       - DSPACE_COLLECTION_UUID=1e9be5e4-6056-4f43-bad0-0288669ce6ad
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:

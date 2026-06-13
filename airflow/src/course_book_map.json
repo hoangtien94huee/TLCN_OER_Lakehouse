@@ -1,0 +1,1490 @@
+{
+  "Kinh tế học": {
+    "asset_uids": [
+      "1598b62e11680582f65fdce36773692d378f74297c6eaeeb5ba74ecd18b056c3",
+      "c8aa0a406598329bdf895908f9ea1b24a48c5eac0b76256cf8d4d3c9ce9c74aa",
+      "07ad139465765115c99c40af90b12f16e38c5817a8c85fd2354ed9a1a3c685b3",
+      "253953705b3a4e317933a7154a790790067b161764cba0d9dbe76fa909b6f831",
+      "193261a369ecb450f30ca98353f57e9eea8dcac9220555af7b3477b99f862331",
+      "0c959ab0a25ecd70cfcbcee454f2be732b26280c04c77b23873a0a0c20ae119a",
+      "8d230552b601dde0618b35f386105ca71641f87a7d78869ae4697df94daeb364",
+      "d38d9b00585cd48e2a7603c8a982234bf7e514133f5bad30b1744596d4969aa5",
+      "33ca1e24a49383d8c2d8cc48fd812fc5295d6072d1cdea2b6e6c7bae7566c1be",
+      "246611e33b5b13f3c6fe20399e63eab7132bdb7c1688687891f87af918c5c3d8",
+      "3fb42deec53a770f3010d4da32fa9655c5d798b4e7135a0d6028486c41be6b87",
+      "061a819a41b234e0e1f550b605cee0f858c5614ec97527ac75739915fba23ca7",
+      "2d55adf5ef97519693e6d2645fdd06bad3e9ebd28d2eb067d6864bac33aaad4f",
+      "010d03da960ed391a04b79ed601002f0164958f24fe2bd4db1ca70a82f42caf8",
+      "620ebe2c55ff0155b4f3ef011aaa8ba9d4e45f3632e93c59ec37bb1b9f9c748b",
+      "7ff85bf0d1eb2be167d131085fb82664893630d2725c7307ec8d6106bdbb2ae5",
+      "053f56518e8685dc3a10d6e4d62731c21a777f37a5dacdb1a3b259e8a180eb03",
+      "5a7c6a692eec5c9bb6269febd54c34adb86f5903b930b3980d069103f194d7cb",
+      "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
+      "4c59e597bf5d094a379c918c6e9b039db11beb91555fdbaef7ff874434dcaa3f",
+      "af04a6bf069d622ee5aa13e1bebc7025e432c22ae889f1036808b0bc29b2611d",
+      "8fca26cb1c2bbede850a8c38dd2ab06b980258f5fb27e3946a3bf442feba122e",
+      "156fd792d83c34c48a0790454740ce89789320d1435d959694cffcdb82429d96",
+      "158098823797f569cd8b2f4ec462564dfe1c95dc9b37f4f5dc7f057d0361794e",
+      "03ff3e40319cac746eba9624b89ded33b0dbb2d0a439fd55fd5139d5dbf86a73"
+    ],
+    "books": [
+      {
+        "asset_uid": "1598b62e11680582f65fdce36773692d378f74297c6eaeeb5ba74ecd18b056c3",
+        "title": "Economic Growth",
+        "source_url": "https://ocw.mit.edu/courses/14-452-economic-growth-fall-2016/"
+      },
+      {
+        "asset_uid": "c8aa0a406598329bdf895908f9ea1b24a48c5eac0b76256cf8d4d3c9ce9c74aa",
+        "title": "Economic Crises",
+        "source_url": "https://ocw.mit.edu/courses/14-454-economic-crises-spring-2011/"
+      },
+      {
+        "asset_uid": "07ad139465765115c99c40af90b12f16e38c5817a8c85fd2354ed9a1a3c685b3",
+        "title": "Development Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-771-development-economics-fall-2021/"
+      },
+      {
+        "asset_uid": "253953705b3a4e317933a7154a790790067b161764cba0d9dbe76fa909b6f831",
+        "title": "Energy Decisions, Markets, and Policies",
+        "source_url": "https://ocw.mit.edu/courses/15-031j-energy-decisions-markets-and-policies-spring-2012/"
+      },
+      {
+        "asset_uid": "193261a369ecb450f30ca98353f57e9eea8dcac9220555af7b3477b99f862331",
+        "title": "Economic Development Planning",
+        "source_url": "https://ocw.mit.edu/courses/11-438-economic-development-planning-spring-2020/"
+      },
+      {
+        "asset_uid": "0c959ab0a25ecd70cfcbcee454f2be732b26280c04c77b23873a0a0c20ae119a",
+        "title": "Financing Economic Development",
+        "source_url": "https://ocw.mit.edu/courses/11-437-financing-economic-development-fall-2016/"
+      },
+      {
+        "asset_uid": "8d230552b601dde0618b35f386105ca71641f87a7d78869ae4697df94daeb364",
+        "title": "Liquidity, Markets and Trading in Action",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/liquidity-markets-and-trading-in-action"
+      },
+      {
+        "asset_uid": "d38d9b00585cd48e2a7603c8a982234bf7e514133f5bad30b1744596d4969aa5",
+        "title": "Urban Labor Markets and Employment Policy",
+        "source_url": "https://ocw.mit.edu/courses/15-677j-urban-labor-markets-and-employment-policy-spring-2005/"
+      },
+      {
+        "asset_uid": "33ca1e24a49383d8c2d8cc48fd812fc5295d6072d1cdea2b6e6c7bae7566c1be",
+        "title": "Labor Economics I",
+        "source_url": "https://ocw.mit.edu/courses/14-661-labor-economics-i-fall-2017/"
+      },
+      {
+        "asset_uid": "246611e33b5b13f3c6fe20399e63eab7132bdb7c1688687891f87af918c5c3d8",
+        "title": "Labor Economics II",
+        "source_url": "https://ocw.mit.edu/courses/14-662-labor-economics-ii-spring-2015/"
+      },
+      {
+        "asset_uid": "3fb42deec53a770f3010d4da32fa9655c5d798b4e7135a0d6028486c41be6b87",
+        "title": "International Economics I",
+        "source_url": "https://ocw.mit.edu/courses/14-581-international-economics-i-spring-2013/"
+      },
+      {
+        "asset_uid": "061a819a41b234e0e1f550b605cee0f858c5614ec97527ac75739915fba23ca7",
+        "title": "Psychology and Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-13-psychology-and-economics-spring-2020/"
+      },
+      {
+        "asset_uid": "2d55adf5ef97519693e6d2645fdd06bad3e9ebd28d2eb067d6864bac33aaad4f",
+        "title": "Development Economics: Macroeconomics",
+        "source_url": "https://ocw.mit.edu/courses/14-772-development-economics-macroeconomics-spring-2013/"
+      },
+      {
+        "asset_uid": "010d03da960ed391a04b79ed601002f0164958f24fe2bd4db1ca70a82f42caf8",
+        "title": "Microeconomic Theory III",
+        "source_url": "https://ocw.mit.edu/courses/14-123-microeconomic-theory-iii-spring-2015/"
+      },
+      {
+        "asset_uid": "620ebe2c55ff0155b4f3ef011aaa8ba9d4e45f3632e93c59ec37bb1b9f9c748b",
+        "title": "Economic Development & Technical Capabilities",
+        "source_url": "https://ocw.mit.edu/courses/11-167-economic-development-technical-capabilities-spring-2004/"
+      },
+      {
+        "asset_uid": "7ff85bf0d1eb2be167d131085fb82664893630d2725c7307ec8d6106bdbb2ae5",
+        "title": "Introduction to Economic Analysis",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introduction-to-economic-analysis"
+      },
+      {
+        "asset_uid": "053f56518e8685dc3a10d6e4d62731c21a777f37a5dacdb1a3b259e8a180eb03",
+        "title": "Finance Theory I",
+        "source_url": "https://ocw.mit.edu/courses/15-401-finance-theory-i-fall-2008/"
+      },
+      {
+        "asset_uid": "5a7c6a692eec5c9bb6269febd54c34adb86f5903b930b3980d069103f194d7cb",
+        "title": "Consumer Finance: Markets, Product Design, and FinTech",
+        "source_url": "https://ocw.mit.edu/courses/15-483-consumer-finance-markets-product-design-and-fintech-spring-2018/"
+      },
+      {
+        "asset_uid": "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
+        "title": "Statistical Method in Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-381-statistical-method-in-economics-fall-2018/"
+      },
+      {
+        "asset_uid": "4c59e597bf5d094a379c918c6e9b039db11beb91555fdbaef7ff874434dcaa3f",
+        "title": "Environmental Policy and Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-42-environmental-policy-and-economics-spring-2011/"
+      },
+      {
+        "asset_uid": "af04a6bf069d622ee5aa13e1bebc7025e432c22ae889f1036808b0bc29b2611d",
+        "title": "Applied Economics for Managers",
+        "source_url": "https://ocw.mit.edu/courses/15-024-applied-economics-for-managers-summer-2004/"
+      },
+      {
+        "asset_uid": "8fca26cb1c2bbede850a8c38dd2ab06b980258f5fb27e3946a3bf442feba122e",
+        "title": "Economics – Theory Through Applications",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/economics-theory-through-applications"
+      },
+      {
+        "asset_uid": "156fd792d83c34c48a0790454740ce89789320d1435d959694cffcdb82429d96",
+        "title": "Economics and E-Commerce",
+        "source_url": "https://ocw.mit.edu/courses/14-27-economics-and-e-commerce-fall-2014/"
+      },
+      {
+        "asset_uid": "158098823797f569cd8b2f4ec462564dfe1c95dc9b37f4f5dc7f057d0361794e",
+        "title": "Microeconomic Theory and Public Policy",
+        "source_url": "https://ocw.mit.edu/courses/14-03-microeconomic-theory-and-public-policy-fall-2016/"
+      },
+      {
+        "asset_uid": "03ff3e40319cac746eba9624b89ded33b0dbb2d0a439fd55fd5139d5dbf86a73",
+        "title": "Political Economy and Economic Development",
+        "source_url": "https://ocw.mit.edu/courses/14-75-political-economy-and-economic-development-fall-2012/"
+      }
+    ]
+  },
+  "Đại số tuyến tính": {
+    "asset_uids": [
+      "1b5a0df86f9c20e2a0d567627e1ac8decf8db3a183cdd5bea716b08aede323be",
+      "08c79d5c3d5df1d072e084ad931523d282f87be5057c31b2840ddc6f19ab3507",
+      "57f45f296e648404ee0af0fec22fdfb31ce6a844555e1dbad24b6f5caf8a9e7a",
+      "817ba50f327aafd4f8817c862fb16e3c902ade49c4a418a55193bdc5445558f0",
+      "65e085bd910e5a121f421c5c7e0475c61aed651cacb6d3bf5296e589937d3974",
+      "13d06bee6bfa7a3b30627d3951e838c5448f82cd9a68ef493178c17979dbae8b",
+      "11a89bf7b39f727a89f020ecaf37c80094f827b81d171bc55b271d66203a45ed",
+      "156d66983a1eefbd9e7c85a7e9f1d5f001d371cf0d5054630719515f16acbf17",
+      "18738220d76e1f45d1a9e9989726b526ecdef3ef71d7d3ddc1bffd401fd7c2d4",
+      "b2a91612241510c3d2a6c65275b76515eb0d26811b1cab7edb3806c0b3d670a7",
+      "cbe42da89d4e19d1b1e10b8a2994416210ebd6fcf2bda03599da4898d36a6a66",
+      "b671e3cc0fbd01d893d698d25161344eb8caa3c17e3d6ab94ca431a03065e2da",
+      "334260db3a4fbb61309e21f3061ec6a88f3b1fb606d7684edaf678c840087e08",
+      "1fdeef090ddeaf612b66666c2f177f19d40951173ccd42ab59b882465ccb2e1b",
+      "4665617a83cf91cf0ecccf609e1796a61f8eedf55335bbfb045464a9ead655c5",
+      "0213069a03a6ee1978872fbec024a352b2408d80017b393d6553021ea7d058fd",
+      "c9c8c90cccae782344a62440594e5572dc92c420f5369380aba728a7210b3d69",
+      "c9742d87e4ce7ef1f68aed656efd93490ee09ed3e820c7e8d9e0822431712da5",
+      "0ec422186a1b7e63586150e8cd1367e92b4eb11b5ee839a81fd871254dce8601",
+      "01a66c09d675bc7b5414af11350ed02c2f12b325b26f2960754fac0cadaecb17",
+      "17f1f1101bb0eb64809fcca7aa4d6cc9c02c7438c4994e31f4f3516423be6690",
+      "772d2d9bcf65cf4d294924a74740bd7b936a7b9bc6c8b2be880b18fc4d52c13c",
+      "37922814646178bdf1d21b9000e735c6e33195c12e55d55021bb015b01d6de86",
+      "4408c44ea3b9b09bf3ae111938981ba82c8a10a7b83bfc311f42c9b4cdeaaca3",
+      "21ce897335bba142f15cdb5df36be2510c9ae106ead4fe1a73a0d9b3f4a13118"
+    ],
+    "books": [
+      {
+        "asset_uid": "1b5a0df86f9c20e2a0d567627e1ac8decf8db3a183cdd5bea716b08aede323be",
+        "title": "Linear Algebra",
+        "source_url": "https://ocw.mit.edu/courses/18-06sc-linear-algebra-fall-2011/"
+      },
+      {
+        "asset_uid": "08c79d5c3d5df1d072e084ad931523d282f87be5057c31b2840ddc6f19ab3507",
+        "title": "Linear Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/linear-algebra-2016"
+      },
+      {
+        "asset_uid": "57f45f296e648404ee0af0fec22fdfb31ce6a844555e1dbad24b6f5caf8a9e7a",
+        "title": "Linear Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/linear-algebra"
+      },
+      {
+        "asset_uid": "817ba50f327aafd4f8817c862fb16e3c902ade49c4a418a55193bdc5445558f0",
+        "title": "Linear Algebra Done Right - Fourth Edition",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/linear-algebra-done-right"
+      },
+      {
+        "asset_uid": "65e085bd910e5a121f421c5c7e0475c61aed651cacb6d3bf5296e589937d3974",
+        "title": "Introduction to Numerical Methods",
+        "source_url": "https://ocw.mit.edu/courses/18-335j-introduction-to-numerical-methods-spring-2019/"
+      },
+      {
+        "asset_uid": "13d06bee6bfa7a3b30627d3951e838c5448f82cd9a68ef493178c17979dbae8b",
+        "title": "Introduction to Stochastic Processes",
+        "source_url": "https://ocw.mit.edu/courses/18-445-introduction-to-stochastic-processes-spring-2015/"
+      },
+      {
+        "asset_uid": "11a89bf7b39f727a89f020ecaf37c80094f827b81d171bc55b271d66203a45ed",
+        "title": "Linear Partial Differential Equations: Analysis and Numerics",
+        "source_url": "https://ocw.mit.edu/courses/18-303-linear-partial-differential-equations-analysis-and-numerics-fall-2014/"
+      },
+      {
+        "asset_uid": "156d66983a1eefbd9e7c85a7e9f1d5f001d371cf0d5054630719515f16acbf17",
+        "title": "Matrix Calculus for Machine Learning and Beyond",
+        "source_url": "https://ocw.mit.edu/courses/18-s096-matrix-calculus-for-machine-learning-and-beyond-january-iap-2023/"
+      },
+      {
+        "asset_uid": "18738220d76e1f45d1a9e9989726b526ecdef3ef71d7d3ddc1bffd401fd7c2d4",
+        "title": "Multivariable Calculus with Theory",
+        "source_url": "https://ocw.mit.edu/courses/18-024-multivariable-calculus-with-theory-spring-2011/"
+      },
+      {
+        "asset_uid": "b2a91612241510c3d2a6c65275b76515eb0d26811b1cab7edb3806c0b3d670a7",
+        "title": "Introductory Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introductory-algebra"
+      },
+      {
+        "asset_uid": "cbe42da89d4e19d1b1e10b8a2994416210ebd6fcf2bda03599da4898d36a6a66",
+        "title": "Elementary Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/elementary-algebra-2019"
+      },
+      {
+        "asset_uid": "b671e3cc0fbd01d893d698d25161344eb8caa3c17e3d6ab94ca431a03065e2da",
+        "title": "Intermediate Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/intermediate-algebra-2020"
+      },
+      {
+        "asset_uid": "334260db3a4fbb61309e21f3061ec6a88f3b1fb606d7684edaf678c840087e08",
+        "title": "Intermediate Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/intermediate-algebra"
+      },
+      {
+        "asset_uid": "1fdeef090ddeaf612b66666c2f177f19d40951173ccd42ab59b882465ccb2e1b",
+        "title": "Elementary Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/elementary-algebra"
+      },
+      {
+        "asset_uid": "4665617a83cf91cf0ecccf609e1796a61f8eedf55335bbfb045464a9ead655c5",
+        "title": "Noncommutative Algebra",
+        "source_url": "https://ocw.mit.edu/courses/18-706-noncommutative-algebra-spring-2023/"
+      },
+      {
+        "asset_uid": "0213069a03a6ee1978872fbec024a352b2408d80017b393d6553021ea7d058fd",
+        "title": "Algebraic Combinatorics",
+        "source_url": "https://ocw.mit.edu/courses/18-212-algebraic-combinatorics-spring-2019/"
+      },
+      {
+        "asset_uid": "c9c8c90cccae782344a62440594e5572dc92c420f5369380aba728a7210b3d69",
+        "title": "Advanced Algebra v. 1.0",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/advanced-algebra-v-1-0"
+      },
+      {
+        "asset_uid": "c9742d87e4ce7ef1f68aed656efd93490ee09ed3e820c7e8d9e0822431712da5",
+        "title": "Elementary Algebra 2e - OpenStax",
+        "source_url": "https://openstax.org/details/books/elementary-algebra-2e"
+      },
+      {
+        "asset_uid": "0ec422186a1b7e63586150e8cd1367e92b4eb11b5ee839a81fd871254dce8601",
+        "title": "Intermediate Algebra 2e - OpenStax",
+        "source_url": "https://openstax.org/details/books/intermediate-algebra-2e"
+      },
+      {
+        "asset_uid": "01a66c09d675bc7b5414af11350ed02c2f12b325b26f2960754fac0cadaecb17",
+        "title": "Dynamics and Control I",
+        "source_url": "https://ocw.mit.edu/courses/2-003j-dynamics-and-control-i-spring-2007/"
+      },
+      {
+        "asset_uid": "17f1f1101bb0eb64809fcca7aa4d6cc9c02c7438c4994e31f4f3516423be6690",
+        "title": "Numerical Computation for Mechanical Engineers",
+        "source_url": "https://ocw.mit.edu/courses/2-086-numerical-computation-for-mechanical-engineers-spring-2013/"
+      },
+      {
+        "asset_uid": "772d2d9bcf65cf4d294924a74740bd7b936a7b9bc6c8b2be880b18fc4d52c13c",
+        "title": "Numerical Computation for Mechanical Engineers",
+        "source_url": "https://ocw.mit.edu/courses/2-086-numerical-computation-for-mechanical-engineers-fall-2012/"
+      },
+      {
+        "asset_uid": "37922814646178bdf1d21b9000e735c6e33195c12e55d55021bb015b01d6de86",
+        "title": "Microeconomic Theory I",
+        "source_url": "https://ocw.mit.edu/courses/14-121-microeconomic-theory-i-fall-2015/"
+      },
+      {
+        "asset_uid": "4408c44ea3b9b09bf3ae111938981ba82c8a10a7b83bfc311f42c9b4cdeaaca3",
+        "title": "Computational Science and Engineering I",
+        "source_url": "https://ocw.mit.edu/courses/18-085-computational-science-and-engineering-i-summer-2020/"
+      },
+      {
+        "asset_uid": "21ce897335bba142f15cdb5df36be2510c9ae106ead4fe1a73a0d9b3f4a13118",
+        "title": "Numerical Methods Applied to Chemical Engineering",
+        "source_url": "https://ocw.mit.edu/courses/10-34-numerical-methods-applied-to-chemical-engineering-fall-2015/"
+      }
+    ]
+  },
+  "Quản trị kinh doanh": {
+    "asset_uids": [
+      "523adf4181931654de5315b848013574bd5cd96da09ca7604e946f86dd746875",
+      "0b6febe11da436a67e5b11b2c3390ba8cd9fc20d65e9a54d2ca90fcc10742e19",
+      "9e569794bf8b8c4834c642318df290ea16c188051e44d4de2a1ea2f355721841",
+      "27d0417d3d53b5d13a02315bee3309ae801a37b628ba54da7982d155ecc92083",
+      "cef34e1a2b6a399fb239c2a89662a9bfdc5b715d7d6ee558b293e9da5cd09a9d",
+      "07e472feeec29883404c650c3726b6f63aa5e4c10b12727e780cc415c764181b",
+      "18e1880dd1c3f25b4a070f721c58b32c74b16ba74babd609a4bcf5bf1e3dff56",
+      "7c4e4c5512120cafee67e87f47bf3c7d0aa710673b15b2da88ae471f45243fc3",
+      "b435eda21a3b50c7a90f22b0b64ee5a98203a477e962a12bbd3f627a948c20b6",
+      "2dc1615f93f2817ca57a25a453d11a4bb33c8a962f172f6c5ca2e62076a0ef5d",
+      "cf1c0ac421a06252155f1c55e83b2bff5a79e2d43607da38a0b9b3b8046c2ddd",
+      "2fc765c70820ed593240ea7fee0bfc4b0272a3aa019449d1a3b605a0e742c665",
+      "3183159d790fce79dd7f66785ab37e316f312cb44010da93e5e46729239bb814",
+      "767f3b6abb8b4a2dfab438e3c4349c9916d925a696d7010bb3257a7f072f26fa",
+      "54e8501e0f3f0edfc3125d9a4fb624bbf5459eebc0779952e82d1fd146a68e8a",
+      "22b531f4f892b1c8ff0ce664561ab3f5549f7f0c058256a7ddc5bb0377b5730c",
+      "0caee608d2733f212370ce0ed61c74c607c09a57c84805c462b586636998a9c7",
+      "0a997706b356b6ec1a342cb1ef4579dcffd8174d8801f7a166b12f3ec1d88a6d",
+      "0085db7a180c29f9f402bdfa087ce2ec20aaf221729a833419e60d20d3fb22f6",
+      "9354cb2bd88db34f5221a86f196f9282c09d2af8ca440fdf88b0a443323a3429",
+      "f6f2c14aeb7849f8cb15633af0ad1e0832c1302dae0ce5db362008aae55d2188",
+      "22ec7e7b77a38a542a560de1b2759cf6288ebcc3792a94b1d034757adbfab0d3",
+      "49ee6f54952f520d1883ffebeb65fe641d1aae828d2352bd565d745ec41bdf13",
+      "a3bafe43ece7c8dbbcec4e62bf149d155a67c76eecc74815130120c5f53cbc0a",
+      "0e2636dee6b9454183ca08528148f0df9c29e02889130f7fa23c26ab1ef66ee5"
+    ],
+    "books": [
+      {
+        "asset_uid": "523adf4181931654de5315b848013574bd5cd96da09ca7604e946f86dd746875",
+        "title": "Global Strategy and Organization",
+        "source_url": "https://ocw.mit.edu/courses/15-220-global-strategy-and-organization-spring-2008/"
+      },
+      {
+        "asset_uid": "0b6febe11da436a67e5b11b2c3390ba8cd9fc20d65e9a54d2ca90fcc10742e19",
+        "title": "Technology Strategy for System Design and Management",
+        "source_url": "https://ocw.mit.edu/courses/15-965-technology-strategy-for-system-design-and-management-spring-2009/"
+      },
+      {
+        "asset_uid": "9e569794bf8b8c4834c642318df290ea16c188051e44d4de2a1ea2f355721841",
+        "title": "Small Business Management in the 21st Century",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/small-business-management-in-the-21st-century"
+      },
+      {
+        "asset_uid": "27d0417d3d53b5d13a02315bee3309ae801a37b628ba54da7982d155ecc92083",
+        "title": "Operations Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-769-operations-strategy-fall-2010/"
+      },
+      {
+        "asset_uid": "cef34e1a2b6a399fb239c2a89662a9bfdc5b715d7d6ee558b293e9da5cd09a9d",
+        "title": "Advanced Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-963-advanced-strategy-spring-2008/"
+      },
+      {
+        "asset_uid": "07e472feeec29883404c650c3726b6f63aa5e4c10b12727e780cc415c764181b",
+        "title": "Technology Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-912-technology-strategy-fall-2008/"
+      },
+      {
+        "asset_uid": "18e1880dd1c3f25b4a070f721c58b32c74b16ba74babd609a4bcf5bf1e3dff56",
+        "title": "Marketing Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-834-marketing-strategy-spring-2003/"
+      },
+      {
+        "asset_uid": "7c4e4c5512120cafee67e87f47bf3c7d0aa710673b15b2da88ae471f45243fc3",
+        "title": "Operations Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-769-operations-strategy-spring-2003/"
+      },
+      {
+        "asset_uid": "b435eda21a3b50c7a90f22b0b64ee5a98203a477e962a12bbd3f627a948c20b6",
+        "title": "The Sociology of Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-968-the-sociology-of-strategy-spring-2005/"
+      },
+      {
+        "asset_uid": "2dc1615f93f2817ca57a25a453d11a4bb33c8a962f172f6c5ca2e62076a0ef5d",
+        "title": "Managing Global Integration",
+        "source_url": "https://ocw.mit.edu/courses/15-229-managing-global-integration-spring-2012/"
+      },
+      {
+        "asset_uid": "cf1c0ac421a06252155f1c55e83b2bff5a79e2d43607da38a0b9b3b8046c2ddd",
+        "title": "Strategy and Information",
+        "source_url": "https://ocw.mit.edu/courses/14-16-strategy-and-information-spring-2016/"
+      },
+      {
+        "asset_uid": "2fc765c70820ed593240ea7fee0bfc4b0272a3aa019449d1a3b605a0e742c665",
+        "title": "Building Strategy and Performance",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/building-strategy-and-performance"
+      },
+      {
+        "asset_uid": "3183159d790fce79dd7f66785ab37e316f312cb44010da93e5e46729239bb814",
+        "title": "Fundamentals of Global Strategy",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/fundamentals-of-global-strategy"
+      },
+      {
+        "asset_uid": "767f3b6abb8b4a2dfab438e3c4349c9916d925a696d7010bb3257a7f072f26fa",
+        "title": "Airline Management",
+        "source_url": "https://ocw.mit.edu/courses/16-75j-airline-management-spring-2006/"
+      },
+      {
+        "asset_uid": "54e8501e0f3f0edfc3125d9a4fb624bbf5459eebc0779952e82d1fd146a68e8a",
+        "title": "Marketing Management",
+        "source_url": "https://ocw.mit.edu/courses/15-810-marketing-management-fall-2010/"
+      },
+      {
+        "asset_uid": "22b531f4f892b1c8ff0ce664561ab3f5549f7f0c058256a7ddc5bb0377b5730c",
+        "title": "Financial Management",
+        "source_url": "https://ocw.mit.edu/courses/15-414-financial-management-summer-2003/"
+      },
+      {
+        "asset_uid": "0caee608d2733f212370ce0ed61c74c607c09a57c84805c462b586636998a9c7",
+        "title": "Operations Management",
+        "source_url": "https://ocw.mit.edu/courses/15-760a-operations-management-spring-2002/"
+      },
+      {
+        "asset_uid": "0a997706b356b6ec1a342cb1ef4579dcffd8174d8801f7a166b12f3ec1d88a6d",
+        "title": "Project Management",
+        "source_url": "https://ocw.mit.edu/courses/1-040-project-management-spring-2009/"
+      },
+      {
+        "asset_uid": "0085db7a180c29f9f402bdfa087ce2ec20aaf221729a833419e60d20d3fb22f6",
+        "title": "Transit Management",
+        "source_url": "https://ocw.mit.edu/courses/1-259j-transit-management-fall-2006/"
+      },
+      {
+        "asset_uid": "9354cb2bd88db34f5221a86f196f9282c09d2af8ca440fdf88b0a443323a3429",
+        "title": "The Economics of Information: Strategy, Structure and Pricing",
+        "source_url": "https://ocw.mit.edu/courses/15-567-the-economics-of-information-strategy-structure-and-pricing-fall-2010/"
+      },
+      {
+        "asset_uid": "f6f2c14aeb7849f8cb15633af0ad1e0832c1302dae0ce5db362008aae55d2188",
+        "title": "Management Accounting and Control",
+        "source_url": "https://ocw.mit.edu/courses/15-521-management-accounting-and-control-spring-2003/"
+      },
+      {
+        "asset_uid": "22ec7e7b77a38a542a560de1b2759cf6288ebcc3792a94b1d034757adbfab0d3",
+        "title": "Communicating With Data",
+        "source_url": "https://ocw.mit.edu/courses/15-063-communicating-with-data-summer-2003/"
+      },
+      {
+        "asset_uid": "49ee6f54952f520d1883ffebeb65fe641d1aae828d2352bd565d745ec41bdf13",
+        "title": "Management in Engineering",
+        "source_url": "https://ocw.mit.edu/courses/2-96-management-in-engineering-fall-2012/"
+      },
+      {
+        "asset_uid": "a3bafe43ece7c8dbbcec4e62bf149d155a67c76eecc74815130120c5f53cbc0a",
+        "title": "Generating Business Value from Information Technology",
+        "source_url": "https://ocw.mit.edu/courses/15-571-generating-business-value-from-information-technology-spring-2009/"
+      },
+      {
+        "asset_uid": "0e2636dee6b9454183ca08528148f0df9c29e02889130f7fa23c26ab1ef66ee5",
+        "title": "Strategic Management II",
+        "source_url": "https://ocw.mit.edu/courses/15-904-strategic-management-ii-fall-2005/"
+      }
+    ]
+  },
+  "Xác suất thống kê": {
+    "asset_uids": [
+      "95965b17c5815529544a902b3bb1724c8f1c4226011275d31772cdcd6a230406",
+      "41f69a6b20fb555200fd64eacd765f7124091ad7081e4c4f138df2145e9a013f",
+      "093fa42a6dfe0c0922c442b0abf97a35a3975699686f35c48bf8840abd387761",
+      "010d59502a3c6db0513b6144eb0cc0c6d71a49b0b29c847230d9b210ac87b134",
+      "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
+      "01b176f1e613815c3d412b165e1c082a44e765095a607dafd0fe26ce42fb7e87",
+      "0d703a450043aaec4509ba947660cc80ff80a05ee7b8de3a0a4cb969ccd791e7",
+      "3ff43842e67a4e861dea3eddcf6cc1c6fced4477b7ba1b500ae23a424b631546",
+      "082ef6f9b84d439d702371e448aa03d04f63d0e34446673a3e3c2fb5419504de",
+      "4345f85c42203dca78213349aba723549990e9cbccb9f4e8a8351983b4ebcfbd",
+      "5deb1d93d24b6b53cf25c8a9452a9c0594b613ecbf37fe6208b17b83921ea371",
+      "2f1e053c0043d8f88b303dc9c2bf7d008bc3da7694e3d3ea72a17824fe040930",
+      "a75cde23c6ed77fdb01d02e812096aaa625d547d23392005be1d21f9f02c92a3",
+      "586242ad98ae088fcb2e7757898da6a4f2e81982b3b872356d3b7857dd82df23",
+      "016c768f507cbc925d978e64f486cacd23ef291bd4cb50626c1a8bb20282fc92",
+      "3ffba64c22e74add74807b3b0adb792e73e6f22ee4d8444be5689c78ca7da1cd",
+      "0ef17aeaf5808ea7ecc8b04cb9ff96478f67aa5e5334add39a3b5f2906f0a451",
+      "1032e1d260c453a802171afa03e007d7f6a16b4b36f80e260118f55bf4205de5",
+      "30df2b0fbe456e708c5d0e4f39b8625f42d681804c615e735ac2ca6ba66dd0d7",
+      "a92795179f0956cc301cd28b385e8f2dc690895aa2af36dcba9f5339ad704c72",
+      "2850daa9ea81e44fa8634c1f50a54c4c592db47178f51f048a6038347045c542",
+      "17f1f1101bb0eb64809fcca7aa4d6cc9c02c7438c4994e31f4f3516423be6690",
+      "3bb90603d7bbf6fe01c66982a61b26b145ac8054f7c4c51dbd1394d056c4bf48",
+      "772d2d9bcf65cf4d294924a74740bd7b936a7b9bc6c8b2be880b18fc4d52c13c",
+      "d30749fca7fe32a88b7ec5f26b3456cfd709d201c3c48be2a83729249f598e99"
+    ],
+    "books": [
+      {
+        "asset_uid": "95965b17c5815529544a902b3bb1724c8f1c4226011275d31772cdcd6a230406",
+        "title": "Think Stats: Probability and Statistics for Programmers - 2e",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/think-stats-probability-and-statistics-for-programmers"
+      },
+      {
+        "asset_uid": "41f69a6b20fb555200fd64eacd765f7124091ad7081e4c4f138df2145e9a013f",
+        "title": "Introduction to Statistical Methods in Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-30-introduction-to-statistical-methods-in-economics-spring-2009/"
+      },
+      {
+        "asset_uid": "093fa42a6dfe0c0922c442b0abf97a35a3975699686f35c48bf8840abd387761",
+        "title": "Quantitative Reasoning & Statistical Methods for Planners I",
+        "source_url": "https://ocw.mit.edu/courses/11-220-quantitative-reasoning-statistical-methods-for-planners-i-spring-2009/"
+      },
+      {
+        "asset_uid": "010d59502a3c6db0513b6144eb0cc0c6d71a49b0b29c847230d9b210ac87b134",
+        "title": "Theory of Probability",
+        "source_url": "https://ocw.mit.edu/courses/18-175-theory-of-probability-spring-2014/"
+      },
+      {
+        "asset_uid": "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
+        "title": "Statistical Method in Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-381-statistical-method-in-economics-fall-2018/"
+      },
+      {
+        "asset_uid": "01b176f1e613815c3d412b165e1c082a44e765095a607dafd0fe26ce42fb7e87",
+        "title": "Probability and Random Variables",
+        "source_url": "https://ocw.mit.edu/courses/18-600-probability-and-random-variables-fall-2019/"
+      },
+      {
+        "asset_uid": "0d703a450043aaec4509ba947660cc80ff80a05ee7b8de3a0a4cb969ccd791e7",
+        "title": "Probability and Random Variables",
+        "source_url": "https://ocw.mit.edu/courses/18-440-probability-and-random-variables-spring-2014/"
+      },
+      {
+        "asset_uid": "3ff43842e67a4e861dea3eddcf6cc1c6fced4477b7ba1b500ae23a424b631546",
+        "title": "Statistics for Applications",
+        "source_url": "https://ocw.mit.edu/courses/18-443-statistics-for-applications-spring-2015/"
+      },
+      {
+        "asset_uid": "082ef6f9b84d439d702371e448aa03d04f63d0e34446673a3e3c2fb5419504de",
+        "title": "Mathematical Statistics",
+        "source_url": "https://ocw.mit.edu/courses/18-655-mathematical-statistics-spring-2016/"
+      },
+      {
+        "asset_uid": "4345f85c42203dca78213349aba723549990e9cbccb9f4e8a8351983b4ebcfbd",
+        "title": "Statistics - OpenStax",
+        "source_url": "https://openstax.org/details/books/statistics"
+      },
+      {
+        "asset_uid": "5deb1d93d24b6b53cf25c8a9452a9c0594b613ecbf37fe6208b17b83921ea371",
+        "title": "Introductory Statistics",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introductory-statistics"
+      },
+      {
+        "asset_uid": "2f1e053c0043d8f88b303dc9c2bf7d008bc3da7694e3d3ea72a17824fe040930",
+        "title": "Analytics of Finance",
+        "source_url": "https://ocw.mit.edu/courses/15-450-analytics-of-finance-fall-2010/"
+      },
+      {
+        "asset_uid": "a75cde23c6ed77fdb01d02e812096aaa625d547d23392005be1d21f9f02c92a3",
+        "title": "Statistics for Applications",
+        "source_url": "https://ocw.mit.edu/courses/18-443-statistics-for-applications-fall-2006/"
+      },
+      {
+        "asset_uid": "586242ad98ae088fcb2e7757898da6a4f2e81982b3b872356d3b7857dd82df23",
+        "title": "Introduction to Statistics",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introduction-to-statistics"
+      },
+      {
+        "asset_uid": "016c768f507cbc925d978e64f486cacd23ef291bd4cb50626c1a8bb20282fc92",
+        "title": "Statistics for Applications",
+        "source_url": "https://ocw.mit.edu/courses/18-650-statistics-for-applications-fall-2016/"
+      },
+      {
+        "asset_uid": "3ffba64c22e74add74807b3b0adb792e73e6f22ee4d8444be5689c78ca7da1cd",
+        "title": "Uncertainty in Engineering",
+        "source_url": "https://ocw.mit.edu/courses/1-010-uncertainty-in-engineering-fall-2008/"
+      },
+      {
+        "asset_uid": "0ef17aeaf5808ea7ecc8b04cb9ff96478f67aa5e5334add39a3b5f2906f0a451",
+        "title": "Computation for Biological Engineers",
+        "source_url": "https://ocw.mit.edu/courses/20-181-computation-for-biological-engineers-fall-2006/"
+      },
+      {
+        "asset_uid": "1032e1d260c453a802171afa03e007d7f6a16b4b36f80e260118f55bf4205de5",
+        "title": "Statistical Thermodynamics of Biomolecular Systems (BE.011J)",
+        "source_url": "https://ocw.mit.edu/courses/20-011j-statistical-thermodynamics-of-biomolecular-systems-be-011j-spring-2004/"
+      },
+      {
+        "asset_uid": "30df2b0fbe456e708c5d0e4f39b8625f42d681804c615e735ac2ca6ba66dd0d7",
+        "title": "The Art of the Probable: Literature and Probability",
+        "source_url": "https://ocw.mit.edu/courses/21l-017-the-art-of-the-probable-literature-and-probability-spring-2008/"
+      },
+      {
+        "asset_uid": "a92795179f0956cc301cd28b385e8f2dc690895aa2af36dcba9f5339ad704c72",
+        "title": "Prediction: Machine Learning and Statistics",
+        "source_url": "https://ocw.mit.edu/courses/15-097-prediction-machine-learning-and-statistics-spring-2012/"
+      },
+      {
+        "asset_uid": "2850daa9ea81e44fa8634c1f50a54c4c592db47178f51f048a6038347045c542",
+        "title": "Data Analysis for Social Scientists",
+        "source_url": "https://ocw.mit.edu/courses/14-310x-data-analysis-for-social-scientists-spring-2023/"
+      },
+      {
+        "asset_uid": "17f1f1101bb0eb64809fcca7aa4d6cc9c02c7438c4994e31f4f3516423be6690",
+        "title": "Numerical Computation for Mechanical Engineers",
+        "source_url": "https://ocw.mit.edu/courses/2-086-numerical-computation-for-mechanical-engineers-spring-2013/"
+      },
+      {
+        "asset_uid": "3bb90603d7bbf6fe01c66982a61b26b145ac8054f7c4c51dbd1394d056c4bf48",
+        "title": "Biological Engineering II: Instrumentation and Measurement",
+        "source_url": "https://ocw.mit.edu/courses/20-309-biological-engineering-ii-instrumentation-and-measurement-fall-2006/"
+      },
+      {
+        "asset_uid": "772d2d9bcf65cf4d294924a74740bd7b936a7b9bc6c8b2be880b18fc4d52c13c",
+        "title": "Numerical Computation for Mechanical Engineers",
+        "source_url": "https://ocw.mit.edu/courses/2-086-numerical-computation-for-mechanical-engineers-fall-2012/"
+      },
+      {
+        "asset_uid": "d30749fca7fe32a88b7ec5f26b3456cfd709d201c3c48be2a83729249f598e99",
+        "title": "Free Introductory Statistics 2e Textbook for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/introductory-statistics-2e"
+      }
+    ]
+  },
+  "Lập trình và Khoa học máy tính": {
+    "asset_uids": [
+      "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+      "31445ecc68ce1fa15d43fa44edf20dcc9c68a5208d49fdeb3e6dd98a007fd4c2",
+      "658f13658926e0ab101b7a702157110ab8ec1469a586523de0470260edf08fb1",
+      "3e87b8bcc8055eb4973fd3b3cafc0c5fbbabfe8d880dc814474a389f6109992c",
+      "0c4aaf5855923f2dc6f63a55df9fa446f0283290807bd7ff0066d508a4769ad6",
+      "0e2fe535bddb4df277a129e9f1772e280089d4f81c0cbd79eca0a395579c9eb5",
+      "b9307858c8b74a9552de02ff0be7e28c8642104d9ba6f0d5f96b838ccb23ae32",
+      "01ab16045c2e8c0c0b2e4f9b0f2ad12dba6a818f0fb199a6f0f99317eb944131",
+      "bb00becb1d2b3b4709105f55be2d77618913bd01e474d0e84f56c2f82f7d2cf2",
+      "9a7da8f82b7f0372eb920c785886220913de9ddb4f5efea33199dadad9918f70",
+      "da37dfebcf2a42d55ec29401c172cf5b3b56299fc81074795e52e5ac3719bd0f",
+      "5646b2c277dc561a7cd4f7eb54559efd5b19487e35261d0496d5e41a22ac12d3",
+      "93c4c29f7713cab6ca67434e97277ce3e3032eb2b1b53dd3365b7a5c6c5aadab",
+      "21f489350a65e3c1a67c7d0bcc3af5867199b39094a31dbc6368c25e853004b7",
+      "2977d02fc43bae540d0d54c93fb81adad1dc9a07be9f00fa493dfc2aac21e3d6",
+      "c1bd56b0fa8cd59b8a20f972aefdc42e171665eab252b3972104b5514334ceec",
+      "004504bfb87234e0434f69bae61f6b16cecc5aa1b8cbabe6cacf75f7416ba921",
+      "ee212414d184c39172a270ca31d90f7db23131e8ee6050a501d68e7863dbc9d6",
+      "0fc9a78ad74ddbed34e227f833743aae188893aac26a851bba28ea0e3950a1d8",
+      "2434662759a954f053c4a9732d32b5d60ab238f1993913d0450d652b93403f4b",
+      "5f51b1466453b3f97e0d1d18c0f4f7434086cc09d41928d77616bfdf95879abf",
+      "4408c44ea3b9b09bf3ae111938981ba82c8a10a7b83bfc311f42c9b4cdeaaca3",
+      "846e8751d04277fdfb4e0eca1d1739138a742a752991790b89695c3e5a43eac0",
+      "4f7d24530393301d3f0c17e1df7d1a7353e2041637ffc8b4c25836eb2eb12f31",
+      "c6cbf37ca755a24397c15fec1a9966d7b87d7eab88a0f51c8464d3a83dd7b6db"
+    ],
+    "books": [
+      {
+        "asset_uid": "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+        "title": "Introduction to Computer Science - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-computer-science"
+      },
+      {
+        "asset_uid": "31445ecc68ce1fa15d43fa44edf20dcc9c68a5208d49fdeb3e6dd98a007fd4c2",
+        "title": "Introduction to Computers and Engineering Problem Solving",
+        "source_url": "https://ocw.mit.edu/courses/1-00-introduction-to-computers-and-engineering-problem-solving-spring-2012/"
+      },
+      {
+        "asset_uid": "658f13658926e0ab101b7a702157110ab8ec1469a586523de0470260edf08fb1",
+        "title": "Topics in Theoretical Computer Science: Probabilistically Checkable Proofs",
+        "source_url": "https://ocw.mit.edu/courses/18-408-topics-in-theoretical-computer-science-probabilistically-checkable-proofs-fall-2022/"
+      },
+      {
+        "asset_uid": "3e87b8bcc8055eb4973fd3b3cafc0c5fbbabfe8d880dc814474a389f6109992c",
+        "title": "Topics in Theoretical Computer Science : Internet Research Problems",
+        "source_url": "https://ocw.mit.edu/courses/18-996-topics-in-theoretical-computer-science-internet-research-problems-spring-2002/"
+      },
+      {
+        "asset_uid": "0c4aaf5855923f2dc6f63a55df9fa446f0283290807bd7ff0066d508a4769ad6",
+        "title": "Nonlinear Programming",
+        "source_url": "https://ocw.mit.edu/courses/15-084j-nonlinear-programming-spring-2004/"
+      },
+      {
+        "asset_uid": "0e2fe535bddb4df277a129e9f1772e280089d4f81c0cbd79eca0a395579c9eb5",
+        "title": "Software Engineering Concepts",
+        "source_url": "https://ocw.mit.edu/courses/16-355j-software-engineering-concepts-fall-2005/"
+      },
+      {
+        "asset_uid": "b9307858c8b74a9552de02ff0be7e28c8642104d9ba6f0d5f96b838ccb23ae32",
+        "title": "Introduction to Python Programming - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-python-programming"
+      },
+      {
+        "asset_uid": "01ab16045c2e8c0c0b2e4f9b0f2ad12dba6a818f0fb199a6f0f99317eb944131",
+        "title": "Introduction to Computer Graphics",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introduction-to-computer-graphics"
+      },
+      {
+        "asset_uid": "bb00becb1d2b3b4709105f55be2d77618913bd01e474d0e84f56c2f82f7d2cf2",
+        "title": "Programming Differential Privacy",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/programming-differential-privacy"
+      },
+      {
+        "asset_uid": "9a7da8f82b7f0372eb920c785886220913de9ddb4f5efea33199dadad9918f70",
+        "title": "Computational Methods of Scientific Programming",
+        "source_url": "https://ocw.mit.edu/courses/12-010-computational-methods-of-scientific-programming-fall-2011/"
+      },
+      {
+        "asset_uid": "da37dfebcf2a42d55ec29401c172cf5b3b56299fc81074795e52e5ac3719bd0f",
+        "title": "Computer Algorithms in Systems Engineering",
+        "source_url": "https://ocw.mit.edu/courses/1-204-computer-algorithms-in-systems-engineering-spring-2010/"
+      },
+      {
+        "asset_uid": "5646b2c277dc561a7cd4f7eb54559efd5b19487e35261d0496d5e41a22ac12d3",
+        "title": "Computational Methods of Scientific Programming",
+        "source_url": "https://ocw.mit.edu/courses/12-010-computational-methods-of-scientific-programming-fall-2024/"
+      },
+      {
+        "asset_uid": "93c4c29f7713cab6ca67434e97277ce3e3032eb2b1b53dd3365b7a5c6c5aadab",
+        "title": "Integer Programming and Combinatorial Optimization",
+        "source_url": "https://ocw.mit.edu/courses/15-083j-integer-programming-and-combinatorial-optimization-fall-2009/"
+      },
+      {
+        "asset_uid": "21f489350a65e3c1a67c7d0bcc3af5867199b39094a31dbc6368c25e853004b7",
+        "title": "Global Warming Science",
+        "source_url": "https://ocw.mit.edu/courses/12-340-global-warming-science-spring-2012/"
+      },
+      {
+        "asset_uid": "2977d02fc43bae540d0d54c93fb81adad1dc9a07be9f00fa493dfc2aac21e3d6",
+        "title": "Political Science Laboratory",
+        "source_url": "https://ocw.mit.edu/courses/17-871-political-science-laboratory-spring-2012/"
+      },
+      {
+        "asset_uid": "c1bd56b0fa8cd59b8a20f972aefdc42e171665eab252b3972104b5514334ceec",
+        "title": "Programming Persistent Memory: A Comprehensive Guide for Developers",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/programming-persistent-memory-a-comprehensive-guide-for-developers"
+      },
+      {
+        "asset_uid": "004504bfb87234e0434f69bae61f6b16cecc5aa1b8cbabe6cacf75f7416ba921",
+        "title": "Network Optimization",
+        "source_url": "https://ocw.mit.edu/courses/15-082j-network-optimization-fall-2010/"
+      },
+      {
+        "asset_uid": "ee212414d184c39172a270ca31d90f7db23131e8ee6050a501d68e7863dbc9d6",
+        "title": "Parallel Programming for Multicore Machines Using OpenMP and MPI",
+        "source_url": "https://ocw.mit.edu/courses/12-950-parallel-programming-for-multicore-machines-using-openmp-and-mpi-january-iap-2010/"
+      },
+      {
+        "asset_uid": "0fc9a78ad74ddbed34e227f833743aae188893aac26a851bba28ea0e3950a1d8",
+        "title": "Information Technology Essentials",
+        "source_url": "https://ocw.mit.edu/courses/15-561-information-technology-essentials-spring-2005/"
+      },
+      {
+        "asset_uid": "2434662759a954f053c4a9732d32b5d60ab238f1993913d0450d652b93403f4b",
+        "title": "Database, Internet, and Systems Integration Technologies",
+        "source_url": "https://ocw.mit.edu/courses/1-264j-database-internet-and-systems-integration-technologies-fall-2013/"
+      },
+      {
+        "asset_uid": "5f51b1466453b3f97e0d1d18c0f4f7434086cc09d41928d77616bfdf95879abf",
+        "title": "Political Science Scope and Methods",
+        "source_url": "https://ocw.mit.edu/courses/17-801-political-science-scope-and-methods-fall-2017/"
+      },
+      {
+        "asset_uid": "4408c44ea3b9b09bf3ae111938981ba82c8a10a7b83bfc311f42c9b4cdeaaca3",
+        "title": "Computational Science and Engineering I",
+        "source_url": "https://ocw.mit.edu/courses/18-085-computational-science-and-engineering-i-summer-2020/"
+      },
+      {
+        "asset_uid": "846e8751d04277fdfb4e0eca1d1739138a742a752991790b89695c3e5a43eac0",
+        "title": "Optimization Methods in Management Science",
+        "source_url": "https://ocw.mit.edu/courses/15-053-optimization-methods-in-management-science-spring-2013/"
+      },
+      {
+        "asset_uid": "4f7d24530393301d3f0c17e1df7d1a7353e2041637ffc8b4c25836eb2eb12f31",
+        "title": "Introduction to Political Science - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-political-science"
+      },
+      {
+        "asset_uid": "c6cbf37ca755a24397c15fec1a9966d7b87d7eab88a0f51c8464d3a83dd7b6db",
+        "title": "A Guide to MATLAB for ME 160",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/a-guide-to-matlab-for-me-160"
+      }
+    ]
+  },
+  "Giải tích": {
+    "asset_uids": [
+      "3d63a9a4db0d9eebf66499b4e437337b09fe5bd06022828814a8c5e9db26f2fb",
+      "1799dbaf54b5a17315db2227e51eb8e9f2fe50c80e200601128c8db9695d7d9c",
+      "a7e46cb15d4c959a0786f6b5f293b2d76ea505845717045705e57a452c452600",
+      "18738220d76e1f45d1a9e9989726b526ecdef3ef71d7d3ddc1bffd401fd7c2d4",
+      "6dfd6609ef91e71e590d32b5d33ab55fcc8d5bb9e4e53677601f4e5a210df5ed",
+      "0340b3e71a4ddb60a00c00eec7cba4deb1cbc58c0fa65300b889a7ef6ff709a9",
+      "24cfbd393a9b3ab9cb7e405f641f754e7edeba3025e32eb0ea794a948649526d",
+      "0971f5d6d401175afa6d176e7d9aceb745547194c5837937e719147efee89ce2",
+      "442c2a8a557c55407167505c7b1742950a1358c8d41d0b6c2c142e31c590f6f2",
+      "ea56bf1c1167cc2d6dc5e02bf0724612866ee0ad05dd5a649bb7cdd80d0f39b2",
+      "5e8121afe4c55032f9ec49be49ebfbc02bebfcfa09469b29061869904b09c6dc",
+      "156d66983a1eefbd9e7c85a7e9f1d5f001d371cf0d5054630719515f16acbf17",
+      "4acf9a7ac6accbdcb517b26bde043ce41ff759c5b11a5fde3751dad461c98658",
+      "1f9ef4286ee107b58eebf89987eb9c1f4485d90ba8503533834d1a0e8fd59df2",
+      "5750b23cec528a4ce27c0a660e55d6e83facf8130917dc6d1360b0fa074cdd47",
+      "010d59502a3c6db0513b6144eb0cc0c6d71a49b0b29c847230d9b210ac87b134",
+      "28009c355cb7db954ad593338ecab53fc2e4a5a368c582d3fe777b981b843039",
+      "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
+      "01b176f1e613815c3d412b165e1c082a44e765095a607dafd0fe26ce42fb7e87",
+      "0d703a450043aaec4509ba947660cc80ff80a05ee7b8de3a0a4cb969ccd791e7",
+      "115c9c70886ecb0917b8490e634fd7c678ce2ee758bab36f1f25b1e7e598112f",
+      "08c79d5c3d5df1d072e084ad931523d282f87be5057c31b2840ddc6f19ab3507",
+      "06126a2c0f574ad813816649f64fd5f67fc52af5a0edb783af264f6a25e1d6ed",
+      "07ca87744e0e0340e8b88a6b62682ff6c31ac494943f3045819aef6e793fab16",
+      "5395084c3a6e6767d8d54a6801b01b59f4dffe7a690917d1db9406b42dbd0df7"
+    ],
+    "books": [
+      {
+        "asset_uid": "3d63a9a4db0d9eebf66499b4e437337b09fe5bd06022828814a8c5e9db26f2fb",
+        "title": "Optimal, Integral, Likely Optimization, Integral Calculus, and Probability for Students of Commerce and the Social Sciences",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/optimal-integral-likely-optimization-integral-calculus-and-probability-for-students-of-commerce-and-the-social-sciences"
+      },
+      {
+        "asset_uid": "1799dbaf54b5a17315db2227e51eb8e9f2fe50c80e200601128c8db9695d7d9c",
+        "title": "Multivariable Calculus",
+        "source_url": "https://ocw.mit.edu/courses/18-02-multivariable-calculus-fall-2007/"
+      },
+      {
+        "asset_uid": "a7e46cb15d4c959a0786f6b5f293b2d76ea505845717045705e57a452c452600",
+        "title": "Multivariable Calculus",
+        "source_url": "https://ocw.mit.edu/courses/18-02sc-multivariable-calculus-fall-2010/"
+      },
+      {
+        "asset_uid": "18738220d76e1f45d1a9e9989726b526ecdef3ef71d7d3ddc1bffd401fd7c2d4",
+        "title": "Multivariable Calculus with Theory",
+        "source_url": "https://ocw.mit.edu/courses/18-024-multivariable-calculus-with-theory-spring-2011/"
+      },
+      {
+        "asset_uid": "6dfd6609ef91e71e590d32b5d33ab55fcc8d5bb9e4e53677601f4e5a210df5ed",
+        "title": "Real Analysis",
+        "source_url": "https://ocw.mit.edu/courses/18-100a-real-analysis-fall-2020/"
+      },
+      {
+        "asset_uid": "0340b3e71a4ddb60a00c00eec7cba4deb1cbc58c0fa65300b889a7ef6ff709a9",
+        "title": "Calculus with Theory",
+        "source_url": "https://ocw.mit.edu/courses/18-014-calculus-with-theory-fall-2010/"
+      },
+      {
+        "asset_uid": "24cfbd393a9b3ab9cb7e405f641f754e7edeba3025e32eb0ea794a948649526d",
+        "title": "Single Variable Calculus",
+        "source_url": "https://ocw.mit.edu/courses/18-01-single-variable-calculus-fall-2006/"
+      },
+      {
+        "asset_uid": "0971f5d6d401175afa6d176e7d9aceb745547194c5837937e719147efee89ce2",
+        "title": "Single Variable Calculus",
+        "source_url": "https://ocw.mit.edu/courses/18-01-single-variable-calculus-fall-2005/"
+      },
+      {
+        "asset_uid": "442c2a8a557c55407167505c7b1742950a1358c8d41d0b6c2c142e31c590f6f2",
+        "title": "Single Variable Calculus",
+        "source_url": "https://ocw.mit.edu/courses/18-01sc-single-variable-calculus-fall-2010/"
+      },
+      {
+        "asset_uid": "ea56bf1c1167cc2d6dc5e02bf0724612866ee0ad05dd5a649bb7cdd80d0f39b2",
+        "title": "Advanced Stochastic Processes",
+        "source_url": "https://ocw.mit.edu/courses/15-070j-advanced-stochastic-processes-fall-2013/"
+      },
+      {
+        "asset_uid": "5e8121afe4c55032f9ec49be49ebfbc02bebfcfa09469b29061869904b09c6dc",
+        "title": "Random Walks and Diffusion",
+        "source_url": "https://ocw.mit.edu/courses/18-366-random-walks-and-diffusion-fall-2006/"
+      },
+      {
+        "asset_uid": "156d66983a1eefbd9e7c85a7e9f1d5f001d371cf0d5054630719515f16acbf17",
+        "title": "Matrix Calculus for Machine Learning and Beyond",
+        "source_url": "https://ocw.mit.edu/courses/18-s096-matrix-calculus-for-machine-learning-and-beyond-january-iap-2023/"
+      },
+      {
+        "asset_uid": "4acf9a7ac6accbdcb517b26bde043ce41ff759c5b11a5fde3751dad461c98658",
+        "title": "Free Calculus Volume 1 Textbook Available for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/calculus-volume-1"
+      },
+      {
+        "asset_uid": "1f9ef4286ee107b58eebf89987eb9c1f4485d90ba8503533834d1a0e8fd59df2",
+        "title": "Free Calculus Volume 3 Textbook Available for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/calculus-volume-3"
+      },
+      {
+        "asset_uid": "5750b23cec528a4ce27c0a660e55d6e83facf8130917dc6d1360b0fa074cdd47",
+        "title": "Free Calculus Volume 2 Textbook Available for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/calculus-volume-2"
+      },
+      {
+        "asset_uid": "010d59502a3c6db0513b6144eb0cc0c6d71a49b0b29c847230d9b210ac87b134",
+        "title": "Theory of Probability",
+        "source_url": "https://ocw.mit.edu/courses/18-175-theory-of-probability-spring-2014/"
+      },
+      {
+        "asset_uid": "28009c355cb7db954ad593338ecab53fc2e4a5a368c582d3fe777b981b843039",
+        "title": "Real Analysis",
+        "source_url": "https://ocw.mit.edu/courses/18-100c-real-analysis-fall-2012/"
+      },
+      {
+        "asset_uid": "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
+        "title": "Statistical Method in Economics",
+        "source_url": "https://ocw.mit.edu/courses/14-381-statistical-method-in-economics-fall-2018/"
+      },
+      {
+        "asset_uid": "01b176f1e613815c3d412b165e1c082a44e765095a607dafd0fe26ce42fb7e87",
+        "title": "Probability and Random Variables",
+        "source_url": "https://ocw.mit.edu/courses/18-600-probability-and-random-variables-fall-2019/"
+      },
+      {
+        "asset_uid": "0d703a450043aaec4509ba947660cc80ff80a05ee7b8de3a0a4cb969ccd791e7",
+        "title": "Probability and Random Variables",
+        "source_url": "https://ocw.mit.edu/courses/18-440-probability-and-random-variables-spring-2014/"
+      },
+      {
+        "asset_uid": "115c9c70886ecb0917b8490e634fd7c678ce2ee758bab36f1f25b1e7e598112f",
+        "title": "Identification, Estimation, and Learning",
+        "source_url": "https://ocw.mit.edu/courses/2-160-identification-estimation-and-learning-spring-2006/"
+      },
+      {
+        "asset_uid": "08c79d5c3d5df1d072e084ad931523d282f87be5057c31b2840ddc6f19ab3507",
+        "title": "Linear Algebra",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/linear-algebra-2016"
+      },
+      {
+        "asset_uid": "06126a2c0f574ad813816649f64fd5f67fc52af5a0edb783af264f6a25e1d6ed",
+        "title": "Design and Manufacturing II",
+        "source_url": "https://ocw.mit.edu/courses/2-008-design-and-manufacturing-ii-spring-2025/"
+      },
+      {
+        "asset_uid": "07ca87744e0e0340e8b88a6b62682ff6c31ac494943f3045819aef6e793fab16",
+        "title": "Analysis II",
+        "source_url": "https://ocw.mit.edu/courses/18-101-analysis-ii-fall-2005/"
+      },
+      {
+        "asset_uid": "5395084c3a6e6767d8d54a6801b01b59f4dffe7a690917d1db9406b42dbd0df7",
+        "title": "Precalculus",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/precalculus-2016"
+      }
+    ]
+  },
+  "Vật lý đại cương": {
+    "asset_uids": [
+      "384d48d55fddd254849a620ed816919b62bb068ade713f9bc48ab9d01cf8590b",
+      "ca55bbd7b3ef4bbd6014eed7fac20a342240377eb09cfc70aa2e1e17755fdce9",
+      "1e64ab8e6f1dfeadc05930281bdf9aadf18e8c5963a22c516cc660c5313b3327",
+      "16c8e8b15353b8f79d2d3aef745925224e21c08c94404ba49bb7ff00ae94dd24",
+      "4665617a83cf91cf0ecccf609e1796a61f8eedf55335bbfb045464a9ead655c5",
+      "05bb5f902ad81ca77fbe0f7337b572e41ee60e9121cddcec566687d24a9c8188",
+      "0e834ce5887a69a8e57b93b22a6062bee766b611a66308646ac5564cd090cdb2",
+      "76b593defbd88d748d114686f06b7ad3ac4328c78128692a919711eef299275c",
+      "05a686f8c8b860d5dfad9bd35a3554967bdb9d324243b9255acb9c4c5e6be931",
+      "02cfb579d1cedc2bd2cba14d18a925c33865c0d5e9cc34fe1fdb56d781916ffb",
+      "03bffead4223f3816739583bb8c0035d556f526676cbf47de78aedb86a2fe5f5",
+      "b5a5635afcc9627463e38b06ecaf4a09ba19f9e6d0f5a345253b0e0ec5a081c1",
+      "13c751c7ae365d74344d840421086d34d94871dff84cedd4c5c56f673cb19bf2",
+      "6fc137c83cc6065cd712e3ef7dbaba2afbb699768ea60d9c6ff80ef7645551e8",
+      "32822fdfff0812a02e6163dbbedc6937a2870200841a3b2aeb5d81105670ffc9",
+      "24f33bf3f9e59847a55198e6ac76706eeb189cfbaff092419312c4df58f47b1b",
+      "0d03e01c736a6d8e9e428abd797987e6a0c285505581fe52b9531e2afabbb222",
+      "d8d87b55c9adbe8ed3d9a4efb4c314922484b84a51a768470962a59bb3828594",
+      "a34bc34447f7869050b66843053cbc57fbbabf32d3985ccad5dad079f40b8925",
+      "37421cb2159983b0911f2fa837e651ad3eb0b30e1745579fb19bf416db91b53f",
+      "09a173f8d0796fdd56ff73fe8564773ebb2a7bfe9cbcf7bb872f2a931d586636",
+      "60a1e4d2cbd6ecd0ecadc1d29b171f0f76700d192dc1fb9d37c9b896a538503f",
+      "4bcec95f4a0dd87dc5f4a2118198ab3fb0b290c02498f9b5b787a41a78aeed82",
+      "38103a84ec3a5311263bd8f5adec78d6aa9eebd0e08084dc122ee62d27763fa5",
+      "2657af0e3c4712f3504b82e109916124c06b76f9c6478bfb25e65d1b7fc035d2"
+    ],
+    "books": [
+      {
+        "asset_uid": "384d48d55fddd254849a620ed816919b62bb068ade713f9bc48ab9d01cf8590b",
+        "title": "Computational Quantum Mechanics of Molecular and Extended Systems",
+        "source_url": "https://ocw.mit.edu/courses/10-675j-computational-quantum-mechanics-of-molecular-and-extended-systems-fall-2004/"
+      },
+      {
+        "asset_uid": "ca55bbd7b3ef4bbd6014eed7fac20a342240377eb09cfc70aa2e1e17755fdce9",
+        "title": "Principles of Mechanics: Fundamental University Physics",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/principles-of-mechanics-fundamental-university-physics"
+      },
+      {
+        "asset_uid": "1e64ab8e6f1dfeadc05930281bdf9aadf18e8c5963a22c516cc660c5313b3327",
+        "title": "Geometry and Quantum Field Theory",
+        "source_url": "https://ocw.mit.edu/courses/18-238-geometry-and-quantum-field-theory-spring-2023/"
+      },
+      {
+        "asset_uid": "16c8e8b15353b8f79d2d3aef745925224e21c08c94404ba49bb7ff00ae94dd24",
+        "title": "Structural Mechanics",
+        "source_url": "https://ocw.mit.edu/courses/2-080j-structural-mechanics-fall-2013/"
+      },
+      {
+        "asset_uid": "4665617a83cf91cf0ecccf609e1796a61f8eedf55335bbfb045464a9ead655c5",
+        "title": "Noncommutative Algebra",
+        "source_url": "https://ocw.mit.edu/courses/18-706-noncommutative-algebra-spring-2023/"
+      },
+      {
+        "asset_uid": "05bb5f902ad81ca77fbe0f7337b572e41ee60e9121cddcec566687d24a9c8188",
+        "title": "Advanced Partial Differential Equations with Applications",
+        "source_url": "https://ocw.mit.edu/courses/18-306-advanced-partial-differential-equations-with-applications-fall-2009/"
+      },
+      {
+        "asset_uid": "0e834ce5887a69a8e57b93b22a6062bee766b611a66308646ac5564cd090cdb2",
+        "title": "Engineering Mechanics I",
+        "source_url": "https://ocw.mit.edu/courses/1-050-engineering-mechanics-i-fall-2007/"
+      },
+      {
+        "asset_uid": "76b593defbd88d748d114686f06b7ad3ac4328c78128692a919711eef299275c",
+        "title": "Engineering Mechanics: Statics",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/engineering-mechanics-statics"
+      },
+      {
+        "asset_uid": "05a686f8c8b860d5dfad9bd35a3554967bdb9d324243b9255acb9c4c5e6be931",
+        "title": "Numerical Fluid Mechanics",
+        "source_url": "https://ocw.mit.edu/courses/2-29-numerical-fluid-mechanics-spring-2015/"
+      },
+      {
+        "asset_uid": "02cfb579d1cedc2bd2cba14d18a925c33865c0d5e9cc34fe1fdb56d781916ffb",
+        "title": "Climate Physics and Chemistry",
+        "source_url": "https://ocw.mit.edu/courses/12-842-climate-physics-and-chemistry-fall-2008/"
+      },
+      {
+        "asset_uid": "03bffead4223f3816739583bb8c0035d556f526676cbf47de78aedb86a2fe5f5",
+        "title": "Atmospheric Physics and Chemistry",
+        "source_url": "https://ocw.mit.edu/courses/10-571j-atmospheric-physics-and-chemistry-spring-2006/"
+      },
+      {
+        "asset_uid": "b5a5635afcc9627463e38b06ecaf4a09ba19f9e6d0f5a345253b0e0ec5a081c1",
+        "title": "Mechanics and Materials II",
+        "source_url": "https://ocw.mit.edu/courses/2-002-mechanics-and-materials-ii-spring-2004/"
+      },
+      {
+        "asset_uid": "13c751c7ae365d74344d840421086d34d94871dff84cedd4c5c56f673cb19bf2",
+        "title": "COMPUTATIONAL PHYSICS: A Practical Introduction to Computational Physics and Scientific Computing (using C++) - Second Edition",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/computational-physics-a-practical-introduction-to-computational-physics-and-scientific-computing-using-c"
+      },
+      {
+        "asset_uid": "6fc137c83cc6065cd712e3ef7dbaba2afbb699768ea60d9c6ff80ef7645551e8",
+        "title": "Physics and Chemistry of the Terrestrial Planets",
+        "source_url": "https://ocw.mit.edu/courses/12-002-physics-and-chemistry-of-the-terrestrial-planets-fall-2008/"
+      },
+      {
+        "asset_uid": "32822fdfff0812a02e6163dbbedc6937a2870200841a3b2aeb5d81105670ffc9",
+        "title": "Mechanics of Material Systems: An Energy Approach",
+        "source_url": "https://ocw.mit.edu/courses/1-033-mechanics-of-material-systems-an-energy-approach-fall-2003/"
+      },
+      {
+        "asset_uid": "24f33bf3f9e59847a55198e6ac76706eeb189cfbaff092419312c4df58f47b1b",
+        "title": "Free University Physics Volume 2 Book for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/university-physics-volume-2"
+      },
+      {
+        "asset_uid": "0d03e01c736a6d8e9e428abd797987e6a0c285505581fe52b9531e2afabbb222",
+        "title": "Free University Physics Volume 1 Book for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/university-physics-volume-1"
+      },
+      {
+        "asset_uid": "d8d87b55c9adbe8ed3d9a4efb4c314922484b84a51a768470962a59bb3828594",
+        "title": "Free University Physics Volume 3 Book for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/university-physics-volume-3"
+      },
+      {
+        "asset_uid": "a34bc34447f7869050b66843053cbc57fbbabf32d3985ccad5dad079f40b8925",
+        "title": "Elements of Mechanical Design",
+        "source_url": "https://ocw.mit.edu/courses/2-72-elements-of-mechanical-design-spring-2009/"
+      },
+      {
+        "asset_uid": "37421cb2159983b0911f2fa837e651ad3eb0b30e1745579fb19bf416db91b53f",
+        "title": "Applications of Continuum Mechanics to Earth, Atmospheric, and Planetary Sciences",
+        "source_url": "https://ocw.mit.edu/courses/12-005-applications-of-continuum-mechanics-to-earth-atmospheric-and-planetary-sciences-spring-2006/"
+      },
+      {
+        "asset_uid": "09a173f8d0796fdd56ff73fe8564773ebb2a7bfe9cbcf7bb872f2a931d586636",
+        "title": "Molecular, Cellular and Tissue Biomechanics (BE.410J)",
+        "source_url": "https://ocw.mit.edu/courses/20-410j-molecular-cellular-and-tissue-biomechanics-be-410j-spring-2003/"
+      },
+      {
+        "asset_uid": "60a1e4d2cbd6ecd0ecadc1d29b171f0f76700d192dc1fb9d37c9b896a538503f",
+        "title": "Dynamics",
+        "source_url": "https://ocw.mit.edu/courses/16-07-dynamics-fall-2009/"
+      },
+      {
+        "asset_uid": "4bcec95f4a0dd87dc5f4a2118198ab3fb0b290c02498f9b5b787a41a78aeed82",
+        "title": "Radiobiology Textbook",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/radiobiology-textbook"
+      },
+      {
+        "asset_uid": "38103a84ec3a5311263bd8f5adec78d6aa9eebd0e08084dc122ee62d27763fa5",
+        "title": "Geodynamics",
+        "source_url": "https://ocw.mit.edu/courses/12-520-geodynamics-fall-2006/"
+      },
+      {
+        "asset_uid": "2657af0e3c4712f3504b82e109916124c06b76f9c6478bfb25e65d1b7fc035d2",
+        "title": "Molecular, Cellular, and Tissue Biomechanics",
+        "source_url": "https://ocw.mit.edu/courses/20-310j-molecular-cellular-and-tissue-biomechanics-spring-2015/"
+      }
+    ]
+  },
+  "Marketing": {
+    "asset_uids": [
+      "534e49e701e0db14bdbf2a2589465ef75a216bc73393ffe34034633a6eec8d4b",
+      "54e8501e0f3f0edfc3125d9a4fb624bbf5459eebc0779952e82d1fd146a68e8a",
+      "18e1880dd1c3f25b4a070f721c58b32c74b16ba74babd609a4bcf5bf1e3dff56",
+      "fb294b5df92a84a9ca4f3a6335838709e83ffb1b04d26df751c8396c7a941bd3",
+      "7a4639904569a5195762d396367d4c39d788eda771214f17d1fc2a127f9fa141",
+      "5a7c6a692eec5c9bb6269febd54c34adb86f5903b930b3980d069103f194d7cb",
+      "34ad84b83b026e6235f11a7f39c9500a2581d44cf9511a18d1509349f60a5822",
+      "9ce77ce6f0557434f8819b8d16875f471015f86dbb8e08163e279f0304999a8f",
+      "3f0bcf62d0b7144884996f7b4fe442232bdefe4659b170420f92618730ff28fc",
+      "de2c1f77239cc9d8b5e113869d8c00f9aeabeb959c85176c5caa7dc8418e59b1",
+      "468df29f69a1066cfa6ba481e29d0e911f459d6c486767a6ee99360a9c3e25b8",
+      "02486132a0d593c7ea7d90f4e8b81d390c8899b16c31bdd021e55de487c389d3",
+      "2bad7f0ca76630e9026d565d8f3fb66e0d2164e21481974788e9dbc42cc89cd0",
+      "9354cb2bd88db34f5221a86f196f9282c09d2af8ca440fdf88b0a443323a3429",
+      "ded9ff01a23377dcdea5d382877ebe557990d66061937de6ed9761ebe41fe06d",
+      "846e8751d04277fdfb4e0eca1d1739138a742a752991790b89695c3e5a43eac0",
+      "ff2eaca797b356c2138186d3ff6d6e7b101dfae050a992dcfe7188f975b1c24b",
+      "158098823797f569cd8b2f4ec462564dfe1c95dc9b37f4f5dc7f057d0361794e",
+      "29cf29b80ba0ad4d62397ef862f42c0357ff477e3cec2246a62babd950f94a59",
+      "5f51b1466453b3f97e0d1d18c0f4f7434086cc09d41928d77616bfdf95879abf",
+      "0085db7a180c29f9f402bdfa087ce2ec20aaf221729a833419e60d20d3fb22f6",
+      "adc78526a51b673461c96e5a87741febaa7ae39bd3e4aace91972d3df5da7ea1",
+      "3d2b2c99f907101586114a5bd223925f95063129d996b7a1c4eea4f4ab04ae12",
+      "616fcc9579e52411a3eda9873d3986fce0441a24ffe8cccb2b664a14b57acbdb",
+      "53f9f21b70915aae55918a902f39a21506351507419b1c90a010f63eefa7cd4c"
+    ],
+    "books": [
+      {
+        "asset_uid": "534e49e701e0db14bdbf2a2589465ef75a216bc73393ffe34034633a6eec8d4b",
+        "title": "Fashion and Apparel Consumer Behavior",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/fashion-and-apparel-consumer-behavior"
+      },
+      {
+        "asset_uid": "54e8501e0f3f0edfc3125d9a4fb624bbf5459eebc0779952e82d1fd146a68e8a",
+        "title": "Marketing Management",
+        "source_url": "https://ocw.mit.edu/courses/15-810-marketing-management-fall-2010/"
+      },
+      {
+        "asset_uid": "18e1880dd1c3f25b4a070f721c58b32c74b16ba74babd609a4bcf5bf1e3dff56",
+        "title": "Marketing Strategy",
+        "source_url": "https://ocw.mit.edu/courses/15-834-marketing-strategy-spring-2003/"
+      },
+      {
+        "asset_uid": "fb294b5df92a84a9ca4f3a6335838709e83ffb1b04d26df751c8396c7a941bd3",
+        "title": "Launch! Advertising and Promotion in Real Time",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/launch-advertising-and-promotion-in-real-time"
+      },
+      {
+        "asset_uid": "7a4639904569a5195762d396367d4c39d788eda771214f17d1fc2a127f9fa141",
+        "title": "Strategic Marketing Measurement",
+        "source_url": "https://ocw.mit.edu/courses/15-822-strategic-marketing-measurement-fall-2002/"
+      },
+      {
+        "asset_uid": "5a7c6a692eec5c9bb6269febd54c34adb86f5903b930b3980d069103f194d7cb",
+        "title": "Consumer Finance: Markets, Product Design, and FinTech",
+        "source_url": "https://ocw.mit.edu/courses/15-483-consumer-finance-markets-product-design-and-fintech-spring-2018/"
+      },
+      {
+        "asset_uid": "34ad84b83b026e6235f11a7f39c9500a2581d44cf9511a18d1509349f60a5822",
+        "title": "Marketing Management: Analytics, Frameworks, and Applications",
+        "source_url": "https://ocw.mit.edu/courses/15-810-marketing-management-analytics-frameworks-and-applications-fall-2015/"
+      },
+      {
+        "asset_uid": "9ce77ce6f0557434f8819b8d16875f471015f86dbb8e08163e279f0304999a8f",
+        "title": "Legal Aspects of Marketing and Sales",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/legal-aspects-of-marketing-and-sales"
+      },
+      {
+        "asset_uid": "3f0bcf62d0b7144884996f7b4fe442232bdefe4659b170420f92618730ff28fc",
+        "title": "Free Principles of Marketing Book for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/principles-marketing"
+      },
+      {
+        "asset_uid": "de2c1f77239cc9d8b5e113869d8c00f9aeabeb959c85176c5caa7dc8418e59b1",
+        "title": "eMarketing: The Essential Guide to Marketing in a Digital World - 7th Edition",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/emarketing-the-essential-guide-to-marketing-in-a-digital-world"
+      },
+      {
+        "asset_uid": "468df29f69a1066cfa6ba481e29d0e911f459d6c486767a6ee99360a9c3e25b8",
+        "title": "The Anthropology of Politics: U.S. Presidential Election Edition",
+        "source_url": "https://ocw.mit.edu/courses/21a-506-the-anthropology-of-politics-u-s-presidential-election-edition-fall-2016/"
+      },
+      {
+        "asset_uid": "02486132a0d593c7ea7d90f4e8b81d390c8899b16c31bdd021e55de487c389d3",
+        "title": "The Business of Politics: A View of Latin America",
+        "source_url": "https://ocw.mit.edu/courses/21a-506-the-business-of-politics-a-view-of-latin-america-spring-2014/"
+      },
+      {
+        "asset_uid": "2bad7f0ca76630e9026d565d8f3fb66e0d2164e21481974788e9dbc42cc89cd0",
+        "title": "Principles of Microeconomics",
+        "source_url": "https://ocw.mit.edu/courses/14-01-principles-of-microeconomics-fall-2023/"
+      },
+      {
+        "asset_uid": "9354cb2bd88db34f5221a86f196f9282c09d2af8ca440fdf88b0a443323a3429",
+        "title": "The Economics of Information: Strategy, Structure and Pricing",
+        "source_url": "https://ocw.mit.edu/courses/15-567-the-economics-of-information-strategy-structure-and-pricing-fall-2010/"
+      },
+      {
+        "asset_uid": "ded9ff01a23377dcdea5d382877ebe557990d66061937de6ed9761ebe41fe06d",
+        "title": "Introduction to Communication and Media Studies",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introduction-to-communication-and-media-studies"
+      },
+      {
+        "asset_uid": "846e8751d04277fdfb4e0eca1d1739138a742a752991790b89695c3e5a43eac0",
+        "title": "Optimization Methods in Management Science",
+        "source_url": "https://ocw.mit.edu/courses/15-053-optimization-methods-in-management-science-spring-2013/"
+      },
+      {
+        "asset_uid": "ff2eaca797b356c2138186d3ff6d6e7b101dfae050a992dcfe7188f975b1c24b",
+        "title": "Intermediate Microeconomic Theory",
+        "source_url": "https://ocw.mit.edu/courses/14-04-intermediate-microeconomic-theory-fall-2020/"
+      },
+      {
+        "asset_uid": "158098823797f569cd8b2f4ec462564dfe1c95dc9b37f4f5dc7f057d0361794e",
+        "title": "Microeconomic Theory and Public Policy",
+        "source_url": "https://ocw.mit.edu/courses/14-03-microeconomic-theory-and-public-policy-fall-2016/"
+      },
+      {
+        "asset_uid": "29cf29b80ba0ad4d62397ef862f42c0357ff477e3cec2246a62babd950f94a59",
+        "title": "Modern Japan: 1868 to Present",
+        "source_url": "https://ocw.mit.edu/courses/21h-155-modern-japan-1868-to-present-spring-2017/"
+      },
+      {
+        "asset_uid": "5f51b1466453b3f97e0d1d18c0f4f7434086cc09d41928d77616bfdf95879abf",
+        "title": "Political Science Scope and Methods",
+        "source_url": "https://ocw.mit.edu/courses/17-801-political-science-scope-and-methods-fall-2017/"
+      },
+      {
+        "asset_uid": "0085db7a180c29f9f402bdfa087ce2ec20aaf221729a833419e60d20d3fb22f6",
+        "title": "Transit Management",
+        "source_url": "https://ocw.mit.edu/courses/1-259j-transit-management-fall-2006/"
+      },
+      {
+        "asset_uid": "adc78526a51b673461c96e5a87741febaa7ae39bd3e4aace91972d3df5da7ea1",
+        "title": "Precision Machine Design",
+        "source_url": "https://ocw.mit.edu/courses/2-75-precision-machine-design-fall-2001/"
+      },
+      {
+        "asset_uid": "3d2b2c99f907101586114a5bd223925f95063129d996b7a1c4eea4f4ab04ae12",
+        "title": "Workshop in IT: Collaborative Innovation Networks",
+        "source_url": "https://ocw.mit.edu/courses/15-599-workshop-in-it-collaborative-innovation-networks-fall-2011/"
+      },
+      {
+        "asset_uid": "616fcc9579e52411a3eda9873d3986fce0441a24ffe8cccb2b664a14b57acbdb",
+        "title": "Transportation Systems Analysis: Demand and Economics",
+        "source_url": "https://ocw.mit.edu/courses/1-201j-transportation-systems-analysis-demand-and-economics-fall-2008/"
+      },
+      {
+        "asset_uid": "53f9f21b70915aae55918a902f39a21506351507419b1c90a010f63eefa7cd4c",
+        "title": "GlobalHealth Lab",
+        "source_url": "https://ocw.mit.edu/courses/15-s07-globalhealth-lab-spring-2013/"
+      }
+    ]
+  },
+  "Kinh tế vi mô và vĩ mô": {
+    "asset_uids": [
+      "5b3414b5fd64b3a47678fb232751cc7af94389308488446ab64345e4423d36fe",
+      "2bad7f0ca76630e9026d565d8f3fb66e0d2164e21481974788e9dbc42cc89cd0",
+      "2d55adf5ef97519693e6d2645fdd06bad3e9ebd28d2eb067d6864bac33aaad4f",
+      "ca1b1113979c8414d4aa4b34679f2e97b449d5279b6a216f91c25efde652f3ba",
+      "22cb5006934cc637001bbcfb167d6e1f61529bc42fd0802853c00ea5f0de1dcb",
+      "7fb7511a9d32760dd38e0fbc8d8b2a8ac4ba01609f8f36aa9ab0893a01a1b5d2",
+      "8d230552b601dde0618b35f386105ca71641f87a7d78869ae4697df94daeb364",
+      "e78c1444ee2b34dfc7fd6ec7be089eb373dac3f6b3e1e7f23c14518c0960575a",
+      "132fae259cdb54640a24021e197e6f5bc8e1581342301681257a3643e9a8ca6d",
+      "af04a6bf069d622ee5aa13e1bebc7025e432c22ae889f1036808b0bc29b2611d",
+      "7ff85bf0d1eb2be167d131085fb82664893630d2725c7307ec8d6106bdbb2ae5",
+      "b73bcdf3485214fe0fade4dae0c834f55be9cdf90973838e38286661a0234f07",
+      "0c3ba04ccbfa412c954dd68c6852495eee4b6e47a970640cfc1e4a1120a83265"
+    ],
+    "books": [
+      {
+        "asset_uid": "5b3414b5fd64b3a47678fb232751cc7af94389308488446ab64345e4423d36fe",
+        "title": "Intermediate Macroeconomics",
+        "source_url": "https://ocw.mit.edu/courses/14-05-intermediate-macroeconomics-spring-2013/"
+      },
+      {
+        "asset_uid": "2bad7f0ca76630e9026d565d8f3fb66e0d2164e21481974788e9dbc42cc89cd0",
+        "title": "Principles of Microeconomics",
+        "source_url": "https://ocw.mit.edu/courses/14-01-principles-of-microeconomics-fall-2023/"
+      },
+      {
+        "asset_uid": "2d55adf5ef97519693e6d2645fdd06bad3e9ebd28d2eb067d6864bac33aaad4f",
+        "title": "Development Economics: Macroeconomics",
+        "source_url": "https://ocw.mit.edu/courses/14-772-development-economics-macroeconomics-spring-2013/"
+      },
+      {
+        "asset_uid": "ca1b1113979c8414d4aa4b34679f2e97b449d5279b6a216f91c25efde652f3ba",
+        "title": "Microeconomics: Theory Through Applications",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/microeconomics-theory-through-applications"
+      },
+      {
+        "asset_uid": "22cb5006934cc637001bbcfb167d6e1f61529bc42fd0802853c00ea5f0de1dcb",
+        "title": "Macroeconomics: Theory through Applications",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/macroeconomics-theory-through-applications"
+      },
+      {
+        "asset_uid": "7fb7511a9d32760dd38e0fbc8d8b2a8ac4ba01609f8f36aa9ab0893a01a1b5d2",
+        "title": "Advanced Macroeconomics: An Easy Guide",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/advanced-macroeconomics-an-easy-guide"
+      },
+      {
+        "asset_uid": "8d230552b601dde0618b35f386105ca71641f87a7d78869ae4697df94daeb364",
+        "title": "Liquidity, Markets and Trading in Action",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/liquidity-markets-and-trading-in-action"
+      },
+      {
+        "asset_uid": "e78c1444ee2b34dfc7fd6ec7be089eb373dac3f6b3e1e7f23c14518c0960575a",
+        "title": "Free Principles of Microeconomics 3e Book for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/principles-microeconomics-3e"
+      },
+      {
+        "asset_uid": "132fae259cdb54640a24021e197e6f5bc8e1581342301681257a3643e9a8ca6d",
+        "title": "Free Principles of Macroeconomics 3e Book for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/principles-macroeconomics-3e"
+      },
+      {
+        "asset_uid": "af04a6bf069d622ee5aa13e1bebc7025e432c22ae889f1036808b0bc29b2611d",
+        "title": "Applied Economics for Managers",
+        "source_url": "https://ocw.mit.edu/courses/15-024-applied-economics-for-managers-summer-2004/"
+      },
+      {
+        "asset_uid": "7ff85bf0d1eb2be167d131085fb82664893630d2725c7307ec8d6106bdbb2ae5",
+        "title": "Introduction to Economic Analysis",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/introduction-to-economic-analysis"
+      },
+      {
+        "asset_uid": "b73bcdf3485214fe0fade4dae0c834f55be9cdf90973838e38286661a0234f07",
+        "title": "Intermediate Macroeconomic Theory",
+        "source_url": "https://ocw.mit.edu/courses/14-06-intermediate-macroeconomic-theory-spring-2004/"
+      },
+      {
+        "asset_uid": "0c3ba04ccbfa412c954dd68c6852495eee4b6e47a970640cfc1e4a1120a83265",
+        "title": "Time Series Analysis",
+        "source_url": "https://ocw.mit.edu/courses/14-384-time-series-analysis-fall-2013/"
+      }
+    ]
+  },
+  "Nguyên lý kế toán": {
+    "asset_uids": [
+      "01617e75576b6873daa31ba6d4250cae801c41ce652ee949c8c664a90595b055",
+      "12af48401732a14c0a1514718eecd97520c57b91dbdc6b51814d4e7b1edd1025",
+      "0723f336577148589b7800f5c5333f87342dac71505d155b29ab0f13e2a1be45",
+      "26b259252cc33129dac8df020be1124ee051d14582b54a9293646d67432ba12e",
+      "1cd79bee13ad3f213a2988a57fb244acb945f1273958f99e7cf2e86dfe95b5e7",
+      "f9b6ee50383e53a0afa30b01bbd8c12a06de52f40bfdcead33f1bd20c1cb86ea",
+      "502b574b2b241936e0a5c73a223e6da2586bfe8e0190a233c568a5492813ba63",
+      "1b0155d5735b4366812e8effc0d1cf60e3a9a9ceb643903a8864c46e49a7eaad",
+      "0d23634b971e39d876c96d6edb5fa760905448fd68a7ef97cdb956a05169b052",
+      "1b6f46cf11fca2ded90195d93ea1ae2490d4609c1d32d2cad77b1b9d4a0e3989",
+      "22b531f4f892b1c8ff0ce664561ab3f5549f7f0c058256a7ddc5bb0377b5730c",
+      "02a985a1015630f2f750aa1106a3d8a7f651cfd999a87d6421129232e0ef5525",
+      "05e60f3a355fed8acbdd2d02d30419cd4a82a0c737b69749001fd98a3ae9f282",
+      "f6f2c14aeb7849f8cb15633af0ad1e0832c1302dae0ce5db362008aae55d2188",
+      "09df2690a894e9f9f3b65c4102d2dcfafb68f8743586a36605af5ed6b6854835",
+      "1b7c04745498313cb671833f809ab238184ae5dd827aafa8508041243adcb68b",
+      "08c6d0c8b6218f72c889a591c9689312adfe9e9a948ae63faef641e303415463",
+      "0c959ab0a25ecd70cfcbcee454f2be732b26280c04c77b23873a0a0c20ae119a",
+      "053f56518e8685dc3a10d6e4d62731c21a777f37a5dacdb1a3b259e8a180eb03",
+      "aaf7d74e3f47e10d57c463f574e8e445db72d301c1135fd5eb497f5b2277cef9",
+      "2f1e053c0043d8f88b303dc9c2bf7d008bc3da7694e3d3ea72a17824fe040930",
+      "22863022e0b5ed9b3f7b1f8671860ef407afddf5c205eb25fe7e5a33c2d1a632",
+      "9354cb2bd88db34f5221a86f196f9282c09d2af8ca440fdf88b0a443323a3429",
+      "34ad84b83b026e6235f11a7f39c9500a2581d44cf9511a18d1509349f60a5822",
+      "2dc1615f93f2817ca57a25a453d11a4bb33c8a962f172f6c5ca2e62076a0ef5d"
+    ],
+    "books": [
+      {
+        "asset_uid": "01617e75576b6873daa31ba6d4250cae801c41ce652ee949c8c664a90595b055",
+        "title": "Financial and Managerial Accounting",
+        "source_url": "https://ocw.mit.edu/courses/15-514-financial-and-managerial-accounting-summer-2003/"
+      },
+      {
+        "asset_uid": "12af48401732a14c0a1514718eecd97520c57b91dbdc6b51814d4e7b1edd1025",
+        "title": "Introduction to Financial and Managerial Accounting",
+        "source_url": "https://ocw.mit.edu/courses/15-501-introduction-to-financial-and-managerial-accounting-spring-2004/"
+      },
+      {
+        "asset_uid": "0723f336577148589b7800f5c5333f87342dac71505d155b29ab0f13e2a1be45",
+        "title": "Managerial Accounting",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/managerial-accounting"
+      },
+      {
+        "asset_uid": "26b259252cc33129dac8df020be1124ee051d14582b54a9293646d67432ba12e",
+        "title": "Financial Accounting",
+        "source_url": "https://ocw.mit.edu/courses/15-511-financial-accounting-summer-2004/"
+      },
+      {
+        "asset_uid": "1cd79bee13ad3f213a2988a57fb244acb945f1273958f99e7cf2e86dfe95b5e7",
+        "title": "Financial Accounting",
+        "source_url": "https://ocw.mit.edu/courses/15-515-financial-accounting-fall-2003/"
+      },
+      {
+        "asset_uid": "f9b6ee50383e53a0afa30b01bbd8c12a06de52f40bfdcead33f1bd20c1cb86ea",
+        "title": "Principles of Accounting, Volume 2: Managerial Accounting - OpenStax",
+        "source_url": "https://openstax.org/details/books/principles-managerial-accounting"
+      },
+      {
+        "asset_uid": "502b574b2b241936e0a5c73a223e6da2586bfe8e0190a233c568a5492813ba63",
+        "title": "Principles of Accounting, Volume 1: Financial Accounting - OpenStax",
+        "source_url": "https://openstax.org/details/books/principles-financial-accounting"
+      },
+      {
+        "asset_uid": "1b0155d5735b4366812e8effc0d1cf60e3a9a9ceb643903a8864c46e49a7eaad",
+        "title": "Managerial Psychology",
+        "source_url": "https://ocw.mit.edu/courses/15-301-managerial-psychology-fall-2006/"
+      },
+      {
+        "asset_uid": "0d23634b971e39d876c96d6edb5fa760905448fd68a7ef97cdb956a05169b052",
+        "title": "Managerial Psychology Laboratory",
+        "source_url": "https://ocw.mit.edu/courses/15-310-managerial-psychology-laboratory-spring-2003/"
+      },
+      {
+        "asset_uid": "1b6f46cf11fca2ded90195d93ea1ae2490d4609c1d32d2cad77b1b9d4a0e3989",
+        "title": "Managerial Psychology Laboratory",
+        "source_url": "https://ocw.mit.edu/courses/15-301-managerial-psychology-laboratory-fall-2004/"
+      },
+      {
+        "asset_uid": "22b531f4f892b1c8ff0ce664561ab3f5549f7f0c058256a7ddc5bb0377b5730c",
+        "title": "Financial Management",
+        "source_url": "https://ocw.mit.edu/courses/15-414-financial-management-summer-2003/"
+      },
+      {
+        "asset_uid": "02a985a1015630f2f750aa1106a3d8a7f651cfd999a87d6421129232e0ef5525",
+        "title": "Financial Crises",
+        "source_url": "https://ocw.mit.edu/courses/14-09-financial-crises-january-iap-2016/"
+      },
+      {
+        "asset_uid": "05e60f3a355fed8acbdd2d02d30419cd4a82a0c737b69749001fd98a3ae9f282",
+        "title": "Management Accounting and Control",
+        "source_url": "https://ocw.mit.edu/courses/15-963-management-accounting-and-control-spring-2007/"
+      },
+      {
+        "asset_uid": "f6f2c14aeb7849f8cb15633af0ad1e0832c1302dae0ce5db362008aae55d2188",
+        "title": "Management Accounting and Control",
+        "source_url": "https://ocw.mit.edu/courses/15-521-management-accounting-and-control-spring-2003/"
+      },
+      {
+        "asset_uid": "09df2690a894e9f9f3b65c4102d2dcfafb68f8743586a36605af5ed6b6854835",
+        "title": "Analyzing and Accounting for Regional Economic Growth",
+        "source_url": "https://ocw.mit.edu/courses/11-481j-analyzing-and-accounting-for-regional-economic-growth-spring-2009/"
+      },
+      {
+        "asset_uid": "1b7c04745498313cb671833f809ab238184ae5dd827aafa8508041243adcb68b",
+        "title": "The Law of Corporate Finance and Financial Markets",
+        "source_url": "https://ocw.mit.edu/courses/15-617-the-law-of-corporate-finance-and-financial-markets-spring-2004/"
+      },
+      {
+        "asset_uid": "08c6d0c8b6218f72c889a591c9689312adfe9e9a948ae63faef641e303415463",
+        "title": "The Impact of Globalization on the Built Environment",
+        "source_url": "https://ocw.mit.edu/courses/1-463j-the-impact-of-globalization-on-the-built-environment-fall-2009/"
+      },
+      {
+        "asset_uid": "0c959ab0a25ecd70cfcbcee454f2be732b26280c04c77b23873a0a0c20ae119a",
+        "title": "Financing Economic Development",
+        "source_url": "https://ocw.mit.edu/courses/11-437-financing-economic-development-fall-2016/"
+      },
+      {
+        "asset_uid": "053f56518e8685dc3a10d6e4d62731c21a777f37a5dacdb1a3b259e8a180eb03",
+        "title": "Finance Theory I",
+        "source_url": "https://ocw.mit.edu/courses/15-401-finance-theory-i-fall-2008/"
+      },
+      {
+        "asset_uid": "aaf7d74e3f47e10d57c463f574e8e445db72d301c1135fd5eb497f5b2277cef9",
+        "title": "Money and Banking",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/money-and-banking"
+      },
+      {
+        "asset_uid": "2f1e053c0043d8f88b303dc9c2bf7d008bc3da7694e3d3ea72a17824fe040930",
+        "title": "Analytics of Finance",
+        "source_url": "https://ocw.mit.edu/courses/15-450-analytics-of-finance-fall-2010/"
+      },
+      {
+        "asset_uid": "22863022e0b5ed9b3f7b1f8671860ef407afddf5c205eb25fe7e5a33c2d1a632",
+        "title": "Free Principles of Finance Textbook Available for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/principles-finance"
+      },
+      {
+        "asset_uid": "9354cb2bd88db34f5221a86f196f9282c09d2af8ca440fdf88b0a443323a3429",
+        "title": "The Economics of Information: Strategy, Structure and Pricing",
+        "source_url": "https://ocw.mit.edu/courses/15-567-the-economics-of-information-strategy-structure-and-pricing-fall-2010/"
+      },
+      {
+        "asset_uid": "34ad84b83b026e6235f11a7f39c9500a2581d44cf9511a18d1509349f60a5822",
+        "title": "Marketing Management: Analytics, Frameworks, and Applications",
+        "source_url": "https://ocw.mit.edu/courses/15-810-marketing-management-analytics-frameworks-and-applications-fall-2015/"
+      },
+      {
+        "asset_uid": "2dc1615f93f2817ca57a25a453d11a4bb33c8a962f172f6c5ca2e62076a0ef5d",
+        "title": "Managing Global Integration",
+        "source_url": "https://ocw.mit.edu/courses/15-229-managing-global-integration-spring-2012/"
+      }
+    ]
+  }
+}

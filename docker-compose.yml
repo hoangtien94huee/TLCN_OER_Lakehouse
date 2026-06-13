@@ -164,6 +164,16 @@ services:
       - CHATBOT_API_HOST=0.0.0.0
       - CHATBOT_API_PORT=8088
       - CHATBOT_PUBLIC_BASE_URL=http://172.19.24.202:18088
+      # Tier-2 cross-book retrieval (inverted index oer_pages_tier2) — improves
+      # Vietnamese content retrieval over the English OER corpus. Scope-check
+      # rejects out-of-scope questions. See evaluation/prototype_tier2_invertedindex.
+      - PAGEINDEX_TIER2_BACKEND=${PAGEINDEX_TIER2_BACKEND:-elasticsearch}
+      - PAGEINDEX_TIER2_CROSSBOOK=${PAGEINDEX_TIER2_CROSSBOOK:-1}
+      - PAGEINDEX_TIER2_CROSSBOOK_SCOPE_CHECK=${PAGEINDEX_TIER2_CROSSBOOK_SCOPE_CHECK:-1}
+      - PAGEINDEX_TIER2_ES_INDEX=${PAGEINDEX_TIER2_ES_INDEX:-oer_pages_tier2}
+      # Course-scoping: in a Moodle course matching course_book_map.json, restrict
+      # retrieval to that course's books and refuse off-course questions.
+      - PAGEINDEX_TIER2_COURSE_SCOPED=${PAGEINDEX_TIER2_COURSE_SCOPED:-1}
       - LOCAL_LLM_BACKEND=${LOCAL_LLM_BACKEND:-groq}
       - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-}
       - LOCAL_LLM_API_URL=${LOCAL_LLM_API_URL:-}

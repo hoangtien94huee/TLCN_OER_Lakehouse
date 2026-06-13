@@ -3,7 +3,6 @@ metric,value,rating
 Hit Rate (Evidence),0.8534,Rất tốt
 Tier-1 Recall@K,0.9367,Rất tốt
 Faithfulness (PageIndex),0.9114,Rất tốt
-Faithfulness (Groq LLM judge),,
 OOS Detection Rate,1.0000,Rất tốt
 Avg Latency (ms),2736.2000,—
 P50 Latency (ms),2353.4000,—

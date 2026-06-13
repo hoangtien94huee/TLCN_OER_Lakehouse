@@ -3,7 +3,7 @@
     "hit_rate": 0.6677,
     "tier1_recall_at_k": 0.6918,
     "grounded_rate": 0.6792,
-    "faithfulness": 0.0245,
+    "faithfulness": 0.0082,
     "oos_detection_rate": 0.975,
     "latency_avg_ms": 1936.8,
     "latency_p50_ms": 1688.4,
@@ -36,7 +36,7 @@
       "hit_rate": 0.6751,
       "tier1_recall_at_k": 0.8,
       "grounded_rate": 0.775,
-      "faithfulness": 0.0575,
+      "faithfulness": 0.0,
       "avg_latency_ms": 2168.69
     },
     "find_material": {
@@ -44,7 +44,7 @@
       "hit_rate": 0.6121,
       "tier1_recall_at_k": 0.6,
       "grounded_rate": 0.6,
-      "faithfulness": 0.04,
+      "faithfulness": 0.02,
       "avg_latency_ms": 2387.9725
     },
     "comparison": {
@@ -60,7 +60,7 @@
       "hit_rate": 0.7321,
       "tier1_recall_at_k": 0.7436,
       "grounded_rate": 0.7436,
-      "faithfulness": 0.0,
+      "faithfulness": 0.0128,
       "avg_latency_ms": 2304.041
     },
     "out_of_scope": {
@@ -83,7 +83,7 @@
       "tier1_recall_at_k": 1.0,
       "grounded_answer_rate": 1.0,
       "oos_correct": null,
-      "faithfulness": 1.0
+      "faithfulness": 0.0
     },
     {
       "id": "Q002",
@@ -279,7 +279,7 @@
       "tier1_recall_at_k": 1.0,
       "grounded_answer_rate": 1.0,
       "oos_correct": null,
-      "faithfulness": 0.8
+      "faithfulness": 0.0
     },
     {
       "id": "Q016",
@@ -475,7 +475,7 @@
       "tier1_recall_at_k": 1.0,
       "grounded_answer_rate": 1.0,
       "oos_correct": null,
-      "faithfulness": 0.8
+      "faithfulness": 0.0
     },
     {
       "id": "Q030",
@@ -1497,7 +1497,7 @@
       "tier1_recall_at_k": 1.0,
       "grounded_answer_rate": 1.0,
       "oos_correct": null,
-      "faithfulness": 0.5
+      "faithfulness": 0.0
     },
     {
       "id": "QVI003",
@@ -2463,7 +2463,7 @@
       "tier1_recall_at_k": 1.0,
       "grounded_answer_rate": 1.0,
       "oos_correct": null,
-      "faithfulness": 0.0
+      "faithfulness": 0.5
     },
     {
       "id": "QVI072",

@@ -100,15 +100,36 @@ define([], function() {
         return t.trim();
     }
 
-    function appendSources(container, sources) {
+    function appendSources(container, sources, config) {
         if (!sources || !sources.length) { return; }
         var validSources = sources.filter(function(s) { return s && s.title && s.url; });
         if (!validSources.length) { return; }
         var wrap = el('div', {'class': 'oerchatbot-sources'});
         var title = el('div', {'class': 'oerchatbot-sources-title'}, '📚 Nguồn tham khảo (' + validSources.length + ')');
         wrap.appendChild(title);
+
+        var apiBase = '';
+        if (config && config.apiUrl) {
+            var askIndex = config.apiUrl.indexOf('/api/ask');
+            if (askIndex !== -1) {
+                apiBase = config.apiUrl.substring(0, askIndex);
+            } else {
+                var apiIndex = config.apiUrl.indexOf('/api');
+                if (apiIndex !== -1) {
+                    apiBase = config.apiUrl.substring(0, apiIndex);
+                }
+            }
+        }
+
         validSources.forEach(function(src) {
-            var item = el('a', {'class': 'oerchatbot-source', 'href': src.url, 'target': '_blank', 'rel': 'noopener noreferrer'});
+            var url = src.url || '';
+            if (apiBase) {
+                var match = url.match(/\/api\/pdf\/[^#?]+(#page=\d+)?$/);
+                if (match) {
+                    url = apiBase + match[0];
+                }
+            }
+            var item = el('a', {'class': 'oerchatbot-source', 'href': url, 'target': '_blank', 'rel': 'noopener noreferrer'});
             var html = '<span class="oerchatbot-source-title">📄 ' + escapeHtml(src.title) + '</span>';
             if (src.page) { html += '<span class="oerchatbot-source-page">tr. ' + src.page + '</span>'; }
             if (src.section) { html += '<span class="oerchatbot-source-section">| ' + escapeHtml(src.section) + '</span>'; }
@@ -168,7 +189,7 @@ define([], function() {
         return out.join('');
     }
 
-    function appendMessage(container, who, text, sources) {
+    function appendMessage(container, who, text, sources, config) {
         var wrap = el('div');
         wrap.className = 'oerchatbot-msg ' + (who === 'user' ? 'oerchatbot-msg-user' : 'oerchatbot-msg-bot');
 
@@ -178,7 +199,7 @@ define([], function() {
         var displayText = (who === 'bot') ? cleanAnswerText(text) : text;
         bubble.innerHTML = formatMessageText(displayText);
         if (who === 'bot' && sources && sources.length) {
-            appendSources(bubble, sources);
+            appendSources(bubble, sources, config);
         }
 
         wrap.appendChild(meta);
@@ -445,7 +466,7 @@ define([], function() {
         function openBox() {
             box.style.display = 'flex';
             if (!greeted) {
-                appendMessage(msgs, 'bot', getAutoGreeting(config));
+                appendMessage(msgs, 'bot', getAutoGreeting(config), null, config);
                 appendSuggestions(msgs, getSuggestionButtons(config), function(suggestion) {
                     sendQuestion(suggestion);
                 });
@@ -477,7 +498,7 @@ define([], function() {
             if (!q) {
                 return;
             }
-            appendMessage(msgs, 'user', q);
+            appendMessage(msgs, 'user', q, null, config);
             input.value = '';
             setSendingState(true);
             appendTyping(msgs);
@@ -537,9 +558,9 @@ define([], function() {
             tryApiAt(0).then(function(data) {
                 var answer = (data && data.answer) ? data.answer : 'Mình chưa có câu trả lời phù hợp. Bạn thử diễn đạt lại chi tiết hơn nhé.';
                 var sources = (data && data.sources) ? data.sources : [];
-                appendMessage(msgs, 'bot', answer, sources);
+                appendMessage(msgs, 'bot', answer, sources, config);
             }).catch(function(err) {
-                appendMessage(msgs, 'bot', 'Kết nối tạm thời gián đoạn: ' + err.message + '. Bạn thử gửi lại sau ít giây nhé.');
+                appendMessage(msgs, 'bot', 'Kết nối tạm thời gián đoạn: ' + err.message + '. Bạn thử gửi lại sau ít giây nhé.', null, config);
             }).finally(function() {
                 removeTyping(msgs);
                 setSendingState(false);

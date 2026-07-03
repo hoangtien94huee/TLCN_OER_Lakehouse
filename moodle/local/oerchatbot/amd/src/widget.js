@@ -461,15 +461,11 @@ define([], function() {
     function getSuggestionButtons(config) {
         if (config.hasCourseContext && config.courseName) {
             return [
-                'Gợi ý tài liệu cho môn này',
-                'Giải thích khái niệm chính của bài này',
-                'Tóm tắt nhanh nội dung cần nhớ'
+                'Gợi ý tài liệu cho môn này'
             ];
         }
         return [
-            'Gợi ý tài liệu nhập môn',
-            'Giải thích khái niệm cơ bản',
-            'Cho tôi lộ trình học ngắn gọn'
+            'Gợi ý tài liệu nhập môn'
         ];
     }
 

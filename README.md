@@ -1,414 +1,181 @@
-# OER Lakehouse - Hệ thống Quản lý Tài nguyên Giáo dục Mở
+# OER Lakehouse - Hệ thống Quản lý & Tra cứu Tài nguyên Giáo dục Mở Thông minh
 
 ## Giới thiệu
 
-**OER Lakehouse** là giải pháp toàn diện để giải quyết bài toán phân mảnh tài liệu giáo dục mở. Hệ thống tự động thu thập, xử lý và tổ chức tài liệu từ nhiều nguồn (MIT OCW, OpenStax, Open Textbook Library), kết hợp với **DSpace 9** để quản lý kho lưu trữ số và cung cấp khả năng tìm kiếm thông minh cấp độ trang PDF.
+**OER Lakehouse** là giải pháp kiến trúc Data Lakehouse toàn diện, được thiết kế để giải quyết bài toán thu thập, lưu trữ, chuẩn hóa và khai thác dữ liệu từ các nguồn tài nguyên giáo dục mở (OER) lớn trên thế giới như **MIT OpenCourseWare (OCW)**, **OpenStax**, và **Open Textbook Library (OTL)**. 
 
-### Vấn đề giải quyết
-
-- **Phân mảnh dữ liệu**: Tài liệu OER nằm rải rác trên nhiều nền tảng
-- **Khó tìm kiếm**: Không thể tìm kiếm nội dung bên trong PDF
-- **Thiếu gợi ý**: Không có hệ thống recommend phù hợp với chương trình đào tạo
-- **Không thống nhất**: Metadata không đồng nhất giữa các nguồn
-
-
-## Tính năng chính
-
-### 1. Thu thập tự động (Web Scraping)
-
-- Tự động crawl từ **MIT OpenCourseWare**, **OpenStax**, **Open Textbook Library**
-- Tải PDF và trích xuất metadata
-- Lên lịch chạy định kỳ với Apache Airflow
-
-### 2. Kiến trúc Data Lakehouse (Medallion Architecture)
-
-| Layer      | Mô tả                          | Format         |
-| ---------- | ------------------------------ | -------------- |
-| **Bronze** | Dữ liệu thô (JSON, PDF)        | MinIO (S3)     |
-| **Silver** | Dữ liệu đã làm sạch, chuẩn hóa | Apache Iceberg |
-| **Gold**   | Star Schema cho analytics      | Apache Iceberg |
-
-### 3. Tìm kiếm thông minh (Deep PDF Search)
-
-- **Nested PDF Indexing**: Index nội dung từng trang PDF riêng biệt
-- **Smart Header/Footer Removal**: Tự động loại bỏ header/footer lặp lại
-- **Gaussian Decay Scoring**: Ưu tiên tài liệu mới hơn
-- **Highlight Snippets**: Hiển thị ngữ cảnh xung quanh từ khóa
-
-### 4. Hệ thống Gợi ý (Recommendation Engine)
-
-- **Content-based Filtering**: Gợi ý dựa trên nội dung tương tự
-- **Semantic Matching**: Mapping tài liệu với môn học theo chương trình đào tạo
-- **Personalized Recommendations**: Gợi ý theo ngành/khoa của sinh viên
-
-### 5. Tích hợp DSpace 9
-
-- **SAF Import**: Tự động import tài liệu vào DSpace
-- **REST API Integration**: Đồng bộ metadata với DSpace
-- **Angular Frontend**: Giao diện DSpace Angular với custom theme
-
-### 6. Rating & Review
-
-- Đánh giá và bình luận tài liệu
-- Liên kết với tài khoản DSpace (eperson)
-- Thống kê rating và helpful votes
+Dự án tích hợp sâu với kho lưu trữ số **DSpace 9**, kết hợp với công cụ tìm kiếm phân tích **Elasticsearch** và mô hình ngôn ngữ lớn **LLM (Ollama/Qwen2.5)** để cung cấp hệ thống chatbot trợ lý học tập (RAG) thông thái, có khả năng hiểu ngữ cảnh môn học và tìm kiếm chính xác đến từng trang tài liệu PDF.
 
 ---
 
 ## Sơ đồ Kiến trúc Hệ thống
-![Sơ đồ luồng dữ liệu](image/structure.png)
+
+Hệ thống hoạt động theo mô hình luồng dữ liệu tự động từ lúc thu thập đến khi phục vụ người dùng cuối:
+
+![Sơ đồ kiến trúc luồng dữ liệu](image/structure.png)
+
+---
+
+## Tính năng Nổi bật
+
+### 1. Thu thập Tự động & Kiến trúc Medallion (Apache Spark + Iceberg + MinIO)
+* **Web Scraping**: Tự động crawl tài liệu, bài giảng, và giáo trình từ các nguồn học liệu mở. Lên lịch định kỳ qua Apache Airflow.
+* **Bronze Layer**: Lưu trữ dữ liệu thô (PDF, metadata JSON) trực tiếp trên MinIO (S3-compatible).
+* **Silver Layer**: Apache Spark xử lý tách trang PDF, làm sạch văn bản (bỏ header/footer), phân tích TOC và lưu dưới định dạng bảng Apache Iceberg.
+* **Gold Layer**: Tổ chức Star Schema phục vụ báo cáo và đồng bộ dữ liệu.
+
+### 2. Trợ lý Học tập RAG (Context-Aware Chatbot)
+* Tích hợp chatbot thông minh trực tiếp vào **Moodle LMS** và **DSpace 9**.
+* **Hiểu ngữ cảnh học tập**: Chatbot tự nhận diện thông tin môn học, chương mục (`course`, `section`, `activity`) và lịch sử trò chuyện để cá nhân hóa phản hồi.
+* **Local LLM**: Kết nối **Qwen2.5:7b-instruct** chạy qua Ollama (có thể dùng mạng Tailscale) giúp bảo mật dữ liệu và dịch thuật thuật ngữ toán học chuyên sâu chuẩn xác.
+
+### 3. Tìm kiếm Thông minh (Deep PDF Search)
+* **Nested Page Indexing**: Lập chỉ mục nội dung ở cấp độ từng trang PDF riêng lẻ thay vì toàn bộ sách, giúp tìm kiếm đạt độ chính xác tối đa.
+* **Thuật toán Tối ưu**: Kết hợp BM25 trên Elasticsearch với Gaussian Decay Scoring (ưu tiên tài liệu mới) và Highlight Snippets (hiển thị ngữ cảnh quanh từ khóa).
+
+### 4. Hệ thống Gợi ý (Recommendation Engine)
+* **Semantic Matching**: Ánh xạ tự động tài liệu với môn học theo chương trình đào tạo của sinh viên.
+* **Content-based Filtering**: Đề xuất các tài liệu có nội dung tương đồng để mở rộng kiến thức.
+
+### 5. Quản lý Kho lưu trữ (DSpace 9 Integration) & Tương tác
+* **SAF Import**: Tự động đóng gói và import tài liệu vào repository của DSpace.
+* **DSpace Angular Frontend**: Tích hợp giao diện Frontend tùy biến hỗ trợ hiển thị Tiếng Việt.
+* **Rating & Review**: Cho phép sinh viên đánh giá, bình luận tài liệu và bình chọn tính hữu ích (helpful votes) gắn với tài khoản DSpace (eperson).
 
 ---
 
 ## Tech Stack
 
-| Component          | Technology     | Version |
-| ------------------ | -------------- | ------- |
-| **Data Storage**   | MinIO          | Latest  |
-| **Table Format**   | Apache Iceberg | 1.4.2   |
-| **Processing**     | Apache Spark   | 3.5.4   |
-| **Orchestration**  | Apache Airflow | 2.x     |
-| **Search Engine**  | Elasticsearch  | 8.15    |
-| **Repository**     | DSpace         | 9.x     |
-| **Backend API**    | FastAPI        | Latest  |
-| **Frontend**       | DSpace Angular | 9.1     |
-| **Database**       | PostgreSQL     | 17      |
-| **Infrastructure** | Docker Compose | Latest  |
+| Thành phần | Công nghệ | Phiên bản |
+| :--- | :--- | :--- |
+| **Data Storage** | MinIO | Latest |
+| **Table Format** | Apache Iceberg | 1.4.2 |
+| **Processing** | Apache Spark | 3.5.4 |
+| **Orchestration** | Apache Airflow | 2.x |
+| **Search Engine** | Elasticsearch | 8.15 |
+| **Repository** | DSpace | 9.x |
+| **Backend API** | FastAPI | Latest |
+| **Frontend** | DSpace Angular | 9.1 |
+| **Database** | PostgreSQL | 17 |
 
 ---
 
-## Cấu trúc Dự án
+## Cấu trúc Thư mục Dự án
 
 ```
 TLCN_OER_Lakehouse/
 ├── airflow/
-│   ├── dags/                           # Airflow DAG definitions
-│   │   ├── mit_ocw_scraper_dag.py      # MIT OCW scraper
-│   │   ├── openstax_scraper_dag.py     # OpenStax scraper
-│   │   ├── otl_scraper_dag.py          # Open Textbook Library scraper
-│   │   ├── silver_layer_processing_dag.py
-│   │   ├── gold_layer_processing_dag.py
-│   │   ├── elasticsearch_sync_dag.py
-│   │   └── dspace_saf_import_dag.py    # DSpace import
-│   ├── src/                            # Processing modules
-│   │   ├── bronze_*.py                 # Bronze layer scrapers
-│   │   ├── silver_transform.py         # Silver layer ETL
-│   │   ├── gold_analytics.py           # Gold layer analytics
-│   │   ├── elasticsearch_sync.py       # ES indexing
-│   │   ├── recommendation_engine.py    # Recommendation logic
-│   │   ├── semantic_matcher.py         # Subject matching
-│   │   ├── saf_exporter.py            # DSpace SAF export
-│   │   └── dspace_sync.py             # DSpace API sync
-│   ├── Dockerfile
-│   └── requirements.txt
-│
-├── chatbot_api/                        # FastAPI chatbot API
-│   ├── main.py                         # Chatbot endpoints
-│   ├── Dockerfile
-│   └── requirements.txt
-│
+│   ├── dags/                           # Các DAGs điều phối luồng xử lý
+│   ├── src/                            # Code xử lý ETL cốt lõi (Bronze, Silver, Gold, ElasticSync)
+│   └── Dockerfile
+├── chatbot_api/                        # FastAPI cung cấp dịch vụ Chatbot
 ├── demo/
-│   └── dspace-angular-dspace-9.1/      # DSpace Angular Frontend
-│       └── src/
-│           ├── app/
-│           │   └── item-page/
-│           │       └── simple/
-│           │           └── item-reviews/  # Custom reviews component
-│           ├── themes/custom/          # Custom theme
-│           └── assets/i18n/            # Translations (EN, VI)
-│
-├── scripts/
-│   ├── database/
-│   │   ├── giaotrinh.sql              # Reference data
-│   │   └── reviews_schema.sql          # Reviews tables
-│   └── init-postgres.sh               # DB initialization
-│
-├── data/
-│   ├── reference/                      # Faculty/Program mappings
-│   ├── scraped/                        # Scraped data cache
-│   └── iceberg-jars/                   # Spark JARs
-│
-├── docs/
-│   └── DSPACE_INTEGRATION.md          # DSpace integration guide
-│
-├── docker-compose.yml                  # Full stack deployment
+│   └── dspace-angular-fresh/           # DSpace 9 Angular Frontend (Custom Theme)
+├── moodle/
+│   └── local/oerchatbot/               # Plugin Chatbot tích hợp cho Moodle LMS
+├── scripts/                            # Script cài đặt dữ liệu mẫu & khởi động
+├── docker-compose.yml                  # Cấu hình deploy toàn bộ dịch vụ
 └── README.md
 ```
 
 ---
 
-## Hướng dẫn Cài đặt
+## Hướng dẫn Khởi động Nhanh
 
-### Yêu cầu hệ thống
+### 1. Yêu cầu Hệ thống
+* **RAM**: Khuyến nghị 16 GB (hệ thống chạy cụm Spark, Elasticsearch, Airflow, DSpace).
+* **CPU**: Tối thiểu 4 Cores.
+* **OS**: Ubuntu 20.04+, Windows 10/11 (WSL2), macOS.
 
-| Yêu cầu    | Tối thiểu                                   | Khuyến nghị |
-| ---------- | ------------------------------------------- | ----------- |
-| **RAM**    | 8 GB                                        | 16 GB       |
-| **CPU**    | 4 cores                                     | 8 cores     |
-| **Disk**   | 50 GB                                       | 100 GB      |
-| **OS**     | Windows 10/11 (WSL2), Ubuntu 20.04+, macOS  |
-| **Docker** | Docker Desktop hoặc Docker Engine + Compose |
-
-### Các bước cài đặt
-
-#### 1. Clone repository
-
+### 2. Cấu hình Biến Môi trường
+Tạo file `.env` tại thư mục gốc:
 ```bash
-git clone https://github.com/hoangtien94huee/TLCN_OER_Lakehouse.git
-cd TLCN_OER_Lakehouse
+# Cấu hình kết nối Ollama GPU (Local hoặc qua Tailscale)
+LOCAL_LLM_BACKEND=ollama
+LOCAL_LLM_MODEL=qwen2.5:7b-instruct
+LOCAL_LLM_BASE_URL=http://100.68.202.102:11434  # Thay bằng IP Ollama của bạn
+
+# Các thông số timeout
+PAGEINDEX_ASK_TIMEOUT=75
+LOCAL_LLM_PROBE_TIMEOUT=10
 ```
 
-#### 2. Cấu hình biến môi trường (tùy chọn)
-
+### 3. Khởi động Các Dịch vụ
+Khởi động cụm Lakehouse cốt lõi:
 ```bash
-# Tạo file .env nếu cần Google Gemini API cho dịch thuật
-echo "GOOGLE_API_KEY=your_api_key_here" > .env
+docker compose up -d
 ```
-
-#### 3. Khởi động hệ thống
-
+Khởi động hệ thống học tập Moodle LMS phụ trợ:
 ```bash
-# Khởi động tất cả services
-docker-compose up -d
-
-# Theo dõi logs
-docker-compose logs -f
+docker compose --profile lms up -d
 ```
-
-#### 4. Kiểm tra trạng thái
-
-```bash
-docker-compose ps
-```
-
-Chờ khoảng 2-3 phút để các services khởi động hoàn tất.
 
 ---
 
-## Truy cập Hệ thống
+## Hướng dẫn Cấu hình Chatbot trên Moodle LMS
 
-| Service            | URL                          | Credentials                   |
-| ------------------ | ---------------------------- | ----------------------------- |
-| **Airflow**        | http://localhost:8080        | `airflow` / `airflow`         |
-| **Search App**     | http://localhost:8088        | -                             |
-| **DSpace Backend** | http://localhost:8180/server | -                             |
-| **DSpace Angular** | http://localhost:4000        | `admin@dspace.org` / `dspace` |
-| **MinIO Console**  | http://localhost:9001        | `minioadmin` / `minioadmin`   |
-| **Elasticsearch**  | http://localhost:9200        | -                             |
-| **Spark Master**   | http://localhost:8081        | -                             |
-| **Solr (DSpace)**  | http://localhost:8983        | -                             |
-
----
-
-## Hướng dẫn Sử dụng
-
-### 1. Chạy Scraper thu thập dữ liệu
-
-Truy cập Airflow UI → Bật các DAGs:
-
-- `mit_ocw_scraper_daily`
-- `openstax_scraper_daily`
-- `otl_scraper_daily`
-
-### 2. Xử lý dữ liệu qua các Layer
-
-```
-Scraper → Bronze Layer → Silver Layer → Gold Layer → Elasticsearch
-```
-
-Các DAG tự động trigger theo thứ tự.
-
-### 3. Tìm kiếm tài liệu
-
-Truy cập http://localhost:8088 để tìm kiếm:
-
-- Full-text search trong nội dung PDF
-- Lọc theo nguồn (MIT, OpenStax, OTL)
-- Xem kết quả theo trang cụ thể
-
-### 4. Xem gợi ý tài liệu
-
-- Nhập MSSV để nhận gợi ý theo ngành học
-- Xem tài liệu tương tự trên trang chi tiết
-
-### 5. Import vào DSpace
-
-Chạy DAG `dspace_saf_import_dag` để:
-
-- Export tài liệu sang định dạng SAF
-- Import vào DSpace collection
-
----
-
-## Tích hợp Moodle LMS local (context-aware chatbot)
-
-Repository đã bổ sung plugin mẫu tại `moodle/local/oerchatbot` để hiển thị chatbot nổi trong Moodle và gửi ngữ cảnh trang hiện tại (`course`, `section`, `activity`, `role`) về API.
-
-### 1. Kiểm tra cổng local trước khi chạy
-
-```bash
-ss -ltnp | grep -E ':8000|:8080|:18088|:18080|:8085|:8090'
-```
-
-Nếu cổng đã bị chiếm, dùng cổng khác cho Moodle/API (ví dụ Moodle `8085`, API `18088` hoặc `8090`).
-
-### 2. Cấu hình CORS cho Chatbot API
-
-Trong service chạy `chatbot_api.py`, đặt biến môi trường:
-
-```bash
-CHATBOT_API_ALLOWED_ORIGINS=http://localhost:8085
-CHATBOT_API_KEY=your_strong_key
-```
-
-Có thể khai báo nhiều origin bằng dấu phẩy.
-
-### 3. Cài plugin vào Moodle local
-
-1. Chép thư mục `moodle/local/oerchatbot` vào `<moodle_root>/local/oerchatbot`
-2. Vào Moodle Site administration để hoàn tất bước upgrade plugin
-3. Vào `Site administration -> Plugins -> Local plugins -> OER Chatbot` và đặt:
-   - `Chatbot API URL`: ví dụ `http://127.0.0.1:18088/api/ask`
-   - `Chatbot API key`: cùng giá trị với `CHATBOT_API_KEY` ở backend
-   - `Widget position`: right/left
-   - `Enable widget`: bật
-
-### 4. Dữ liệu context gửi lên API `/api/ask`
-
-Widget gửi thêm các trường:
-
-- `course_id`, `course_name`
-- `section_id`, `section_name`
-- `activity_id`, `activity_name`
-- `role`
-- `page_url`
-
-API sẽ gắn context này vào truy vấn để ưu tiên câu trả lời theo môn/chương/bài hiện tại.
-
----
-
-## Chạy Moodle bằng Docker Compose (bản đã kiểm tra chạy)
-
-`docker-compose.yml` đã có profile `lms` với 2 service:
-
-- `moodle-db` (MariaDB 10.11)
-- `moodle` (bitnamilegacy/moodle:latest) map cổng `18085`
-
-Khởi chạy:
-
-```bash
-docker compose --profile lms up -d moodle-db moodle
-```
-
-Truy cập:
-
-- URL: `http://localhost:18085`
-- User: `admin`
-- Password: `Admin@12345`
-
-Plugin chatbot đã được mount sẵn từ repo:
-
-- `./moodle/local/oerchatbot` -> `/opt/bitnami/moodle/local/oerchatbot`
-
-Để plugin hoạt động với API hiện có:
-
-- API chatbot: `http://localhost:18088/api/ask`
-- Trong Moodle container, URL tương ứng tới host: `http://host.docker.internal:18088/api/ask`
-
-Sau lần chạy đầu, vào:
-
-`Site administration -> Plugins -> Local plugins -> OER Chatbot`
-
-và đặt `Chatbot API URL` thành:
-
-`http://host.docker.internal:18088/api/ask`
-
----
-
-## Chạy DSpace Angular (Development)
-
-DSpace Angular chạy riêng để tiết kiệm tài nguyên:
-
-```bash
-cd demo/dspace-angular-dspace-9.1
-
-# Cài đặt dependencies
-yarn install
-
-# Chạy development server
-yarn start:dev
-
-# Truy cập: http://localhost:4000
-```
-
-### Custom Theme Features
-
-- **Item Reviews Component**: Đánh giá và bình luận tài liệu
-- **Recommendation Integration**: Hiển thị gợi ý từ API
-- **Vietnamese Translation**: Hỗ trợ tiếng Việt
+1. Moodle có sẵn tại `http://localhost:18085` (Tài khoản: `admin` / `Admin@12345`).
+2. Đi tới: `Site administration -> Plugins -> Local plugins -> OER Chatbot`.
+3. Cấu hình **Chatbot API URL**: `http://host.docker.internal:18088/api/ask`.
+4. Nếu sửa mã nguồn widget (`widget.js`), chạy lệnh sau để build và xóa cache:
+   ```bash
+   docker cp moodle/local/oerchatbot/amd/src/widget.js oer-moodle:/bitnami/moodle/local/oerchatbot/amd/build/widget.min.js
+   docker exec oer-moodle php /bitnami/moodle/admin/cli/purge_caches.php
+   ```
 
 ---
 
 ## API Endpoints
 
-### Search API (`/api`)
-
-| Method | Endpoint                      | Mô tả               |
-| ------ | ----------------------------- | ------------------- |
-| GET    | `/api/search?q={query}`       | Tìm kiếm full-text  |
-| GET    | `/api/resource/{id}`          | Chi tiết tài liệu   |
-| GET    | `/api/recommend/{student_id}` | Gợi ý cho sinh viên |
-| GET    | `/api/similar/{resource_id}`  | Tài liệu tương tự   |
+### Search & Chatbot API (`/api`)
+| Method | Endpoint | Mô tả |
+| :--- | :--- | :--- |
+| GET | `/api/search?q={query}` | Tìm kiếm full-text |
+| GET | `/api/resource/{id}` | Lấy thông tin chi tiết tài liệu |
+| GET | `/api/recommend/{student_id}` | Gợi ý tài liệu cá nhân hóa |
+| POST | `/api/ask` | Tương tác với LLM RAG Chatbot |
 
 ### Reviews API (`/api/reviews`)
-
-| Method | Endpoint                     | Mô tả             |
-| ------ | ---------------------------- | ----------------- |
-| GET    | `/api/reviews/{resource_id}` | Danh sách reviews |
-| POST   | `/api/reviews`               | Thêm review       |
-| GET    | `/api/reviews/{id}/stats`    | Thống kê rating   |
-| POST   | `/api/reviews/{id}/helpful`  | Vote helpful      |
+| Method | Endpoint | Mô tả |
+| :--- | :--- | :--- |
+| GET | `/api/reviews/{resource_id}` | Lấy danh sách đánh giá |
+| POST | `/api/reviews` | Thêm đánh giá mới |
+| POST | `/api/reviews/{id}/helpful` | Bình chọn tính hữu ích |
 
 ---
 
 ## Airflow DAGs
 
-| DAG                       | Schedule      | Mô tả                       |
-| ------------------------- | ------------- | --------------------------- |
-| `mit_ocw_scraper_daily`   | Daily 2:00 AM | Crawl MIT OpenCourseWare    |
-| `openstax_scraper_daily`  | Daily 3:00 AM | Crawl OpenStax              |
-| `otl_scraper_daily`       | Daily 4:00 AM | Crawl Open Textbook Library |
-| `silver_layer_processing` | Triggered     | Bronze → Silver ETL         |
-| `gold_layer_processing`   | Triggered     | Silver → Gold ETL           |
-| `elasticsearch_sync_dag`  | Triggered     | Sync to Elasticsearch       |
-| `dspace_saf_import_dag`   | Manual        | Import to DSpace            |
+| Tên DAG | Lịch chạy | Chức năng |
+| :--- | :--- | :--- |
+| `mit_ocw_scraper_daily` | 2:00 AM | Thu thập khóa học MIT OpenCourseWare |
+| `openstax_scraper_daily` | 3:00 AM | Thu thập sách giáo trình OpenStax |
+| `otl_scraper_daily` | 4:00 AM | Thu thập tài liệu từ Open Textbook Library |
+| `silver_layer_processing` | Triggered | Chuyển đổi Bronze → Silver (Xử lý PDF/TOC) |
+| `gold_layer_processing` | Triggered | Tổng hợp Silver → Gold Layer |
+| `elasticsearch_sync_dag`| Triggered | Cập nhật chỉ mục tìm kiếm lên ES |
+| `dspace_saf_import_dag` | Manual | Đóng gói SAF & Import vào DSpace |
 
 ---
 
-## Database Schema
+## Cấu trúc Lưu trữ
 
-### PostgreSQL Tables
-
+### Database Schema (PostgreSQL)
 ```sql
--- DSpace tables (managed by DSpace)
-eperson          -- User accounts
-item             -- Repository items
-metadatavalue    -- Item metadata
-
--- Custom OER tables
-oer_reviews      -- User reviews (FK to eperson)
-oer_review_helpful  -- Helpful votes
+eperson             -- Quản lý tài khoản (DSpace)
+item                -- Tài liệu lưu trữ
+metadatavalue       -- Metadata theo chuẩn Dublin Core
+oer_reviews         -- Hệ thống đánh giá của người dùng
+oer_review_helpful  -- Lượt bình chọn bài đánh giá
 ```
 
-### Elasticsearch Index
-
+### Elasticsearch Index (Nested Mapping)
 ```json
 {
   "oer_resources": {
     "mappings": {
       "properties": {
         "title": { "type": "text" },
-        "authors": { "type": "keyword" },
         "source": { "type": "keyword" },
         "pdf_pages": {
           "type": "nested",
@@ -425,67 +192,37 @@ oer_review_helpful  -- Helpful votes
 
 ---
 
-## Docker Services
+## Địa chỉ Truy cập & Giám sát
 
-```bash
-# Xem trạng thái
-docker-compose ps
-
-# Restart service
-docker-compose restart <service_name>
-
-# Xem logs
-docker-compose logs -f <service_name>
-
-# Scale Spark workers
-docker-compose up -d --scale spark-worker=2
-
-# Chạy với analytics profile (bao gồm Dremio)
-docker-compose --profile analytics up -d
-```
+| Dịch vụ | URL | Thông tin đăng nhập mặc định |
+| :--- | :--- | :--- |
+| **Hệ thống Airflow** | `http://localhost:8080` | `airflow` / `airflow` |
+| **DSpace Frontend** | `http://localhost:4000` | `admin@dspace.org` / `dspace` |
+| **Moodle Portal** | `http://localhost:18085` | `admin` / `Admin@12345` |
+| **MinIO Console** | `http://localhost:9001` | `minioadmin` / `minioadmin` |
+| **Spark Master UI** | `http://localhost:8081` | - |
+| **Chatbot API**| `http://localhost:18088` | - |
+| **Elasticsearch** | `http://localhost:9200` | - |
 
 ---
 
 ## Troubleshooting
 
-### Lỗi thường gặp
-
-| Vấn đề                  | Giải pháp                                                              |
-| ----------------------- | ---------------------------------------------------------------------- |
-| Out of memory           | Tăng Docker memory limit (Settings → Resources)                        |
-| Port conflict           | Kiểm tra ports đang sử dụng: `netstat -an \| findstr :8080`            |
-| Elasticsearch not ready | Chờ thêm 1-2 phút hoặc restart: `docker-compose restart elasticsearch` |
-| DSpace migration failed | Xóa volume: `docker-compose down -v` rồi chạy lại                      |
-
-### Reset toàn bộ
-
-```bash
-# Xóa tất cả containers và volumes
-docker-compose down -v
-
-# Xóa images (nếu cần rebuild)
-docker-compose down --rmi local
-
-# Khởi động lại
-docker-compose up -d --build
-```
+| Sự cố | Cách giải quyết |
+| :--- | :--- |
+| **Out of memory** | Tăng mức giới hạn RAM trong Docker Desktop lên 12GB - 16GB. |
+| **Lỗi Port conflict** | Dùng `netstat -an` tìm tiến trình đang chiếm port 8080/5432 và tắt đi. |
+| **Timeout khi chat** | Cấu hình lại IP của Ollama trong `.env` và tăng `LOCAL_LLM_PROBE_TIMEOUT`. Lỗi này thường do mạng VPN/Tailscale chậm. |
+| **Lỗi UI Chatbot lặp text**| Mở tab ẩn danh (Incognito) để dọn sạch `sessionStorage` cũ bị kẹt. |
+| **Reset toàn bộ hệ thống** | Chạy lệnh `docker compose down -v` để làm sạch toàn bộ dữ liệu và container. |
 
 ---
 
-## Metrics & Monitoring
-
-- **Spark UI**: http://localhost:8081 - Monitor Spark jobs
-- **Airflow**: http://localhost:8080 - DAG runs, task logs
-- **Elasticsearch**: `GET /_cluster/health` - Cluster status
-
----
-
+## Tài liệu Tham khảo
 
 - [MIT OpenCourseWare](https://ocw.mit.edu/)
 - [OpenStax](https://openstax.org/)
 - [Open Textbook Library](https://open.umn.edu/opentextbooks/)
-- [DSpace](https://dspace.org/)
+- [DSpace Repository](https://dspace.org/)
 - [Apache Spark](https://spark.apache.org/)
 - [Elasticsearch](https://www.elastic.co/)
-
----

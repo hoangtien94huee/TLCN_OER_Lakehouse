@@ -42,6 +42,9 @@ define([], function() {
             + '.oerchatbot-msg-item{display:flex;gap:6px;align-items:flex-start;margin:3px 0;}'
             + '.oerchatbot-msg-item-num{min-width:18px;color:#0f6cbf;font-weight:700;}'
             + '.oerchatbot-msg-item-bullet{min-width:14px;color:#0f6cbf;font-weight:700;}'
+            + '.oerchatbot-msg-subitem{display:flex;gap:6px;align-items:flex-start;margin:2px 0;padding-left:18px;}'
+            + '.oerchatbot-msg-subitem-bullet{min-width:14px;color:#6b7280;font-weight:400;}'
+            + '.oerchatbot-msg-subitem span:last-child{font-weight:400;color:#374151;font-size:0.93em;}'
             + '.oerchatbot-msg-bubble a{color:#0f6cbf;text-decoration:none;}'
             + '.oerchatbot-msg-bubble a:hover{text-decoration:underline;}'
             + '.oerchatbot-suggestions{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 8px 0;}'
@@ -100,6 +103,75 @@ define([], function() {
         return t.trim();
     }
 
+    function isNoResult(answer) {
+        if (!answer) {
+            return true;
+        }
+        var cleanText = answer.toLowerCase();
+
+        // Check for "out of scope" indicators
+        if (
+            cleanText.indexOf('nằm ngoài phạm vi') !== -1 ||
+            cleanText.indexOf('outside the scope') !== -1 ||
+            cleanText.indexOf('phi học thuật') !== -1 ||
+            cleanText.indexOf('non-academic') !== -1
+        ) {
+            return true;
+        }
+
+        // Check for "no relevant info / no document found" indicators
+        if (
+            cleanText.indexOf('chưa tìm thấy tài liệu') !== -1 ||
+            cleanText.indexOf('chưa tìm thấy thông tin') !== -1 ||
+            cleanText.indexOf('không tìm thấy tài liệu') !== -1 ||
+            cleanText.indexOf('không tìm thấy thông tin') !== -1 ||
+            cleanText.indexOf('no relevant information') !== -1 ||
+            cleanText.indexOf('no suitable document') !== -1 ||
+            cleanText.indexOf('không đủ bằng chứng') !== -1 ||
+            cleanText.indexOf('insufficient evidence') !== -1 ||
+            cleanText.indexOf('insufficient scope') !== -1 ||
+            cleanText.indexOf('ngữ cảnh tìm được chưa đủ sát') !== -1 ||
+            cleanText.indexOf('not sufficiently relevant') !== -1
+        ) {
+            return true;
+        }
+
+        // Check for "definition cannot be confirmed" indicators
+        if (
+            cleanText.indexOf('chưa thể xác nhận định nghĩa') !== -1 ||
+            cleanText.indexOf('no definition can be confirmed') !== -1 ||
+            cleanText.indexOf('bằng chứng còn hạn chế và chưa bám sát') !== -1
+        ) {
+            return true;
+        }
+
+        // Check for unresolved placeholder indicators
+        if (
+            cleanText.indexOf('đề cập đến khái niệm chung') !== -1 ||
+            cleanText.indexOf('references a general concept without specifying') !== -1
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    function isEnglishText(text) {
+        if (!text) {
+            return false;
+        }
+        var cleanText = text.toLowerCase();
+        return (
+            cleanText.indexOf('outside the scope') !== -1 ||
+            cleanText.indexOf('no relevant information') !== -1 ||
+            cleanText.indexOf('no suitable document') !== -1 ||
+            cleanText.indexOf('no definition can be confirmed') !== -1 ||
+            cleanText.indexOf('not sufficiently relevant') !== -1 ||
+            cleanText.indexOf('insufficient') !== -1 ||
+            cleanText.indexOf('without specifying which one') !== -1
+        );
+    }
+
     function appendSources(container, sources, config) {
         if (!sources || !sources.length) { return; }
         var validSources = sources.filter(function(s) { return s && s.title && s.url; });
@@ -123,6 +195,12 @@ define([], function() {
 
         validSources.forEach(function(src) {
             var url = src.url || '';
+            if (apiBase && src.asset_uid) {
+                url = apiBase + '/api/pdf/' + encodeURIComponent(String(src.asset_uid));
+                if (src.page) {
+                    url += '#page=' + encodeURIComponent(String(src.page));
+                }
+            }
             if (apiBase) {
                 var match = url.match(/\/api\/pdf\/[^#?]+(#page=\d+)?$/);
                 if (match) {
@@ -138,7 +216,7 @@ define([], function() {
             item.addEventListener('click', function(evt) {
                 // Open from a direct user gesture to avoid iframe/frame navigation restrictions.
                 evt.preventDefault();
-                var targetUrl = String(src.url || '').trim();
+                var targetUrl = String(url || '').trim();
                 if (!targetUrl) { return; }
                 try {
                     var opened = window.open(targetUrl, '_blank', 'noopener,noreferrer');
@@ -155,37 +233,69 @@ define([], function() {
     }
 
     function formatMessageText(text) {
-        var safe = escapeHtml(text || '').replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-        var lines = safe.split(/\r?\n/);
+        if (!text) { return ''; }
+        var regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[\s\S]*?\$)/g;
+        var parts = text.split(regex);
         var out = [];
-        lines.forEach(function(line) {
-            var trimmed = line.trim();
-            if (!trimmed) {
-                out.push('<div class="oerchatbot-msg-line">&nbsp;</div>');
-                return;
+        
+        parts.forEach(function(part) {
+            if (!part) return;
+            var isMath = (part.indexOf('$$') === 0 && part.lastIndexOf('$$') === part.length - 2) ||
+                         (part.indexOf('\\[') === 0 && part.lastIndexOf('\\]') === part.length - 2) ||
+                         (part.indexOf('\\(') === 0 && part.lastIndexOf('\\)') === part.length - 2) ||
+                         (part.indexOf('$') === 0 && part.lastIndexOf('$') === part.length - 1);
+            if (isMath) {
+                out.push(part);
+            } else {
+                var lines = part.split(/\r?\n/);
+                lines.forEach(function(line, lineIdx) {
+                    var trimmed = line.trim();
+                    if (!trimmed) {
+                        if (lines.length > 1 && lineIdx < lines.length - 1) {
+                            out.push('<div class="oerchatbot-msg-line">&nbsp;</div>');
+                        }
+                        return;
+                    }
+                    
+                    var numbered = trimmed.match(/^(\d+)\.\s+(.*)$/);
+                    var bullet = trimmed.match(/^-\s+(.*)$/);
+                    var subbullet = trimmed.match(/^\*\s+(.*)$/);
+                    
+                    var content = trimmed;
+                    if (numbered) content = numbered[2];
+                    else if (bullet) content = bullet[1];
+                    else if (subbullet) content = subbullet[1];
+                    
+                    var processedContent = linkify(escapeHtml(content).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'));
+                    
+                    if (numbered) {
+                        out.push(
+                            '<div class="oerchatbot-msg-item">'
+                            + '<span class="oerchatbot-msg-item-num">' + numbered[1] + '.</span>'
+                            + '<span>' + processedContent + '</span>'
+                            + '</div>'
+                        );
+                    } else if (subbullet) {
+                        out.push(
+                            '<div class="oerchatbot-msg-subitem">'
+                            + '<span class="oerchatbot-msg-subitem-bullet">◦</span>'
+                            + '<span>' + processedContent + '</span>'
+                            + '</div>'
+                        );
+                    } else if (bullet) {
+                        out.push(
+                            '<div class="oerchatbot-msg-item">'
+                            + '<span class="oerchatbot-msg-item-bullet">•</span>'
+                            + '<span>' + processedContent + '</span>'
+                            + '</div>'
+                        );
+                    } else {
+                        out.push('<div class="oerchatbot-msg-line">' + processedContent + '</div>');
+                    }
+                });
             }
-            var numbered = trimmed.match(/^(\d+)\.\s+(.*)$/);
-            if (numbered) {
-                out.push(
-                    '<div class="oerchatbot-msg-item">'
-                    + '<span class="oerchatbot-msg-item-num">' + numbered[1] + '.</span>'
-                    + '<span>' + linkify(numbered[2]) + '</span>'
-                    + '</div>'
-                );
-                return;
-            }
-            var bullet = trimmed.match(/^-\s+(.*)$/);
-            if (bullet) {
-                out.push(
-                    '<div class="oerchatbot-msg-item">'
-                    + '<span class="oerchatbot-msg-item-bullet">•</span>'
-                    + '<span>' + linkify(bullet[1]) + '</span>'
-                    + '</div>'
-                );
-                return;
-            }
-            out.push('<div class="oerchatbot-msg-line">' + linkify(trimmed) + '</div>');
         });
+        
         return out.join('');
     }
 
@@ -206,6 +316,37 @@ define([], function() {
         wrap.appendChild(bubble);
         container.appendChild(wrap);
         container.scrollTop = container.scrollHeight;
+        
+        function tryTypeset(retries) {
+            if (window.renderMathInElement) {
+                window.renderMathInElement(bubble, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '\\[', right: '\\]', display: true},
+                        {left: '$', right: '$', display: false},
+                        {left: '\\(', right: '\\)', display: false}
+                    ],
+                    throwOnError: false
+                });
+                return;
+            }
+            if (window.MathJax) {
+                if (typeof window.MathJax.typesetPromise === 'function') {
+                    window.MathJax.typesetPromise([bubble]).catch(function (err) {});
+                    return;
+                } else if (window.MathJax.Hub && typeof window.MathJax.Hub.Queue === 'function') {
+                    window.MathJax.Hub.Queue(["Typeset", window.MathJax.Hub, bubble]);
+                    return;
+                }
+            }
+            if (retries > 0) {
+                setTimeout(function() { tryTypeset(retries - 1); }, 500);
+            } else {
+                console.warn('OER Chatbot: Math rendering timeout.');
+            }
+        }
+        tryTypeset(40);
+        
         return wrap;
     }
 
@@ -320,15 +461,11 @@ define([], function() {
     function getSuggestionButtons(config) {
         if (config.hasCourseContext && config.courseName) {
             return [
-                'Gợi ý tài liệu cho môn này',
-                'Giải thích khái niệm chính của bài này',
-                'Tóm tắt nhanh nội dung cần nhớ'
+                'Gợi ý tài liệu cho môn này'
             ];
         }
         return [
-            'Gợi ý tài liệu nhập môn',
-            'Giải thích khái niệm cơ bản',
-            'Cho tôi lộ trình học ngắn gọn'
+            'Gợi ý tài liệu nhập môn'
         ];
     }
 
@@ -390,7 +527,7 @@ define([], function() {
         var controller = new AbortController();
         var timer = setTimeout(function() {
             controller.abort();
-        }, timeoutMs || 12000);
+        }, timeoutMs || 90000);
         var opts = Object.assign({}, options || {}, {signal: controller.signal});
         return fetch(url, opts).finally(function() {
             clearTimeout(timer);
@@ -424,8 +561,107 @@ define([], function() {
             });
     }
 
+    function ensureKatex() {
+        if (window.renderMathInElement) return;
+        
+        var link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';
+        document.head.appendChild(link);
+        
+        var _amd = null;
+        if (typeof define === 'function' && define.amd) {
+            _amd = define.amd;
+            define.amd = null;
+        }
+        
+        var script = document.createElement('script');
+        script.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';
+        script.onload = function() {
+            var script2 = document.createElement('script');
+            script2.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js';
+            script2.onload = function() {
+                if (_amd) { define.amd = _amd; }
+            };
+            script2.onerror = function() {
+                if (_amd) { define.amd = _amd; }
+            };
+            document.head.appendChild(script2);
+        };
+        script.onerror = function() {
+            if (_amd) { define.amd = _amd; }
+        };
+        document.head.appendChild(script);
+    }
+
+    function ensureMathJax() {
+        if (window.MathJax) return;
+        
+        window.MathJax = {
+            tex: {
+                inlineMath: [['\\(', '\\)'], ['$', '$']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            options: {
+                skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code']
+            }
+        };
+
+        var script = document.createElement('script');
+        script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/3.2.2/es5/tex-chtml.min.js';
+        script.id = 'MathJax-script';
+        script.async = true;
+        document.head.appendChild(script);
+    }
+
+    function historyStorageKey(config) {
+        var user = config.userId ? String(config.userId) : 'anon';
+        var course = config.courseId ? String(config.courseId) : (config.courseName || 'site');
+        return 'oerchatbot.history.' + user + '.' + course;
+    }
+
+    function loadConversationHistory(config) {
+        try {
+            var raw = window.sessionStorage.getItem(historyStorageKey(config));
+            if (!raw) {
+                return [];
+            }
+            var parsed = JSON.parse(raw);
+            if (!Array.isArray(parsed)) {
+                return [];
+            }
+            return parsed.filter(function(item) {
+                return item && (item.role === 'user' || item.role === 'assistant' || item.role === 'bot') && item.text;
+            }).slice(-10);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function saveConversationHistory(config, history) {
+        try {
+            window.sessionStorage.setItem(historyStorageKey(config), JSON.stringify((history || []).slice(-10)));
+        } catch (e) {}
+    }
+
     function init(config) {
         ensureStyles(config.position || 'right');
+        ensureKatex();
+        ensureMathJax();
+
+        var conversationHistory = loadConversationHistory(config);
+
+        // If Moodle loaded its own MathJax v2, configure it at runtime to parse inline math delimiters
+        if (window.MathJax && window.MathJax.Hub && typeof window.MathJax.Hub.Config === 'function') {
+            try {
+                window.MathJax.Hub.Config({
+                    tex2jax: {
+                        inlineMath: [['\\(', '\\)'], ['$', '$']],
+                        displayMath: [['$$', '$$'], ['\\[', '\\]']]
+                    }
+                });
+            } catch (e) {}
+        }
 
         var btn = el('button', {'type': 'button', 'class': 'oerchatbot-btn', 'aria-label': 'Mở chatbot OER'});
         btn.innerHTML = '<span class="oerchatbot-btn-icon">🎓</span><span>' + escapeHtml(config.title || 'OER Chatbot') + '</span>';
@@ -499,6 +735,11 @@ define([], function() {
                 return;
             }
             appendMessage(msgs, 'user', q, null, config);
+            conversationHistory.push({role: 'user', text: q});
+            if (conversationHistory.length > 10) {
+                conversationHistory.shift();
+            }
+            saveConversationHistory(config, conversationHistory);
             input.value = '';
             setSendingState(true);
             appendTyping(msgs);
@@ -507,6 +748,7 @@ define([], function() {
             payload.question = q;
             payload.top_k = 5;
             payload.language = 'vi';
+            payload.history = conversationHistory.slice();
 
             var headers = {'Content-Type': 'application/json'};
             if (config.apiKey) {
@@ -525,7 +767,7 @@ define([], function() {
                     method: 'POST',
                     headers: headers,
                     body: JSON.stringify(payload)
-                }, 15000).then(function(resp) {
+                }, 90000).then(function(resp) {
                     if (!resp.ok) {
                         return resp.json()
                             .then(function(err) {
@@ -558,6 +800,20 @@ define([], function() {
             tryApiAt(0).then(function(data) {
                 var answer = (data && data.answer) ? data.answer : 'Mình chưa có câu trả lời phù hợp. Bạn thử diễn đạt lại chi tiết hơn nhé.';
                 var sources = (data && data.sources) ? data.sources : [];
+
+                conversationHistory.push({role: 'assistant', text: answer});
+                if (conversationHistory.length > 10) {
+                    conversationHistory.shift();
+                }
+                saveConversationHistory(config, conversationHistory);
+
+                var cleanAns = cleanAnswerText(answer);
+                if (isNoResult(cleanAns)) {
+                    var isEnglish = isEnglishText(cleanAns);
+                    answer = isEnglish ? 'No suitable document found.' : 'Không tìm thấy tài liệu phù hợp.';
+                    sources = [];
+                }
+
                 appendMessage(msgs, 'bot', answer, sources, config);
             }).catch(function(err) {
                 appendMessage(msgs, 'bot', 'Kết nối tạm thời gián đoạn: ' + err.message + '. Bạn thử gửi lại sau ít giây nhé.', null, config);

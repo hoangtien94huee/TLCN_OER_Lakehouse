@@ -27,6 +27,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 try:
     from minio import Minio
@@ -1367,6 +1370,9 @@ class PageIndexEngine:
             "on",
         }
         self.tier2_crossbook_pages = max(1, int(os.getenv("PAGEINDEX_TIER2_CROSSBOOK_PAGES", "8")))
+        # Số nguồn HIỂN THỊ cho người dùng (vẫn lấy tier2_crossbook_pages trang cho LLM
+        # tổng hợp, nhưng chỉ trả về top-N trang làm nguồn để giao diện gọn).
+        self.tier2_crossbook_show = max(1, int(os.getenv("PAGEINDEX_TIER2_CROSSBOOK_SHOW", "3")))
         # Cross-book has no Tier-1/judge gate, and BM25 cannot distinguish
         # out-of-scope questions (they still match some page lexically). So add
         # one semantic LLM scope-check before answering: if the question is not
@@ -1627,6 +1633,7 @@ class PageIndexEngine:
             return False, "empty base url"
         timeout = (self.local_llm_connect_timeout, self.local_llm_probe_timeout)
         try:
+            headers = {"ngrok-skip-browser-warning": "1"}
             if self.local_llm_health_url:
                 health_url = self.local_llm_health_url
                 if "{base_url}" in health_url:
@@ -1637,25 +1644,23 @@ class PageIndexEngine:
                     endpoint = f"{base}{health_url}"
                 else:
                     endpoint = f"{base}/{health_url}"
-                headers = {}
                 if self.local_llm_api_key:
                     headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
-                response = requests.get(endpoint, headers=headers, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, timeout=timeout, verify=False)
             elif self.local_llm_backend == "gemini":
                 endpoint = f"{base}/models"
                 params: Dict[str, str] = {}
                 if self.local_llm_api_key:
                     params["key"] = self.local_llm_api_key
-                response = requests.get(endpoint, params=params, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, params=params, timeout=timeout, verify=False)
             elif self.local_llm_backend in {"vllm", "openai", "openai_compat", "api", "api_openai", "groq"}:
                 endpoint = self._openai_models_url(base)
-                headers = {}
                 if self.local_llm_api_key:
                     headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
-                response = requests.get(endpoint, headers=headers, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, timeout=timeout, verify=False)
             else:
                 endpoint = f"{base}/api/tags"
-                response = requests.get(endpoint, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, timeout=timeout, verify=False)
             if response.ok:
                 return True, ""
             return False, f"HTTP {response.status_code}"
@@ -1709,7 +1714,7 @@ class PageIndexEngine:
             }
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
-            headers = {"Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
             if self.local_llm_api_key:
                 headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
             response = requests.post(
@@ -1717,6 +1722,7 @@ class PageIndexEngine:
                 headers=headers,
                 json=payload,
                 timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"].strip()
@@ -1732,15 +1738,17 @@ class PageIndexEngine:
                 payload["format"] = "json"
             response = requests.post(
                 f"{self.local_llm_base_url}/api/generate",
+                headers={"ngrok-skip-browser-warning": "1"},
                 json=payload,
                 timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             data = response.json()
             return str(data.get("response") or "").strip()
 
         if self.local_llm_backend == "gemini":
-            headers = {"Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
             params: Dict[str, str] = {}
             if self.local_llm_api_key:
                 params["key"] = self.local_llm_api_key
@@ -1756,6 +1764,7 @@ class PageIndexEngine:
                 params=params,
                 json=payload,
                 timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             data = response.json()
@@ -2954,14 +2963,22 @@ class PageIndexEngine:
         if not key:
             return empty
 
-        query_text = " ".join(
-            p for p in [
-                str(bundle.query_en_semantic or "").strip(),
-                str(bundle.query_vi_semantic or "").strip(),
-                " ".join(bundle.keywords_en),
-                " ".join(bundle.keywords_vi),
-            ] if p
-        ).strip() or str(bundle.query_vi_original or "").strip()
+        # Since the ES index is 100% English textbooks, use English query signals only
+        # when available to avoid accent-folding collisions.
+        en_parts = [
+            str(bundle.query_en_semantic or "").strip(),
+            " ".join(bundle.keywords_en),
+        ]
+        query_text_en = " ".join(p for p in en_parts if p).strip()
+        if query_text_en:
+            query_text = query_text_en
+        else:
+            query_text = " ".join(
+                p for p in [
+                    str(bundle.query_vi_semantic or "").strip(),
+                    " ".join(bundle.keywords_vi),
+                ] if p
+            ).strip() or str(bundle.query_vi_original or "").strip()
         if not query_text:
             return empty
 
@@ -3212,14 +3229,22 @@ class PageIndexEngine:
         # the book title is repeated on every page doc, so boosting it lets a
         # stopword in the question hijack retrieval to a book whose TITLE matches
         # (e.g. "What is X?" -> "What is Capitalism?"). Match on page content only.
-        query_text = " ".join(
-            p for p in [
-                " ".join(bundle.keywords_en),
-                " ".join(bundle.keywords_vi),
-                str(bundle.query_en_semantic or "").strip(),
-                str(bundle.query_vi_semantic or "").strip(),
-            ] if p
-        ).strip() or str(bundle.query_vi_original or "").strip()
+        # Since the ES index is 100% English textbooks, use English query signals only
+        # when available to avoid accent-folding collisions.
+        en_parts = [
+            " ".join(bundle.keywords_en),
+            str(bundle.query_en_semantic or "").strip(),
+        ]
+        query_text_en = " ".join(p for p in en_parts if p).strip()
+        if query_text_en:
+            query_text = query_text_en
+        else:
+            query_text = " ".join(
+                p for p in [
+                    " ".join(bundle.keywords_vi),
+                    str(bundle.query_vi_semantic or "").strip(),
+                ] if p
+            ).strip() or str(bundle.query_vi_original or "").strip()
         if not query_text:
             return None
 
@@ -3350,7 +3375,9 @@ class PageIndexEngine:
         return {
             "question": question,
             "answer": answer,
-            "contexts": contexts,
+            # Trả lời dùng toàn bộ contexts (8 trang) để tổng hợp, nhưng chỉ HIỂN THỊ
+            # top-N nguồn cho gọn (tránh 1 câu định nghĩa kèm 8 nguồn).
+            "contexts": contexts[: self.tier2_crossbook_show],
             "confidence": "medium",
             "search_mode": "pageindex",
             "pageindex_trace": trace,

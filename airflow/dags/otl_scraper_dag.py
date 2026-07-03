@@ -3,6 +3,7 @@ from airflow import DAG
 from airflow.models import Variable
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.operators.dummy import DummyOperator
 import json
 import os
 from minio import Minio
@@ -74,14 +75,25 @@ def scrape_open_textbook_library_documents(**context):
         print(f"[OTL] Scraping failed: {e}")
         raise
 
-# Define task
+# Define tasks
+start_task = DummyOperator(
+    task_id='start_otl_scraping',
+    dag=dag,
+)
+
 scrape_task = PythonOperator(
     task_id='scrape_open_textbook_library_documents',
     python_callable=scrape_open_textbook_library_documents,
     dag=dag,
 )
 
-# Simple workflow: just scrape
-scrape_task
+end_task = DummyOperator(
+    task_id='end_otl_scraping',
+    dag=dag,
+)
+
+# Workflow structure
+start_task >> scrape_task >> end_task
+
 
 

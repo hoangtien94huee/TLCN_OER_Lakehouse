@@ -144,6 +144,7 @@
             color: #555;
             display: -webkit-box;
             -webkit-line-clamp: 3;
+            line-clamp: 3;
             -webkit-box-orient: vertical;
             overflow: hidden;
         }
@@ -486,6 +487,75 @@
             return text.trim();
         }
 
+        function isNoResult(answer) {
+            if (!answer) {
+                return true;
+            }
+            const cleanText = answer.toLowerCase();
+
+            // Check for "out of scope" indicators
+            if (
+                cleanText.includes('nằm ngoài phạm vi') ||
+                cleanText.includes('outside the scope') ||
+                cleanText.includes('phi học thuật') ||
+                cleanText.includes('non-academic')
+            ) {
+                return true;
+            }
+
+            // Check for "no relevant info / no document found" indicators
+            if (
+                cleanText.includes('chưa tìm thấy tài liệu') ||
+                cleanText.includes('chưa tìm thấy thông tin') ||
+                cleanText.includes('không tìm thấy tài liệu') ||
+                cleanText.includes('không tìm thấy thông tin') ||
+                cleanText.includes('no relevant information') ||
+                cleanText.includes('no suitable document') ||
+                cleanText.includes('không đủ bằng chứng') ||
+                cleanText.includes('insufficient evidence') ||
+                cleanText.includes('insufficient scope') ||
+                cleanText.includes('ngữ cảnh tìm được chưa đủ sát') ||
+                cleanText.includes('not sufficiently relevant')
+            ) {
+                return true;
+            }
+
+            // Check for "definition cannot be confirmed" indicators
+            if (
+                cleanText.includes('chưa thể xác nhận định nghĩa') ||
+                cleanText.includes('no definition can be confirmed') ||
+                cleanText.includes('bằng chứng còn hạn chế và chưa bám sát')
+            ) {
+                return true;
+            }
+
+            // Check for unresolved placeholder indicators
+            if (
+                cleanText.includes('đề cập đến khái niệm chung') ||
+                cleanText.includes('references a general concept without specifying')
+            ) {
+                return true;
+            }
+
+            return false;
+        }
+
+        function isEnglishText(text) {
+            if (!text) {
+                return false;
+            }
+            const cleanText = text.toLowerCase();
+            return (
+                cleanText.includes('outside the scope') ||
+                cleanText.includes('no relevant information') ||
+                cleanText.includes('no suitable document') ||
+                cleanText.includes('no definition can be confirmed') ||
+                cleanText.includes('not sufficiently relevant') ||
+                cleanText.includes('insufficient') ||
+                cleanText.includes('without specifying which one')
+            );
+        }
+
         function formatText(text) {
             return escapeHtml(cleanAnswerText(text))
                 .replace(/\n/g, '<br>')
@@ -545,10 +615,20 @@
                 }
 
                 const data = await response.json();
+                let displayAnswer = data.answer || 'Không có câu trả lời.';
+                let displayData = data;
+
+                const cleanAns = cleanAnswerText(displayAnswer);
+                if (isNoResult(cleanAns)) {
+                    const isEnglish = isEnglishText(cleanAns);
+                    displayAnswer = isEnglish ? 'No suitable document found.' : 'Không tìm thấy tài liệu phù hợp.';
+                    displayData = { ...data, sources: [] };
+                }
+
                 addMessage(
-                    data.answer || 'Không có câu trả lời.',
+                    displayAnswer,
                     false,
-                    data,
+                    displayData,
                     data.search_mode
                 );
 

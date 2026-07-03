@@ -27,6 +27,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import urlparse
 
 import requests
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 
 try:
     from minio import Minio
@@ -149,6 +152,7 @@ def _derive_en_keywords_from_vi(text: str, base_tokens: Sequence[str]) -> List[s
 
     phrase_map = [
         ("dai so tuyen tinh", ["linear", "algebra"]),
+        ("giai tich", ["calculus"]),
         ("hoi quy tuyen tinh", ["linear", "regression"]),
         ("hoc may", ["machine", "learning"]),
         ("thong ke", ["statistics"]),
@@ -193,6 +197,7 @@ def _derive_vi_keywords_from_en(text: str, base_tokens: Sequence[str]) -> List[s
 
     phrase_map = [
         ("linear algebra", ["dai", "so", "tuyen", "tinh"]),
+        ("calculus", ["giai", "tich"]),
         ("linear regression", ["hoi", "quy", "tuyen", "tinh"]),
         ("machine learning", ["hoc", "may"]),
         ("statistics", ["thong", "ke"]),
@@ -363,9 +368,22 @@ def _is_recommendation_query(question: str) -> bool:
     return _detect_recommendation_intent(question)
 
 
+def _detect_find_material_intent(question: str) -> bool:
+    """Câu hỏi "Tài liệu/Sách NÀO nói/giải thích về <chủ đề>?" — người dùng muốn
+    biết TÊN tài liệu chứa chủ đề, KHÔNG phải giải thích nội dung. Khác với
+    recommendation (gợi ý sách cho cả môn) ở chỗ có chủ đề cụ thể + từ để hỏi "nào"."""
+    q = _ascii_fold(_strip_moodle_context(question))
+    vi_markers = ["tai lieu nao", "sach nao", "giao trinh nao", "cuon nao", "tai lieu gi", "sach gi"]
+    en_markers = ["which document", "which book", "which material", "which textbook",
+                  "which resource", "what document", "what book", "what material"]
+    return any(m in q for m in vi_markers + en_markers)
+
+
 def _detect_query_intent(question: str) -> str:
     if _is_recommendation_query(question):
         return "recommendation"
+    if _detect_find_material_intent(question):
+        return "find_material"
     q = _strip_moodle_context(question).lower()
     q_folded = _ascii_fold(q)
     listing_markers = [
@@ -507,8 +525,6 @@ def _is_implicit_concept_placeholder(text: str) -> bool:
 def _extract_course_name_hint(question: str) -> str:
     moodle_context = _parse_moodle_context(question)
     course_name = str(moodle_context.get("course_name") or "").strip()
-    if course_name:
-        return course_name
 
     core = _strip_moodle_context(question)
     patterns = [
@@ -520,8 +536,18 @@ def _extract_course_name_hint(question: str) -> str:
     for pattern in patterns:
         match = re.search(pattern, _ascii_fold(core))
         if match:
-            return str(match.group(1) or "").strip()
+            explicit_name = str(match.group(1) or "").strip()
+            if explicit_name and (not course_name or not re.search(r"\b(?:i{1,3}|[1-3])\b", _ascii_fold(course_name))):
+                return explicit_name
+    if course_name:
+        return course_name
     return ""
+
+
+def _extract_document_title_hint(question: str) -> str:
+    moodle_context = _parse_moodle_context(question)
+    doc_title = str(moodle_context.get("document_title") or "").strip()
+    return doc_title
 
 
 def _extract_section_name_hint(question: str) -> str:
@@ -637,6 +663,40 @@ def _evaluate_course_scope_text(text: Optional[str], profile: Dict[str, Any]) ->
 
 def _extract_requested_concept(question: str) -> str:
     core = _strip_moodle_context(question)
+    folded_core = _ascii_fold(core)
+    known_concepts = [
+        ("dao ham cua mot ham so", "dao ham ham so"),
+        ("dao ham cua ham so", "dao ham ham so"),
+        ("derivative of a function", "derivative function"),
+        ("dao ham", "dao ham"),
+        ("derivative", "derivative"),
+        ("tich phan xac dinh", "tich phan xac dinh"),
+        ("definite integral", "definite integral"),
+        ("tich phan khong xac dinh", "tich phan khong xac dinh"),
+        ("indefinite integral", "indefinite integral"),
+        ("tich phan", "tich phan"),
+        ("integral", "integral"),
+        ("gioi han cua ham so", "gioi han ham so"),
+        ("limit of a function", "limit function"),
+        ("gioi han", "gioi han"),
+        ("limit", "limit"),
+        ("ham so", "ham so"),
+        ("function", "function"),
+        ("ma tran", "ma tran"),
+        ("matrix", "matrix"),
+        ("vector rieng", "vector rieng"),
+        ("eigenvector", "eigenvector"),
+        ("gia tri rieng", "gia tri rieng"),
+        ("eigenvalue", "eigenvalue"),
+        ("co so du lieu", "co so du lieu"),
+        ("database management system", "database management system"),
+        ("database", "database"),
+        ("sql", "sql"),
+    ]
+    for phrase, canonical in known_concepts:
+        if re.search(rf"\b{re.escape(phrase)}\b", folded_core):
+            return canonical
+
     target = _extract_definition_target(core)
     if not target and _is_definition_query(core):
         match = re.search(r"^\s*(.+?)\s*(?:\?|$)", _ascii_fold(core))
@@ -707,13 +767,13 @@ def _has_targeted_definition_cue(text: Optional[str], target_terms: Sequence[str
         needle = re.escape(_ascii_fold(term))
         patterns = [
             # forward: "derivative is ...", "derivative defined as ..."
-            rf"\b{needle}\b.{{0,48}}\b(is|are|defined as|refers to|means|la|duoc dinh nghia|duoc dinh nghia la|la mot)\b",
+            rf"\b{needle}\b.{{0,80}}\b(is|are|defined as|refers to|means|la|duoc dinh nghia|duoc dinh nghia la|la mot)\b",
             # "definition of derivative", "định nghĩa của đạo hàm"
             rf"\b(definition of|dinh nghia cua)\s+{needle}\b",
             # "define derivative as ..."
             rf"\bdefine\s+{needle}\s+(as|la)\b",
             # "derivative is called ..."
-            rf"\b{needle}\b.{{0,32}}\b(is called|duoc goi la)\b",
+            rf"\b{needle}\b.{{0,60}}\b(is called|duoc goi la)\b",
             # reversed passive: "is a difference quotient", "called a derivative"
             rf"\b(is|are)\s+(?:a|an|the)\s+{needle}\b",
             rf"\bcalled\s+(?:a|an|the)?\s*{needle}\b",
@@ -1228,6 +1288,7 @@ class QueryBundle:
     query_mode: str
     course_name: str = ""
     section_name: str = ""
+    document_title: str = ""
     concept_target: str = ""
     has_unresolved_placeholder: bool = False
 
@@ -1285,7 +1346,7 @@ class PageIndexEngine:
         self.local_llm_health_url = os.getenv("LOCAL_LLM_HEALTH_URL", "").strip()
         model_env = os.getenv("LOCAL_LLM_MODEL", "").strip()
         self.local_llm_model = model_env or default_model
-        self.local_llm_timeout = int(os.getenv("LOCAL_LLM_TIMEOUT", "120"))
+        self.local_llm_timeout = int(os.getenv("LOCAL_LLM_TIMEOUT", "180"))
         self.local_llm_connect_timeout = int(os.getenv("LOCAL_LLM_CONNECT_TIMEOUT", "1"))
         self.local_llm_probe_timeout = int(os.getenv("LOCAL_LLM_PROBE_TIMEOUT", "1"))
         self.local_llm_probe_required = os.getenv("LOCAL_LLM_PROBE_REQUIRED", "0").strip().lower() in {
@@ -1367,6 +1428,9 @@ class PageIndexEngine:
             "on",
         }
         self.tier2_crossbook_pages = max(1, int(os.getenv("PAGEINDEX_TIER2_CROSSBOOK_PAGES", "8")))
+        # Số nguồn HIỂN THỊ cho người dùng (vẫn lấy tier2_crossbook_pages trang cho LLM
+        # tổng hợp, nhưng chỉ trả về top-N trang làm nguồn để giao diện gọn).
+        self.tier2_crossbook_show = max(1, int(os.getenv("PAGEINDEX_TIER2_CROSSBOOK_SHOW", "3")))
         # Cross-book has no Tier-1/judge gate, and BM25 cannot distinguish
         # out-of-scope questions (they still match some page lexically). So add
         # one semantic LLM scope-check before answering: if the question is not
@@ -1627,6 +1691,7 @@ class PageIndexEngine:
             return False, "empty base url"
         timeout = (self.local_llm_connect_timeout, self.local_llm_probe_timeout)
         try:
+            headers = {"ngrok-skip-browser-warning": "1"}
             if self.local_llm_health_url:
                 health_url = self.local_llm_health_url
                 if "{base_url}" in health_url:
@@ -1637,25 +1702,23 @@ class PageIndexEngine:
                     endpoint = f"{base}{health_url}"
                 else:
                     endpoint = f"{base}/{health_url}"
-                headers = {}
                 if self.local_llm_api_key:
                     headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
-                response = requests.get(endpoint, headers=headers, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, timeout=timeout, verify=False)
             elif self.local_llm_backend == "gemini":
                 endpoint = f"{base}/models"
                 params: Dict[str, str] = {}
                 if self.local_llm_api_key:
                     params["key"] = self.local_llm_api_key
-                response = requests.get(endpoint, params=params, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, params=params, timeout=timeout, verify=False)
             elif self.local_llm_backend in {"vllm", "openai", "openai_compat", "api", "api_openai", "groq"}:
                 endpoint = self._openai_models_url(base)
-                headers = {}
                 if self.local_llm_api_key:
                     headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
-                response = requests.get(endpoint, headers=headers, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, timeout=timeout, verify=False)
             else:
                 endpoint = f"{base}/api/tags"
-                response = requests.get(endpoint, timeout=timeout)
+                response = requests.get(endpoint, headers=headers, timeout=timeout, verify=False)
             if response.ok:
                 return True, ""
             return False, f"HTTP {response.status_code}"
@@ -1709,7 +1772,7 @@ class PageIndexEngine:
             }
             if json_mode:
                 payload["response_format"] = {"type": "json_object"}
-            headers = {"Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
             if self.local_llm_api_key:
                 headers["Authorization"] = f"Bearer {self.local_llm_api_key}"
             response = requests.post(
@@ -1717,6 +1780,7 @@ class PageIndexEngine:
                 headers=headers,
                 json=payload,
                 timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             return response.json()["choices"][0]["message"]["content"].strip()
@@ -1732,15 +1796,17 @@ class PageIndexEngine:
                 payload["format"] = "json"
             response = requests.post(
                 f"{self.local_llm_base_url}/api/generate",
+                headers={"ngrok-skip-browser-warning": "1"},
                 json=payload,
                 timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             data = response.json()
             return str(data.get("response") or "").strip()
 
         if self.local_llm_backend == "gemini":
-            headers = {"Content-Type": "application/json"}
+            headers = {"Content-Type": "application/json", "ngrok-skip-browser-warning": "1"}
             params: Dict[str, str] = {}
             if self.local_llm_api_key:
                 params["key"] = self.local_llm_api_key
@@ -1756,6 +1822,7 @@ class PageIndexEngine:
                 params=params,
                 json=payload,
                 timeout=timeout,
+                verify=False,
             )
             response.raise_for_status()
             data = response.json()
@@ -1801,6 +1868,7 @@ class PageIndexEngine:
         language = _detect_lang(question_core)
         course_name = _extract_course_name_hint(question)
         section_name = _extract_section_name_hint(question)
+        document_title = _extract_document_title_hint(question)
         concept_target = _extract_requested_concept(question_core)
         has_unresolved_placeholder = _contains_unresolved_placeholder(question_core)
         keywords_base = _tokenize(question_core)
@@ -1835,20 +1903,34 @@ class PageIndexEngine:
                 f"Cau hoi: {question_core}\n"
                 "Directly return the final JSON structure. Do not output anything else."
             )
-            data = self._call_local_llm_json(
-                prompt,
-                {
-                    "query_en_semantic": query_en_semantic,
-                    "query_vi_semantic": query_vi_semantic,
-                    "keywords_en": keywords_en,
-                    "keywords_vi": keywords_vi,
-                },
-                request_timeout=llm_timeout if llm_timeout is not None else self.llm_json_timeout,
-            )
+            fallback = {
+                "query_en_semantic": query_en_semantic,
+                "query_vi_semantic": query_vi_semantic,
+                "keywords_en": keywords_en,
+                "keywords_vi": keywords_vi,
+            }
+            try:
+                data = self._call_local_llm_json(
+                    prompt,
+                    fallback,
+                    request_timeout=llm_timeout if llm_timeout is not None else self.llm_json_timeout,
+                )
+            except Exception as exc:
+                logger.warning("Local LLM query rewrite timed out or failed, using fallback. detail=%s", exc)
+                data = fallback
             query_en_semantic = str(data.get("query_en_semantic") or question_core).strip()
             query_vi_semantic = str(data.get("query_vi_semantic") or question_core).strip()
             kw_en = [str(x).strip() for x in data.get("keywords_en") or [] if str(x).strip()]
             kw_vi = [str(x).strip() for x in data.get("keywords_vi") or [] if str(x).strip()]
+            
+            # Merge heuristic fallbacks to guarantee key term preservation
+            for term in fallback["keywords_en"]:
+                if term not in kw_en:
+                    kw_en.append(term)
+            for term in fallback["keywords_vi"]:
+                if term not in kw_vi:
+                    kw_vi.append(term)
+                    
             if kw_en:
                 keywords_en = _tokenize(" ".join(kw_en))
             if kw_vi:
@@ -1896,6 +1978,24 @@ class PageIndexEngine:
                 if not str(query_en_semantic or "").strip() or _ascii_fold(query_en_semantic) == _ascii_fold(question_core):
                     query_en_semantic = " ".join(seed_terms)
 
+        if concept_target:
+            concept_seed_terms = [
+                term
+                for term in _expand_definition_target_tokens(concept_target)
+                if len(str(term or "").strip()) >= 3
+            ][:12]
+            if concept_seed_terms:
+                keywords_en = _dedupe_keep_order(keywords_en + concept_seed_terms)
+                keywords_vi = _dedupe_keep_order(
+                    keywords_vi
+                    + _tokenize(concept_target)
+                    + _derive_vi_keywords_from_en(" ".join(concept_seed_terms), concept_seed_terms)
+                )
+                if query_mode in {"vi", "mixed"}:
+                    query_en_semantic = " ".join(
+                        _dedupe_keep_order(_tokenize(query_en_semantic) + concept_seed_terms)
+                    )
+
         keywords_en = _dedupe_keep_order(keywords_en)
         keywords_vi = _dedupe_keep_order(keywords_vi)
 
@@ -1910,6 +2010,7 @@ class PageIndexEngine:
             query_mode=query_mode,
             course_name=course_name,
             section_name=section_name,
+            document_title=document_title,
             concept_target=concept_target,
             has_unresolved_placeholder=has_unresolved_placeholder,
         )
@@ -2954,14 +3055,36 @@ class PageIndexEngine:
         if not key:
             return empty
 
-        query_text = " ".join(
-            p for p in [
-                str(bundle.query_en_semantic or "").strip(),
-                str(bundle.query_vi_semantic or "").strip(),
-                " ".join(bundle.keywords_en),
-                " ".join(bundle.keywords_vi),
-            ] if p
-        ).strip() or str(bundle.query_vi_original or "").strip()
+        # Since the ES index is 100% English textbooks, use English query signals only
+        # when available to avoid accent-folding collisions.
+        en_parts = [
+            str(bundle.query_en_semantic or "").strip(),
+            " ".join(bundle.keywords_en),
+        ]
+        query_text_en = " ".join(p for p in en_parts if p).strip()
+        if query_text_en:
+            query_text = query_text_en
+        else:
+            query_text = " ".join(
+                p for p in [
+                    str(bundle.query_vi_semantic or "").strip(),
+                    " ".join(bundle.keywords_vi),
+                ] if p
+            ).strip() or str(bundle.query_vi_original or "").strip()
+        # Clean punctuation and remove common stopwords to avoid low-quality keyword matches (like "what is", "là gì")
+        # that lead to false positives on completely unrelated documents.
+        ENGLISH_STOPWORDS = {"what", "is", "a", "the", "of", "to", "in", "for", "on", "with", "at", "by", "an", "be", "this", "that", "from", "how", "why", "who", "where", "which", "can", "do", "does", "did", "are", "was", "were", "been", "have", "has", "had", "i", "you", "he", "she", "they", "we", "it", "about"}
+        VIETNAMESE_STOPWORDS = {"là", "gì", "của", "và", "trong", "cho", "để", "ở", "tại", "bởi", "với", "được", "bị", "này", "kia", "đó", "nào", "sao", "thế", "cái", "con", "sự", "việc"}
+        clean_words = []
+        seen = set()
+        for word in query_text.lower().replace("?", "").replace(".", "").replace(",", "").split():
+            if word not in ENGLISH_STOPWORDS and word not in VIETNAMESE_STOPWORDS:
+                if word not in seen:
+                    clean_words.append(word)
+                    seen.add(word)
+        if clean_words:
+            query_text = " ".join(clean_words)
+
         if not query_text:
             return empty
 
@@ -2978,6 +3101,7 @@ class PageIndexEngine:
                                 "type": "best_fields",
                                 "fields": ["text", "section_title^2", "chapter_title^2", "title^3"],
                                 "operator": "or",
+                                "minimum_should_match": "2<70%"
                             }
                         }
                     ],
@@ -3005,8 +3129,9 @@ class PageIndexEngine:
             text = _strip_surrogate_chars(str(src.get("text") or "")).strip()
             if not text:
                 continue
+            es_page_no = int(src.get("page_no") or 0)
             content.append({
-                "page_no": src.get("page_no"),
+                "page_no": es_page_no + 1,
                 "text": text,
                 "chapter_title": src.get("chapter_title"),
                 "section_title": src.get("section_title"),
@@ -3035,6 +3160,148 @@ class PageIndexEngine:
             "minio_url": minio_url,
             "content": content,
             "cache_hit": False,
+        }
+
+    def _sample_summary_pages_from_es(self, asset_uid: str, max_pages: int = 8) -> Dict[str, Any]:
+        empty = {"pages": [], "page_count": 0, "mode": "no_toc_metadata_only"}
+        key = str(asset_uid or "").strip()
+        if not key or not self._tier2_es_active():
+            return empty
+
+        auth = None
+        if self.tier1_es_username and self.tier1_es_password:
+            auth = (self.tier1_es_username, self.tier1_es_password)
+
+        def _search_pages(body: Dict[str, Any]) -> List[Dict[str, Any]]:
+            try:
+                resp = requests.post(
+                    f"{self.tier1_es_host}/{self.tier2_es_index}/_search",
+                    json=body,
+                    timeout=(1, min(float(self.tier1_timeout), float(self.tier1_es_timeout))),
+                    auth=auth,
+                )
+                resp.raise_for_status()
+                hits = ((resp.json().get("hits") or {}).get("hits") or [])
+            except Exception as exc:
+                logger.warning("No-TOC summary page sampling failed for %s: %s", key, exc)
+                return []
+
+            pages: List[Dict[str, Any]] = []
+            for hit in hits:
+                src = hit.get("_source") or {}
+                text = _strip_surrogate_chars(str(src.get("text") or "")).strip()
+                if not text:
+                    continue
+                try:
+                    page_no = int(src.get("page_no") or 0)
+                except Exception:
+                    page_no = 0
+                if page_no <= 0:
+                    continue
+                pages.append(
+                    {
+                        "page_no": page_no,
+                        "text": text,
+                        "chapter_title": src.get("chapter_title"),
+                        "section_title": src.get("section_title"),
+                        "title": src.get("title"),
+                        "score": float(hit.get("_score") or 0.0),
+                    }
+                )
+            return pages
+
+        page_count = 0
+        try:
+            count_body = {
+                "size": 0,
+                "query": {"term": {"asset_uid": key}},
+                "aggs": {
+                    "max_page": {"max": {"field": "page_no"}},
+                    "page_count": {"cardinality": {"field": "page_no"}},
+                },
+            }
+            resp = requests.post(
+                f"{self.tier1_es_host}/{self.tier2_es_index}/_search",
+                json=count_body,
+                timeout=(1, min(float(self.tier1_timeout), float(self.tier1_es_timeout))),
+                auth=auth,
+            )
+            resp.raise_for_status()
+            aggs = resp.json().get("aggregations") or {}
+            page_count = int((aggs.get("max_page") or {}).get("value") or (aggs.get("page_count") or {}).get("value") or 0)
+        except Exception:
+            page_count = 0
+
+        overview_body = {
+            "size": max(1, min(max_pages, 6)),
+            "_source": ["asset_uid", "page_no", "chapter_title", "section_title", "text", "title"],
+            "query": {
+                "bool": {
+                    "filter": [{"term": {"asset_uid": key}}],
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": "contents table of contents preface introduction overview chapter outline syllabus",
+                                "fields": ["section_title^4", "chapter_title^3", "text", "title^2"],
+                                "operator": "or",
+                            }
+                        }
+                    ],
+                }
+            },
+            "sort": [{"_score": "desc"}, {"page_no": "asc"}],
+        }
+        selected: List[Dict[str, Any]] = []
+        seen_pages: set = set()
+        for page in _search_pages(overview_body):
+            pno = int(page.get("page_no") or 0)
+            if pno and pno not in seen_pages:
+                selected.append(page)
+                seen_pages.add(pno)
+            if len(selected) >= max_pages:
+                break
+
+        sample_numbers: List[int] = []
+        if page_count > 0:
+            candidates = [
+                1,
+                2,
+                3,
+                max(1, page_count // 3),
+                max(1, page_count // 2),
+                max(1, (page_count * 2) // 3),
+                max(1, page_count - 2),
+                max(1, page_count - 1),
+                page_count,
+            ]
+            sample_numbers = [n for n in _dedupe_keep_order(candidates) if n > 0]
+        if sample_numbers and len(selected) < max_pages:
+            sample_body = {
+                "size": len(sample_numbers),
+                "_source": ["asset_uid", "page_no", "chapter_title", "section_title", "text", "title"],
+                "query": {
+                    "bool": {
+                        "filter": [
+                            {"term": {"asset_uid": key}},
+                            {"terms": {"page_no": sample_numbers}},
+                        ]
+                    }
+                },
+                "sort": [{"page_no": "asc"}],
+            }
+            for page in _search_pages(sample_body):
+                pno = int(page.get("page_no") or 0)
+                if pno and pno not in seen_pages:
+                    selected.append(page)
+                    seen_pages.add(pno)
+                if len(selected) >= max_pages:
+                    break
+
+        selected.sort(key=lambda item: int(item.get("page_no") or 0))
+        return {
+            "pages": selected[:max_pages],
+            "page_count": page_count,
+            "mode": "no_toc_sampled_pages" if selected else "no_toc_metadata_only",
         }
 
     def _load_course_map(self) -> Dict[str, Any]:
@@ -3074,6 +3341,259 @@ class PageIndexEngine:
                 return val
         return None
 
+    def _get_tier1_docs_by_asset(self, asset_uids: Sequence[str]) -> Dict[str, Dict[str, Any]]:
+        uids = [str(uid).strip() for uid in asset_uids if str(uid).strip()]
+        if not uids or not self.tier1_es_host or not self.tier1_es_index:
+            return {}
+        body = {
+            "size": len(uids),
+            "_source": [
+                "resource_uid",
+                "asset_uid",
+                "title",
+                "description",
+                "source_system",
+                "source_url",
+                "subject_names_vi",
+                "subject_names_en",
+                "subject_codes",
+            ],
+            "query": {"terms": {"asset_uid": uids}},
+        }
+        auth = None
+        if self.tier1_es_username and self.tier1_es_password:
+            auth = (self.tier1_es_username, self.tier1_es_password)
+        try:
+            resp = requests.post(
+                f"{self.tier1_es_host}/{self.tier1_es_index}/_search",
+                json=body,
+                timeout=max(1.0, min(4.0, self.tier1_es_timeout)),
+                auth=auth,
+            )
+            resp.raise_for_status()
+            hits = resp.json().get("hits", {}).get("hits", [])
+            docs: Dict[str, Dict[str, Any]] = {}
+            for hit in hits:
+                src = hit.get("_source") or {}
+                uid = str(src.get("asset_uid") or "").strip()
+                if uid:
+                    docs[uid] = src
+            return docs
+        except Exception as exc:
+            logger.warning("Error fetching tier1 docs by asset: %s", exc)
+            return {}
+
+    def _source_label(self, source_system: str, source_url: str = "") -> str:
+        folded = _ascii_fold(" ".join([source_system, source_url]))
+        if "openstax" in folded:
+            return "OpenStax"
+        if "open umn" in folded or "opentextbooks" in folded or "open textbook library" in folded:
+            return "Open Textbook Library"
+        if "mit" in folded or "ocw" in folded:
+            return "MIT OpenCourseWare"
+        if source_system:
+            return str(source_system).replace("_", " ").title()
+        host = urlparse(str(source_url or "")).netloc.replace("www.", "")
+        return host or "Nguồn OER"
+
+    def _classify_material_type(self, item: Dict[str, Any], page_count: int = 0) -> str:
+        title = str(item.get("title") or "")
+        description = str(item.get("description") or "")
+        source_system = str(item.get("source_system") or "")
+        source_url = str(item.get("source_url") or "")
+        folded = _ascii_fold(" ".join([title, description, source_system, source_url]))
+        textbook_source = any(marker in folded for marker in ["openstax", "open textbook", "opentextbooks", "open textbook library"])
+        if page_count and page_count < 40 and not textbook_source:
+            return "tài liệu ngắn"
+        if textbook_source or "textbook" in _ascii_fold(" ".join([title, source_system, source_url])):
+            return "sách giáo trình"
+        if any(marker in folded for marker in ["lecture transcript", "lecture notes", "slides", "handout"]):
+            return "bài giảng/ghi chú"
+        if re.search(r"\blec(?:ture)?\d+\b", folded) or re.search(r"\bf\d{2}-lec\d+\b", folded):
+            return "bài giảng/ghi chú"
+        if "course" in folded or "ocw" in folded:
+            return "khóa học OER"
+        if "book" in folded or "self contained" in folded:
+            return "sách"
+        return "tài liệu OER"
+
+    def _score_course_material_quality(
+        self,
+        item: Dict[str, Any],
+        page_count: int,
+        map_index: int,
+        preferred_subject_name: str = "",
+    ) -> Tuple[float, str, bool]:
+        title = str(item.get("title") or "")
+        description = str(item.get("description") or "")
+        source_system = str(item.get("source_system") or "")
+        source_url = str(item.get("source_url") or "")
+        folded = _ascii_fold(" ".join([title, description, source_system, source_url]))
+        title_folded = _ascii_fold(title)
+        course_folded = _ascii_fold(preferred_subject_name)
+        material_type = self._classify_material_type(item, page_count)
+
+        score = 80.0 - (float(map_index) * 0.75)
+        subject_reason = ""
+
+        base_focus_terms = _extract_subject_focus_terms(preferred_subject_name)
+        base_focus_terms.extend(_derive_en_keywords_from_vi(preferred_subject_name, _tokenize(preferred_subject_name)))
+        base_focus_terms.extend(_derive_vi_keywords_from_en(preferred_subject_name, _tokenize(preferred_subject_name)))
+        focus_terms = _dedupe_keep_order([term for term in base_focus_terms if len(str(term)) >= 3])
+        focus_phrases = _extract_subject_focus_phrases(preferred_subject_name, focus_terms)
+        focus_overlap = _overlap_score(" ".join([title, description]), focus_terms)
+        focus_phrase_hits = _phrase_overlap(" ".join([title, description]), focus_phrases)
+        title_focus_overlap = _overlap_score(title, focus_terms)
+        if focus_overlap > 0:
+            score += focus_overlap * 5.0
+        if focus_phrase_hits > 0:
+            score += focus_phrase_hits * 12.0
+        if title_focus_overlap > 0:
+            score += title_focus_overlap * 8.0
+
+        linear_course = any(marker in course_folded for marker in ["linear algebra", "dai so tuyen tinh"])
+        if linear_course:
+            linear_markers = [
+                "linear algebra",
+                "matrix",
+                "matrices",
+                "vector",
+                "vectors",
+                "eigenvalue",
+                "eigenvector",
+                "linear map",
+                "linear transformation",
+                "dai so tuyen tinh",
+            ]
+            linear_hit = any(marker in folded for marker in linear_markers)
+            elementary_algebra_only = (
+                "algebra" in title_folded
+                and not any(marker in title_folded for marker in ["linear", "matrix", "vector"])
+                and any(marker in title_folded for marker in ["elementary", "intermediate", "introductory", "advanced"])
+            )
+            if linear_hit:
+                score += 30.0
+                subject_reason = "Đúng trọng tâm Đại số tuyến tính."
+            if elementary_algebra_only:
+                score -= 55.0
+                subject_reason = "Không ưu tiên vì là đại số phổ thông/đại cương, không phải Đại số tuyến tính."
+        elif preferred_subject_name and focus_terms and focus_overlap <= 0.0 and focus_phrase_hits <= 0.0:
+            score -= 18.0
+            subject_reason = "Không ưu tiên vì metadata chưa bám sát tên môn."
+
+        if page_count >= 250:
+            score += 28.0
+        elif page_count >= 120:
+            score += 20.0
+        elif page_count >= 60:
+            score += 10.0
+        elif page_count > 0:
+            score -= 30.0
+
+        textbook_source = any(marker in folded for marker in ["openstax", "open textbook", "opentextbooks", "open textbook library"])
+        title_source_folded = _ascii_fold(" ".join([title, source_system, source_url]))
+        if textbook_source or "textbook" in title_source_folded:
+            score += 28.0
+        if any(marker in folded for marker in ["complete set", "independent study", "self contained", "self-contained"]):
+            score += 10.0
+        if any(marker in folded for marker in ["lecture transcript", "slides", "handout"]):
+            score -= 45.0
+        if re.search(r"\blec(?:ture)?\d+\b", folded) or re.search(r"\bf\d{2}-lec\d+\b", folded):
+            score -= 45.0
+        if page_count and page_count < 40:
+            score -= 35.0
+
+        incomplete = bool(
+            page_count > 0
+            and page_count < 40
+            and any(marker in material_type for marker in ["ngắn", "bài giảng"])
+        )
+        reason = "Ưu tiên vì có quy mô và mô tả giống tài liệu học hoàn chỉnh."
+        if "sách giáo trình" in material_type:
+            reason = "Ưu tiên vì là sách giáo trình/học liệu hoàn chỉnh."
+        elif "khóa học" in material_type:
+            reason = "Phù hợp vì là học liệu khóa học OER có cấu trúc."
+        elif incomplete:
+            reason = "Không ưu tiên vì giống bài giảng ngắn hơn là giáo trình hoàn chỉnh."
+        if subject_reason and not subject_reason.startswith("Không ưu tiên"):
+            reason = f"{reason} {subject_reason}"
+        elif subject_reason:
+            reason = subject_reason
+        return score, reason, incomplete
+
+    def _display_course_material_title(
+        self,
+        item: Dict[str, Any],
+        title_counts: Dict[str, int],
+    ) -> str:
+        title = str(item.get("title") or "Tài liệu").strip()
+        title_fold = _ascii_fold(title)
+        source_label = str(item.get("recommendation_source_label") or "").strip()
+        material_type = str(item.get("recommendation_material_type") or "").strip()
+        page_count = int(item.get("recommendation_page_count") or 0)
+        details: List[str] = []
+        if source_label:
+            details.append(source_label)
+        if material_type:
+            details.append(material_type)
+        if page_count > 0:
+            details.append(f"khoảng {page_count} trang")
+        generic_short_title = len(_tokenize(title)) <= 2
+        if (title_counts.get(title_fold, 0) > 1 or generic_short_title) and details:
+            return f"{title} — {', '.join(details)}"
+        if page_count > 0 and material_type in {"bài giảng/ghi chú", "tài liệu ngắn"}:
+            return f"{title} — {material_type}, khoảng {page_count} trang"
+        return title
+
+    def _rank_course_map_books(
+        self,
+        course: Dict[str, Any],
+        top_k: int = 5,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], int]:
+        all_books = [b for b in (course.get("books") or []) if isinstance(b, dict)]
+        name = str(course.get("name") or "")
+        target_k = max(1, min(5, int(top_k or 5)))
+        asset_uids = [str(b.get("asset_uid") or "").strip() for b in all_books if str(b.get("asset_uid") or "").strip()]
+        page_counts = self._get_page_counts(asset_uids)
+        tier1_docs = self._get_tier1_docs_by_asset(asset_uids)
+
+        enriched: List[Dict[str, Any]] = []
+        for map_index, raw_book in enumerate(all_books):
+            uid = str(raw_book.get("asset_uid") or "").strip()
+            meta = tier1_docs.get(uid, {})
+            item = dict(raw_book)
+            for key in ["resource_uid", "title", "description", "source_system", "source_url"]:
+                if meta.get(key):
+                    item[key] = meta.get(key)
+            page_count = int(page_counts.get(uid) or 0)
+            quality_score, quality_reason, incomplete = self._score_course_material_quality(item, page_count, map_index, name)
+            source_label = self._source_label(str(item.get("source_system") or ""), str(item.get("source_url") or ""))
+            material_type = self._classify_material_type(item, page_count)
+            item["recommendation_rank_score"] = quality_score
+            item["recommendation_reason"] = quality_reason
+            item["recommendation_page_count"] = page_count
+            item["recommendation_source_label"] = source_label
+            item["recommendation_material_type"] = material_type
+            item["recommendation_incomplete"] = incomplete
+            item["recommendation_subject_mismatch"] = quality_reason.startswith("Không ưu tiên")
+            enriched.append(item)
+
+        enriched.sort(key=lambda b: float(b.get("recommendation_rank_score") or 0.0), reverse=True)
+        complete_books = [b for b in enriched if not bool(b.get("recommendation_incomplete"))]
+        preferred_books = [
+            b
+            for b in enriched
+            if not bool(b.get("recommendation_incomplete"))
+            and not bool(b.get("recommendation_subject_mismatch"))
+        ]
+        if len(preferred_books) >= min(3, target_k):
+            books = preferred_books[:target_k]
+            dropped_incomplete = len(enriched) - len(complete_books)
+        else:
+            books = enriched[:target_k]
+            dropped_incomplete = 0
+        return books, enriched, dropped_incomplete
+
     def _crossbook_refusal(self, question, trace, document_result, answer_language, course_name=None):
         """Build a low-confidence refusal (out-of-scope / out-of-course)."""
         return {
@@ -3098,18 +3618,31 @@ class PageIndexEngine:
     def _recommend_course_books(self, question, course, trace, answer_language, top_k=5):
         """Recommend the curated books of a Moodle course (course-scoped 'gợi ý
         sách'), instead of the noisy subject-based recommendation."""
-        books = (course.get("books") or [])[: max(1, int(top_k))]
         name = course.get("name") or ""
-        contexts = [{
-            "title": b.get("title"),
-            "asset_uid": b.get("asset_uid"),
-            "source_url": b.get("source_url"),
-        } for b in books]
+        books, enriched, dropped_incomplete = self._rank_course_map_books(course, top_k=top_k)
+
+        title_counts: Dict[str, int] = {}
+        for item in books:
+            folded_title = _ascii_fold(str(item.get("title") or ""))
+            if folded_title:
+                title_counts[folded_title] = title_counts.get(folded_title, 0) + 1
+
+        contexts = []
+        for b in books:
+            display_title = self._display_course_material_title(b, title_counts)
+            contexts.append(
+                {
+                    "title": display_title,
+                    "asset_uid": b.get("asset_uid"),
+                    "source_url": b.get("source_url"),
+                    "text": b.get("recommendation_reason") or b.get("description") or display_title,
+                    "retrieval_score": float(b.get("recommendation_rank_score") or 0.0),
+                }
+            )
         lines = []
         for i, b in enumerate(books, 1):
-            line = f"{i}. {b.get('title')}"
-            if b.get("source_url"):
-                line += f"\n- Link: {b['source_url']}"
+            display_title = self._display_course_material_title(b, title_counts)
+            line = f"{i}. {display_title}"
             lines.append(line)
         if answer_language == "en":
             intro = f"You are in the course \"{name}\". Here are {len(books)} core materials of this course:"
@@ -3118,7 +3651,16 @@ class PageIndexEngine:
             intro = f"Bạn đang ở môn \"{name}\". Mình gợi ý {len(books)} tài liệu của môn:"
             tail = "\n\nĐộ tin cậy: Cao"
         answer = f"{intro}\n\n" + "\n\n".join(lines) + tail
-        trace.append({"tool": "course_recommend", "course": name, "books": len(books)})
+        trace.append(
+            {
+                "tool": "course_recommend",
+                "course": name,
+                "books": len(books),
+                "candidates": len(enriched),
+                "dropped_incomplete": dropped_incomplete,
+                "quality_ranked": True,
+            }
+        )
         return {
             "question": question,
             "answer": answer,
@@ -3212,16 +3754,59 @@ class PageIndexEngine:
         # the book title is repeated on every page doc, so boosting it lets a
         # stopword in the question hijack retrieval to a book whose TITLE matches
         # (e.g. "What is X?" -> "What is Capitalism?"). Match on page content only.
-        query_text = " ".join(
-            p for p in [
-                " ".join(bundle.keywords_en),
-                " ".join(bundle.keywords_vi),
-                str(bundle.query_en_semantic or "").strip(),
-                str(bundle.query_vi_semantic or "").strip(),
-            ] if p
-        ).strip() or str(bundle.query_vi_original or "").strip()
+        # Since the ES index is 100% English textbooks, use English query signals only
+        # when available to avoid accent-folding collisions.
+        # Guard against the VI-leak path: query_en_semantic falls back to the raw
+        # Vietnamese question (see _build_query_bundle) when the concept is not in
+        # the static map AND the LLM rewrite fails (GPU offline / Groq throttle).
+        # Mixing Vietnamese tokens into a BM25 query over a 100%-English index
+        # accent-folds into spurious matches (Turkish/Portuguese pages). Only use
+        # query_en_semantic when it is actually ASCII (English).
+        en_semantic = str(bundle.query_en_semantic or "").strip()
+        if not en_semantic.isascii():
+            en_semantic = ""
+        en_parts = [
+            " ".join(bundle.keywords_en),
+            en_semantic,
+        ]
+        query_text_en = " ".join(p for p in en_parts if p).strip()
+        if query_text_en:
+            query_text = query_text_en
+        else:
+            query_text = " ".join(
+                p for p in [
+                    " ".join(bundle.keywords_vi),
+                    str(bundle.query_vi_semantic or "").strip(),
+                ] if p
+            ).strip() or str(bundle.query_vi_original or "").strip()
         if not query_text:
             return None
+
+        # Clean punctuation and remove common stopwords to avoid low-quality keyword matches (like "what is", "là gì")
+        # that lead to false positives on completely unrelated documents.
+        ENGLISH_STOPWORDS = {"what", "is", "a", "the", "of", "to", "in", "for", "on", "with", "at", "by", "an", "be", "this", "that", "from", "how", "why", "who", "where", "which", "can", "do", "does", "did", "are", "was", "were", "been", "have", "has", "had", "i", "you", "he", "she", "they", "we", "it", "about"}
+        VIETNAMESE_STOPWORDS = {"là", "gì", "của", "và", "trong", "cho", "để", "ở", "tại", "bởi", "với", "được", "bị", "này", "kia", "đó", "nào", "sao", "thế", "cái", "con", "sự", "việc"}
+        clean_words = []
+        seen = set()
+        for word in query_text.lower().replace("?", "").replace(".", "").replace(",", "").split():
+            if word not in ENGLISH_STOPWORDS and word not in VIETNAMESE_STOPWORDS:
+                if word not in seen:
+                    clean_words.append(word)
+                    seen.add(word)
+        if clean_words:
+            query_text = " ".join(clean_words)
+
+        focused_definition_query = False
+        if _is_definition_query(bundle.query_vi_original) and str(bundle.concept_target or "").strip():
+            concept_terms = [
+                term
+                for term in _expand_definition_target_tokens(bundle.concept_target)
+                if len(str(term or "").strip()) >= 3
+            ]
+            concept_terms = _dedupe_keep_order(concept_terms)[:12]
+            if concept_terms:
+                query_text = " ".join(concept_terms)
+                focused_definition_query = True
 
         # Course-scoping: restrict to the Moodle course's curated books when matched.
         course = self._resolve_course_books(bundle.course_name) if self.tier2_course_scoped else None
@@ -3229,8 +3814,9 @@ class PageIndexEngine:
             "multi_match": {
                 "query": query_text,
                 "type": "best_fields",
-                "fields": ["text", "section_title^2", "chapter_title^2"],
+                "fields": ["text", "section_title^2", "chapter_title^2", "title"],
                 "operator": "or",
+                "minimum_should_match": "1<40%" if focused_definition_query else "2<70%"
             }
         }
         if course:
@@ -3241,11 +3827,44 @@ class PageIndexEngine:
                 }
             }
         else:
-            query_block = match_clause
+            query_block = {"bool": {"must": [match_clause]}}
 
+        if focused_definition_query and bundle.concept_target:
+            concept_terms_en = [t for t in _expand_definition_target_tokens(bundle.concept_target) if t not in ["dao", "ham"]]
+            if concept_terms_en:
+                primary_concept_en = concept_terms_en[0]
+                query_block["bool"].setdefault("should", [])
+                query_block["bool"]["should"].append({
+                    "multi_match": {
+                        "query": primary_concept_en,
+                        "fields": ["section_title^15", "text^5"],
+                    }
+                })
+
+        if getattr(bundle, "document_title", None):
+            query_block["bool"].setdefault("should", [])
+            query_block["bool"]["should"].append({
+                "match": {
+                    "title": {
+                        "query": bundle.document_title,
+                        "boost": 10.0
+                    }
+                }
+            })
+
+        # Absolute BM25 minimum score: pages below this threshold are noise (e.g. CC license
+        # pages that contain 'NoDerivatives' matching a math 'derivative' query). This is sent
+        # to ES so it drops those hits at the index level before they are forwarded to the LLM.
+        CROSSBOOK_MIN_SCORE = float(
+            os.getenv("PAGEINDEX_CROSSBOOK_MIN_SCORE", "6.0")
+        )
+        es_size = max(1, int(self.tier2_crossbook_pages))
+        if focused_definition_query:
+            es_size = max(24, es_size * 3)
         body = {
-            "size": max(1, int(self.tier2_crossbook_pages)),
+            "size": es_size,
             "_source": ["asset_uid", "title", "page_no", "chapter_title", "section_title", "text"],
+            "min_score": CROSSBOOK_MIN_SCORE,
             "query": query_block,
         }
         auth = None
@@ -3270,27 +3889,143 @@ class PageIndexEngine:
                 return self._crossbook_refusal(question, trace, document_result, answer_language, course["name"])
             return None
 
+        # Relative score gate: drop pages whose BM25 score is below 30% of the top hit's score.
+        # This removes borderline false-positive pages that only matched on stopwords or accidental
+        # keyword overlaps (e.g. Creative Commons "NoDerivatives" page appearing for a math query).
+        top_score = float(hits[0].get("_score") or 0.0)
+        RELATIVE_SCORE_THRESHOLD = 0.30
+        hits = [h for h in hits if float(h.get("_score") or 0.0) >= top_score * RELATIVE_SCORE_THRESHOLD]
+        trace.append({
+            "tool": "crossbook_score_filter",
+            "min_score_absolute": CROSSBOOK_MIN_SCORE,
+            "top_score": top_score,
+            "relative_threshold": RELATIVE_SCORE_THRESHOLD,
+            "hits_after_filter": len(hits),
+            "focused_definition_query": focused_definition_query,
+            "query_text": query_text[:240],
+        })
+        if not hits:
+            if course:
+                return self._crossbook_refusal(question, trace, document_result, answer_language, course["name"])
+            return None
+
         docs_by_uid = {str(d.get("asset_uid") or ""): d for d in (documents or [])}
         contexts: List[Dict[str, Any]] = []
+        course_profile = _build_course_scope_profile(bundle.course_name)
+        definition_target_terms = _expand_definition_target_tokens(bundle.concept_target) if focused_definition_query else []
         for hit in hits:
             src = hit.get("_source") or {}
             text = _strip_surrogate_chars(str(src.get("text") or "")).strip()
             if not text:
                 continue
+
+            # --- Structural Noise Page Detection (TOC, Index, Glossary, Short Page Filter) ---
+            text_lower = text.lower()
+            ch_title = str(src.get("chapter_title") or "").lower()
+            sec_title = str(src.get("section_title") or "").lower()
+            page_no = src.get("page_no")
+
+            # Word count threshold
+            words = text_lower.split()
+            word_count = len(words)
+
+            # Skip pages that have under 40 words but dense matches (indicates index/TOC snippet or cover page)
+            if word_count < 40:
+                continue
+
+            # Flag words for Table of Contents, Indexes, Glossary, Bibliographies
+            noise_indicators = {
+                "table of contents", "mục lục", "index", "glossary", 
+                "bibliography", "references", "chương trình đào tạo",
+                "tài liệu tham khảo", "danh mục", "từ điển thuật ngữ"
+            }
+            
+            is_noise_page = False
+            for indicator in noise_indicators:
+                if indicator in ch_title or indicator in sec_title:
+                    is_noise_page = True
+                    break
+
+            # If it's page 1, 2, 3 or the last few pages, and contains "contents" or "index" in the text body
+            if page_no is not None and (int(page_no) <= 5 or int(page_no) >= 300):
+                if any(ind in text_lower for ind in ["table of contents", "contents", "mục lục", "index"]):
+                    is_noise_page = True
+
+            # Detect dense dots or index pattern (e.g. "Chapter 1 .... 12")
+            dot_lines = text_lower.count("...") + text_lower.count(" . . ") + text_lower.count("···")
+            if dot_lines >= 4:
+                is_noise_page = True
+
+            if is_noise_page:
+                continue
+
+            # --- Exercise/Problem Page Detection ---
+            is_exercise_page = False
+            exercise_indicators = [
+                "exercises", "problems", "review exercises", 
+                "chapter review", "practice problems", "analytical exercises",
+                "multiple-choice questions", "review questions"
+            ]
+            if (
+                any(ind in text_lower for ind in exercise_indicators) or
+                any(ind in sec_title for ind in exercise_indicators) or
+                any(ind in ch_title for ind in exercise_indicators) or
+                text_lower.count("[t]") >= 2 or
+                re.search(r"\b\d+\s*\.\s*\[t\]", text_lower)
+            ):
+                is_exercise_page = True
+
+            if focused_definition_query and is_exercise_page:
+                continue
+            # ---------------------------------------------------------------------------------
+
             uid = str(src.get("asset_uid") or "")
             meta = docs_by_uid.get(uid) or {}
+            scope_text = " ".join(
+                [
+                    str(src.get("title") or meta.get("title") or ""),
+                    str(src.get("chapter_title") or ""),
+                    str(src.get("section_title") or ""),
+                    text[:1200],
+                ]
+            )
+            scope_eval = _evaluate_course_scope_text(scope_text, course_profile)
+            if bool(scope_eval.get("mismatch")):
+                continue
+            concept_overlap = _overlap_score(scope_text, definition_target_terms) if definition_target_terms else 0.0
+            definition_bonus = 0.0
+            if focused_definition_query:
+                if concept_overlap <= 0.0:
+                    continue
+                definition_bonus += concept_overlap * 4.0
+                if _has_targeted_definition_cue(scope_text, definition_target_terms):
+                    definition_bonus += 12.0
+                elif _has_definition_cue(scope_text):
+                    definition_bonus += 4.0
+                if int(src.get("page_no") or 0) <= 120:
+                    definition_bonus += 2.0
+                if "volume 1" in _ascii_fold(scope_text):
+                    definition_bonus += 8.0
+            score = float(hit.get("_score") or 0.0) + definition_bonus
+            if is_exercise_page:
+                score -= 10.0
+            es_page_no = int(src.get("page_no") or 0)
+            physical_page_no = es_page_no + 1
             contexts.append({
                 "text": text,
-                "page_no": src.get("page_no"),
+                "page_no": physical_page_no,
                 "title": src.get("title") or meta.get("title"),
                 "section_title": src.get("section_title"),
                 "chapter_title": src.get("chapter_title"),
                 "asset_uid": uid,
-                "chunk_id": f"{uid}::page::{src.get('page_no')}",
-                "retrieval_score": float(hit.get("_score") or 0.0),
+                "chunk_id": f"{uid}::page::{physical_page_no}",
+                "retrieval_score": score,
             })
         if not contexts:
             return None
+        if focused_definition_query:
+            contexts.sort(key=lambda item: float(item.get("retrieval_score") or 0.0), reverse=True)
+        contexts = contexts[:max(1, int(self.tier2_crossbook_pages))]
 
         # Primary document = book owning the top-ranked page (for attribution).
         top_uid = contexts[0]["asset_uid"]
@@ -3350,7 +4085,9 @@ class PageIndexEngine:
         return {
             "question": question,
             "answer": answer,
-            "contexts": contexts,
+            # Trả lời dùng toàn bộ contexts (8 trang) để tổng hợp, nhưng chỉ HIỂN THỊ
+            # top-N nguồn cho gọn (tránh 1 câu định nghĩa kèm 8 nguồn).
+            "contexts": contexts[: self.tier2_crossbook_show],
             "confidence": "medium",
             "search_mode": "pageindex",
             "pageindex_trace": trace,
@@ -3977,7 +4714,7 @@ class PageIndexEngine:
             f"3) Nguồn: {', '.join([f'[Nguồn {i}]' for i in range(1, source_count + 1)])}"
         )
 
-    def _build_recommendation_profile(self, question: str, preferred_subject_name: str) -> Dict[str, Any]:
+    def _build_recommendation_profile(self, question: str, preferred_subject_name: str, bundle: Optional[QueryBundle] = None) -> Dict[str, Any]:
         user_text = _strip_moodle_context(question)
         combined = " ".join([user_text, preferred_subject_name]).strip()
         folded = _ascii_fold(combined)
@@ -3985,7 +4722,6 @@ class PageIndexEngine:
 
         if preferred_subject_name.strip():
             subject_focus_terms = _extract_subject_focus_terms(preferred_subject_name)
-            subject_focus_phrases = _extract_subject_focus_phrases(preferred_subject_name, subject_focus_terms)
         else:
             recommendation_stop = {
                 "goi", "tai", "lieu", "sach", "tham", "khao", "cho", "mon",
@@ -4001,6 +4737,17 @@ class PageIndexEngine:
                 if len(tok) >= 3 and tok not in generic_terms and tok not in recommendation_stop
             ]
             subject_focus_terms = _dedupe_keep_order(topic_tokens)
+
+        if bundle:
+            en_keywords = [
+                tok for tok in (bundle.keywords_en or [])
+                if len(tok) >= 3 and tok not in generic_terms
+            ]
+            subject_focus_terms = _dedupe_keep_order(subject_focus_terms + en_keywords)
+
+        if preferred_subject_name.strip():
+            subject_focus_phrases = _extract_subject_focus_phrases(preferred_subject_name, subject_focus_terms)
+        else:
             subject_focus_phrases = _extract_subject_focus_phrases(user_text, subject_focus_terms)
 
         db_markers = [
@@ -4439,19 +5186,12 @@ class PageIndexEngine:
         for idx, item in enumerate(documents, start=1):
             tier1_doc = item.get("tier1") or {}
             title = str(item.get("title") or tier1_doc.get("title") or f"Tài liệu {idx}").strip()
-            source_url = str(item.get("source_url") or tier1_doc.get("source_url") or "").strip()
             default_reason = "Relevant to the current course." if answer_language == "en" else "Phù hợp với nội dung đang tìm."
             reason = str(item.get("recommendation_reason") or default_reason).strip()
             if answer_language == "en":
-                line = f"{idx}. {title}"
-                if source_url:
-                    line += f"\n- Link: {source_url}"
-                line += f"\n- Why: {reason}"
+                line = f"{idx}. {title}\n- Why: {reason}"
             else:
-                line = f"{idx}. {title}"
-                if source_url:
-                    line += f"\n- Link: {source_url}"
-                line += f"\n- {reason}"
+                line = f"{idx}. {title}\n- {reason}"
             lines.append(line)
         body = "\n\n".join(lines)
 
@@ -4471,17 +5211,518 @@ class PageIndexEngine:
             intro = f"Dựa trên câu hỏi của bạn, mình gợi ý {len(documents)} tài liệu liên quan:"
         return f"{intro}\n\n{body}\n\nĐộ tin cậy: {confidence_label_vi}{limited_note_vi}"
 
+    def _search_book_by_title(self, title: str) -> Optional[Dict[str, Any]]:
+        if not self.tier1_es_host or not self.tier1_es_index:
+            return None
+        import re
+        query_title = re.sub(r"[^\w\s]", " ", title).strip()
+        if not query_title:
+            return None
+        body = {
+            "size": 1,
+            "_source": [
+                "resource_uid",
+                "asset_uid",
+                "title",
+                "description",
+                "source_system",
+                "source_url"
+            ],
+            "query": {
+                "match": {
+                    "title": {
+                        "query": query_title,
+                        "operator": "and"
+                    }
+                }
+            }
+        }
+        request_url = f"{self.tier1_es_host}/{self.tier1_es_index}/_search"
+        auth = None
+        if self.tier1_es_username and self.tier1_es_password:
+            auth = (self.tier1_es_username, self.tier1_es_password)
+        try:
+            import requests
+            response = requests.post(
+                request_url,
+                json=body,
+                timeout=2,
+                auth=auth
+            )
+            response.raise_for_status()
+            hits = response.json().get("hits", {}).get("hits", [])
+            if hits:
+                hit = hits[0]
+                src = hit["_source"]
+                return {
+                    "resource_uid": src.get("resource_uid"),
+                    "asset_uid": src.get("asset_uid"),
+                    "title": src.get("title"),
+                    "description": src.get("description"),
+                    "source_system": src.get("source_system"),
+                    "source_url": src.get("source_url")
+                }
+        except Exception as exc:
+            logger.warning("Error searching book by title: %s", exc)
+        return None
+
+    def _book_from_course_map_entry(self, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        asset_uid = str(entry.get("asset_uid") or "").strip()
+        title = str(entry.get("title") or "").strip()
+        if not asset_uid and not title:
+            return None
+
+        book: Dict[str, Any] = {
+            "resource_uid": entry.get("resource_uid"),
+            "asset_uid": asset_uid or None,
+            "title": title or "Tài liệu",
+            "description": entry.get("description") or "",
+            "source_system": entry.get("source_system"),
+            "source_url": entry.get("source_url"),
+        }
+
+        if asset_uid:
+            try:
+                meta = self._get_document_meta(asset_uid)
+                if meta:
+                    book.update(
+                        {
+                            "resource_uid": meta.get("resource_uid") or book.get("resource_uid"),
+                            "title": meta.get("title") or book.get("title"),
+                            "description": meta.get("description") or book.get("description"),
+                            "source_system": meta.get("source_system") or book.get("source_system"),
+                            "source_url": meta.get("source_url") or book.get("source_url"),
+                        }
+                    )
+            except Exception as exc:
+                logger.warning("Could not enrich course-map book %s from metadata: %s", asset_uid, exc)
+
+        return book if book.get("asset_uid") or book.get("title") else None
+
+    def _resolve_book_from_history(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, Any]]:
+        import re
+        q_clean = _ascii_fold(_strip_moodle_context(question))
+        question_with_context = question
+        
+        # Check if user refers to a book by index
+        idx_match = re.search(
+            r"\b(quyen|cuon|sach|book|tailieu|tai lieu)\b(?:\s+(?:so|số|thu|thứ|number|no\.?|#))?\s*(\d+|mot|hai|ba|bon|nam|thu nhat|thu hai|thu ba|thu tu|thu nam|#\d+)\b",
+            q_clean,
+            re.IGNORECASE
+        )
+        if idx_match:
+            idx_str = idx_match.group(2).lower()
+            idx = None
+            if idx_str in {"1", "mot", "thu nhat", "#1"}:
+                idx = 0
+            elif idx_str in {"2", "hai", "thu hai", "#2"}:
+                idx = 1
+            elif idx_str in {"3", "ba", "thu ba", "#3"}:
+                idx = 2
+            elif idx_str in {"4", "bon", "thu tu", "#4"}:
+                idx = 3
+            elif idx_str in {"5", "nam", "thu nam", "#5"}:
+                idx = 4
+            else:
+                digit_match = re.search(r"\d+", idx_str)
+                if digit_match:
+                    idx = int(digit_match.group(0)) - 1
+            
+            if idx is not None and idx >= 0:
+                # 1. If Moodle course context is present, resolve by the same ranked course list
+                # used for recommendations. This keeps "cuốn số 1" aligned with the UI list
+                # even when titles are generic or duplicated.
+                course_books: List[Dict[str, Any]] = []
+                moodle_context = _parse_moodle_context(question_with_context)
+                cname = str(moodle_context.get("course_name") or "").strip()
+                if cname:
+                    course_data = self._resolve_course_books(cname)
+                    if course_data:
+                        ranked_books, _, _ = self._rank_course_map_books(course_data, top_k=max(5, idx + 1))
+                        if idx < len(ranked_books):
+                            course_book = self._book_from_course_map_entry(ranked_books[idx])
+                            if course_book:
+                                return course_book
+                        if "books" in course_data:
+                            course_books = [b for b in (course_data.get("books") or []) if isinstance(b, dict)]
+
+                # 2. Try to resolve the book from recommendation responses in conversation history
+                for msg in reversed(history or []):
+                    if msg.get("role") in {"assistant", "bot"}:
+                        text = msg.get("text") or ""
+                        text_lower = _ascii_fold(text)
+                        # Ensure this message actually looks like a book suggestion list
+                        if any(kw in text_lower for kw in ["goi y", "tai lieu", "sach", "suggest", "material", "reference"]):
+                            lines = text.split("\n")
+                            temp_titles = []
+                            for line in lines:
+                                line_trimmed = line.strip()
+                                num_match = re.match(r"^(\d+)\.\s*(.*)$", line_trimmed)
+                                if num_match:
+                                    temp_titles.append(num_match.group(2).strip())
+                            if idx < len(temp_titles):
+                                target_title = temp_titles[idx]
+                                target_title = re.sub(r"\*\*|\*", "", target_title).strip()
+                                book = self._search_book_by_title(target_title)
+                                if book:
+                                    return book
+
+                # 3. Last course fallback: raw course map order, for legacy maps with no ranking metadata.
+                if idx < len(course_books):
+                    target_title = str(course_books[idx].get("title") or "")
+                    target_title = re.sub(r"\*\*|\*", "", target_title).strip()
+                    if target_title:
+                        book = self._search_book_by_title(target_title)
+                        if book:
+                            return book
+                    course_book = self._book_from_course_map_entry(course_books[idx])
+                    if course_book:
+                        return course_book
+
+        # Check if question contains any book name from history
+        for msg in reversed(history or []):
+            if msg.get("role") in {"assistant", "bot"}:
+                text = msg.get("text") or ""
+                lines = text.split("\n")
+                for line in lines:
+                    line_trimmed = line.strip()
+                    num_match = re.match(r"^(\d+)\.\s*(.*)$", line_trimmed)
+                    if num_match:
+                        title = re.sub(r"\*\*|\*", "", num_match.group(2)).strip()
+                        if len(title) > 5 and _ascii_fold(title) in q_clean:
+                            book = self._search_book_by_title(title)
+                            if book:
+                                return book
+
+        # Fallback: extract title directly from question
+        summary_keywords = ["tom tat sach", "tom tat cuon", "tom tat quyen", "tom tat", "summarize book", "summarize"]
+        for kw in summary_keywords:
+            if kw in q_clean:
+                parts = q_clean.split(kw)
+                if len(parts) > 1:
+                    candidate = parts[1].strip()
+                    if len(candidate) > 3:
+                        book = self._search_book_by_title(candidate)
+                        if book:
+                            return book
+        return None
+
+    def _extract_active_book_title_from_history(self, history: Optional[List[Dict[str, str]]]) -> str:
+        if not history:
+            return ""
+        import re
+        for msg in reversed(history):
+            text = msg.get("text") or ""
+            match = re.search(r"\*\*Tóm tắt sách:\s*(.*?)\*\*", text)
+            if match:
+                return match.group(1).strip()
+        return ""
+
+    def _is_summary_request(self, question: str) -> bool:
+        q = _ascii_fold(question)
+        keywords = [
+            "tom tat", "tóm tắt", "muc luc", "mục lục", "chuong trinh", "chương trình",
+            "summarize", "summary", "toc", "chapters", "outline"
+        ]
+        return any(kw in q for kw in keywords)
+
+    def _generate_toc_summary(self, book: Dict[str, Any], answer_language: str = "vi") -> Dict[str, Any]:
+        asset_uid = book.get("asset_uid")
+        book_title = book.get("title")
+        description = book.get("description") or ""
+        clean_description_raw = re.sub(r"\{\{%.*?%\}\}", " ", str(description or ""), flags=re.DOTALL)
+        clean_description_raw = re.sub(r"\[[^\]]{1,180}\]\([^)]*\)", " ", clean_description_raw)
+        clean_description_raw = re.sub(r"\[[^\]]{1,180}\]_/courses/\S+\)?", " ", clean_description_raw)
+        clean_description_raw = re.sub(
+            r"(?is)\b(compared with|so với)\b.*?(?=\.|\n|$)",
+            " ",
+            clean_description_raw,
+        )
+        clean_description = _normalize_pdf_text(clean_description_raw)
+        clean_description = re.sub(r"https?://\S+|/courses/\S+", " ", clean_description)
+        clean_description = re.sub(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", clean_description)
+        clean_description = re.sub(r"\s+", " ", clean_description).strip()
+        
+        structure = self.get_document_structure(asset_uid)
+        sections = structure.get("sections") or []
+        summary_mode = "toc"
+        sampled_pages: List[Dict[str, Any]] = []
+        sampled_page_count = 0
+        
+        toc_lines = []
+        # Generic/boilerplate section labels to always skip
+        _GENERIC_SECTIONS = {
+            "introduction", "chapter review", "review", "preface", "contents",
+            "table of contents", "index", "glossary", "answers", "bibliography",
+            "references", "key terms", "key concepts", "exercises", "problems",
+        }
+
+        def _is_generic_section(sec_t: str, ch_t: str) -> bool:
+            """Return True if a section title should be skipped (generic or redundant)."""
+            sl = sec_t.lower().strip()
+            cl = ch_t.lower().strip()
+            # Exact generic labels
+            if sl in _GENERIC_SECTIONS:
+                return True
+            # Starts with generic word
+            if re.match(r'^(introduction|chapter review|key (terms|concepts|equations)|section (summary|exercises))$', sl):
+                return True
+            # sec_title is a substring of ch_title (e.g. "Chapter 1" inside "Chapter 1 Integration")
+            if sl and cl and (sl in cl or cl in sl):
+                return True
+            # Bare chapter/appendix labels like "Chapter 1", "Appendix A"
+            if re.match(r'^(chapter|appendix|chuong|phu luc)\s+[\dA-Za-z]+$', sl, re.IGNORECASE):
+                return True
+            return False
+
+        if sections:
+            # Deduplicate chapter keys and filter sub-sections
+            raw_chapters = {}
+            for sec in sections:
+                ch_title = (sec.get("chapter_title") or "Khác").strip()
+                sec_title = (sec.get("section_title") or "").strip()
+                if not ch_title:
+                    continue
+                if ch_title not in raw_chapters:
+                    raw_chapters[ch_title] = []
+                if sec_title and sec_title != ch_title and not _is_generic_section(sec_title, ch_title) and sec_title not in raw_chapters[ch_title]:
+                    raw_chapters[ch_title].append(sec_title)
+
+            sorted_ch_keys = sorted(raw_chapters.keys(), key=len, reverse=True)
+            filtered_ch_keys = []
+            for ch in sorted_ch_keys:
+                is_duplicate_prefix = False
+                for longer_ch in filtered_ch_keys:
+                    if longer_ch.startswith(ch) or ch.startswith(longer_ch):
+                        is_duplicate_prefix = True
+                        break
+                if not is_duplicate_prefix:
+                    filtered_ch_keys.append(ch)
+
+            chapters = {}
+            for sec in sections:
+                ch_title = (sec.get("chapter_title") or "Khác").strip()
+                sec_title = (sec.get("section_title") or "").strip()
+                if ch_title in filtered_ch_keys:
+                    if ch_title not in chapters:
+                        chapters[ch_title] = []
+                    if sec_title and sec_title != ch_title and not _is_generic_section(sec_title, ch_title) and sec_title not in chapters[ch_title]:
+                        chapters[ch_title].append(sec_title)
+            for ch, secs in chapters.items():
+                toc_lines.append(f"- **{ch}**")
+                for s in secs[:3]:
+                    toc_lines.append(f"  * {s}")
+        toc_str = "\n".join(toc_lines)
+        if not toc_str:
+            sampled = self._sample_summary_pages_from_es(str(asset_uid or ""), max_pages=8)
+            sampled_pages = list(sampled.get("pages") or [])
+            sampled_page_count = int(sampled.get("page_count") or 0)
+            summary_mode = str(sampled.get("mode") or "no_toc_metadata_only")
+            page_blocks: List[str] = []
+            per_page_limit = 1200
+            for page in sampled_pages:
+                pno = int(page.get("page_no") or 0)
+                section_label = str(page.get("section_title") or page.get("chapter_title") or "").strip()
+                text = _normalize_pdf_text(str(page.get("text") or ""))
+                if len(text) > per_page_limit:
+                    text = f"{text[:per_page_limit]}\n...[truncated]..."
+                label = f"[Trang {pno}]"
+                if section_label:
+                    label += f" {section_label}"
+                page_blocks.append(f"{label}\n{text}")
+            if page_blocks:
+                toc_str = "\n\n".join(page_blocks)
+            else:
+                toc_str = clean_description if clean_description else "Không có TOC hoặc trang mẫu đủ thông tin."
+            
+        if summary_mode == "toc":
+            evidence_label = "Mục lục"
+            scope_note = (
+                "Hãy liệt kê đầy đủ danh sách các chương chính và dịch toàn bộ tiêu đề chương sang tiếng Việt "
+                "BẮT BUỘC dịch 100% tiêu đề các chương (dạng: Chương 1, Chương 2,...) và tiêu đề các mục con sang tiếng Việt tự nhiên. "
+                "Không giữ nguyên tiếng Anh cho tiêu đề. Trình bày dưới dạng danh sách phân cấp thụt lề rõ ràng."
+            )
+        elif summary_mode == "no_toc_sampled_pages":
+            evidence_label = "Mô tả và các trang mẫu"
+            scope_note = (
+                "Tài liệu không có TOC khả dụng. Hãy tóm tắt dựa trên mô tả và các trang mẫu được trích xuất "
+                "(ưu tiên introduction/overview/preface/contents và một số trang đầu-giữa-cuối). "
+                "Không khẳng định đây là tóm tắt đầy đủ tuyệt đối của toàn bộ sách; hãy diễn đạt là tóm tắt dựa trên mẫu trang."
+            )
+        else:
+            evidence_label = "Mô tả metadata"
+            scope_note = (
+                "Tài liệu không có TOC và không lấy được trang mẫu. Chỉ tóm tắt ở mức khái quát dựa trên metadata; "
+                "không khẳng định bao quát đầy đủ toàn bộ sách."
+            )
+
+        prompt = (
+            "Bạn là một trợ lý học tập OER thông thái. Hãy viết một tóm tắt ngắn gọn và có cấu trúc "
+            "về nội dung chính chương trình học của cuốn sách dưới đây dựa trên bằng chứng được cung cấp.\n\n"
+            f"Tên sách: {book_title}\n"
+            f"Mô tả sơ lược: {clean_description}\n"
+            f"Chế độ tóm tắt: {summary_mode}\n"
+            f"Bằng chứng ({evidence_label}):\n{toc_str}\n\n"
+            "Yêu cầu:\n"
+            f"1. {scope_note}\n"
+            "2. Bắt buộc trả lời 100% bằng tiếng Việt tự nhiên; không trộn tiếng Trung, tiếng Anh hoặc ngôn ngữ khác trừ thuật ngữ chuyên ngành cần giữ nguyên.\n"
+            "3. Giữ câu trả lời cô đọng, dễ đọc dưới dạng bullet points.\n"
+            "4. Chỉ dùng thông tin có trong mô tả/bằng chứng; không bịa thêm chương, tác giả, ví dụ hoặc công thức không có trong bằng chứng.\n"
+            "5. Tuyệt đối không đưa URL, đường dẫn /courses/..., mã học phần nội bộ, markdown link lỗi, hoặc câu so sánh kiểu 'So với [tài liệu]...'.\n"
+            "6. Với Đại số tuyến tính, dịch 'diagonalization' là 'chéo hóa' và 'singular value decomposition' là 'phân rã giá trị kỳ dị'.\n"
+            "Hãy trả lời trực tiếp phần tóm tắt, không thêm lời chào mở đầu hay kết bài."
+        )
+        try:
+            summary = self._call_local_llm(prompt, request_timeout=180)
+        except Exception as exc:
+            logger.warning("Local LLM call for summary failed, fallback to raw list. detail=%s", exc)
+            if summary_mode == "toc":
+                summary = "Dưới đây là cấu trúc các chương chính:\n\n" + toc_str
+            elif sampled_pages:
+                summary = "Tài liệu không có TOC khả dụng. Dưới đây là các điểm chính suy ra từ mô tả và trang mẫu:\n\n" + toc_str
+            else:
+                summary = "Tài liệu không có TOC hoặc trang mẫu đủ thông tin. Tóm tắt khái quát dựa trên metadata:\n\n" + toc_str
+
+        summary_lines = []
+        for line in str(summary or "").splitlines():
+            folded_line = _ascii_fold(line)
+            if "/courses/" in line or "http://" in line or "https://" in line:
+                continue
+            if "so voi [" in folded_line or "compared with [" in folded_line:
+                continue
+            line = re.sub(r"\[[^\]]{1,120}\]\([^)]*\)", "", line)
+            line = re.sub(r"\[[^\]]{1,120}\]_/courses/\S+\)?", "", line)
+            line = re.sub(r"/courses/\S+", "", line)
+            line = line.replace("。", ".")
+            line = line.replace("chẩn đoán hóa", "chéo hóa").replace("Chẩn đoán hóa", "Chéo hóa")
+            line = re.sub(r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", line)
+            line = re.sub(r"\s+", " ", line).rstrip()
+            if line.strip():
+                summary_lines.append(line)
+        summary = "\n".join(summary_lines).strip() or str(summary or "").strip()
+
+        # Post-process TOC mode: ensure chapter-level lines (starting with "- ") are bold
+        if summary_mode == "toc":
+            bolded_lines = []
+            for line in summary.splitlines():
+                stripped = line.lstrip()
+                # Top-level bullet (chapter) but not already bold and not a sub-item
+                if stripped.startswith("- ") and not line.startswith("  ") and not line.startswith("\t"):
+                    content = stripped[2:].strip()
+                    # Add bold if not already bold
+                    if content and not content.startswith("**"):
+                        line = f"- **{content}**"
+                bolded_lines.append(line)
+            summary = "\n".join(bolded_lines)
+            
+        answer = f"**Tóm tắt sách: {book_title}**\n\n{summary}"
+        contexts = []
+        if sampled_pages:
+            for page in sampled_pages[:5]:
+                contexts.append(
+                    {
+                        "text": _normalize_pdf_text(str(page.get("text") or ""))[:900],
+                        "page_no": int(page.get("page_no") or 0) or None,
+                        "title": book_title,
+                        "section_title": page.get("section_title"),
+                        "chapter_title": page.get("chapter_title"),
+                        "source_url": book.get("source_url"),
+                        "minio_url": None,
+                        "asset_uid": asset_uid,
+                        "chunk_id": f"{asset_uid}::summary::p{page.get('page_no')}",
+                        "retrieval_score": float(page.get("score") or 1.0),
+                    }
+                )
+        if not contexts:
+            contexts = [{
+                "text": clean_description or book_title,
+                "page_no": None,
+                "title": book_title,
+                "section_title": None,
+                "chapter_title": None,
+                "source_url": book.get("source_url"),
+                "minio_url": None,
+                "asset_uid": asset_uid,
+                "chunk_id": f"{asset_uid}::summary",
+                "retrieval_score": 1.0,
+            }]
+        return {
+            "question": f"Tóm tắt sách {book_title}",
+            "answer": answer,
+            "contexts": contexts,
+            "sources": self._build_sources(contexts),
+            "confidence": "high",
+            "search_mode": "pageindex",
+            "pageindex_trace": [
+                {
+                    "tool": "toc_summarizer",
+                    "book": book_title,
+                    "sections": len(sections),
+                    "summary_mode": summary_mode,
+                    "sampled_pages": [int(p.get("page_no") or 0) for p in sampled_pages],
+                    "page_count": sampled_page_count,
+                }
+            ],
+            "query_bundle": None,
+            "metrics": {
+                "tier1_recall_at_k": 1.0,
+                "tier1_recall_at_k_type": "toc_summary",
+                "tier1_k": 1,
+                "evidence_hit_rate": 1.0,
+                "grounded_answer_rate": 1.0,
+                "pages_loaded_total": 0,
+                "pages_hit_total": 0,
+            }
+        }
+
+    def _get_page_counts(self, asset_uids: List[str]) -> Dict[str, int]:
+        if not asset_uids:
+            return {}
+        body = {
+            "size": 0,
+            "query": {
+                "terms": {
+                    "asset_uid": asset_uids
+                }
+            },
+            "aggs": {
+                "by_book": {
+                    "terms": {
+                        "field": "asset_uid",
+                        "size": len(asset_uids)
+                    }
+                }
+            }
+        }
+        auth = None
+        if self.tier1_es_username and self.tier1_es_password:
+            auth = (self.tier1_es_username, self.tier1_es_password)
+        try:
+            resp = requests.post(
+                f"{self.tier1_es_host}/{self.tier2_es_index}/_search",
+                json=body,
+                timeout=3.0,
+                auth=auth,
+            )
+            resp.raise_for_status()
+            buckets = resp.json().get("aggregations", {}).get("by_book", {}).get("buckets", [])
+            return {b["key"]: b["doc_count"] for b in buckets}
+        except Exception as exc:
+            logger.warning("Error fetching book page counts: %s", exc)
+            return {}
+
     def recommend_books(
         self,
         question: str,
         top_k: int = 5,
         source_system: Optional[str] = None,
         language: Optional[str] = None,
+        bundle: Optional[QueryBundle] = None,
     ) -> Dict[str, Any]:
         answer_language = _resolve_answer_language(language, question)
         moodle_context = _parse_moodle_context(question)
         preferred_subject_name = str(moodle_context.get("course_name") or "").strip()
-        profile = self._build_recommendation_profile(question, preferred_subject_name)
+        profile = self._build_recommendation_profile(question, preferred_subject_name, bundle)
         retrieval_query = self._build_recommendation_query(question, preferred_subject_name, profile)
 
         context_lines: List[str] = []
@@ -4501,6 +5742,18 @@ class PageIndexEngine:
             reason="Recommendation pipeline: ưu tiên metadata môn học hiện tại và lọc lệch domain.",
         )
         documents = document_result.get("documents") or []
+        if documents:
+            uids = list({doc["asset_uid"] for doc in documents if doc.get("asset_uid")})
+            page_counts = self._get_page_counts(uids)
+            filtered_docs = []
+            for doc in documents:
+                uid = doc.get("asset_uid")
+                pcount = page_counts.get(uid, 0)
+                if pcount >= 10:
+                    filtered_docs.append(doc)
+            if len(filtered_docs) >= 3 or (len(filtered_docs) > 0 and len(documents) <= 5):
+                documents = filtered_docs
+
         ranked, rank_stats = self._rank_recommendation_candidates(
             documents=documents,
             preferred_subject_name=preferred_subject_name,
@@ -4638,6 +5891,39 @@ class PageIndexEngine:
             ),
         }
 
+    def _answer_find_material(
+        self, contexts: List[Dict[str, Any]], answer_language: str = "vi"
+    ) -> str:
+        """Câu "Tài liệu nào nói về X?": trả về TÊN tài liệu nguồn (theo thứ tự truy hồi),
+        KHÔNG giải thích nội dung. Retrieval đã tìm đúng sách → chỉ cần nêu tên."""
+        seen: List[str] = []
+        for c in contexts:
+            t = str(c.get("title") or "").strip()
+            if t and t not in seen:
+                seen.append(t)
+            if len(seen) >= 3:
+                break
+        if not seen:
+            return _message_no_relevant(answer_language, "")
+        top, others = seen[0], seen[1:]
+        src = ", ".join(f"[Nguồn {i+1}]" if answer_language == "vi" else f"[Source {i+1}]"
+                        for i in range(len(seen)))
+        if answer_language == "vi":
+            a = f"1) Trả lời: Tài liệu phù hợp nhất là \"{top}\"."
+            a += ("\n2) Chi tiết: Các tài liệu liên quan khác: "
+                  + "; ".join(f"\"{t}\"" for t in others) + "."
+                  if others else
+                  "\n2) Chi tiết: Đây là tài liệu chứa nội dung liên quan trực tiếp đến câu hỏi.")
+            a += f"\n3) Nguồn: {src}"
+        else:
+            a = f"1) Answer: The most relevant material is \"{top}\"."
+            a += ("\n2) Details: Other related materials: "
+                  + "; ".join(f"\"{t}\"" for t in others) + "."
+                  if others else
+                  "\n2) Details: This is the document that directly covers the topic in question.")
+            a += f"\n3) Sources: {src}"
+        return a
+
     def _generate_answer(
         self,
         question: str,
@@ -4676,15 +5962,27 @@ class PageIndexEngine:
 
         definition_target = _extract_requested_concept(question) if _is_definition_query(question) else ""
         query_intent = _detect_query_intent(question)
+        if query_intent == "find_material":
+            return self._answer_find_material(contexts, answer_language=answer_language)
         moodle_ctx = _parse_moodle_context(question)
         section_hint = str(moodle_ctx.get("section_name") or "").strip()
+        course_name = str(moodle_ctx.get("course_name") or "").strip()
+        
         context_metadata = f"Document title: {document.get('title')}"
+        if course_name:
+            context_metadata += f"\nMoodle course context: {course_name}"
         if section_hint:
             context_metadata += f"\nMoodle section: {section_hint}"
         if definition_target:
             context_metadata += f"\nDefinition target: {definition_target}"
 
         is_listing = query_intent == "listing"
+
+        course_instruction_en = ""
+        course_instruction_vi = ""
+        if course_name:
+            course_instruction_en = f"IMPORTANT COURSE CONTEXT: The user is asking within the context of the course '{course_name}'. You MUST adapt the general concepts from the context to fit the specific syntax, paradigm, and characteristics of this course. If the context is generic computer science, adjust it to match {course_name}."
+            course_instruction_vi = f"QUAN TRỌNG: Người dùng đang hỏi trong ngữ cảnh môn học '{course_name}'. Bạn PHẢI đối chiếu và điều chỉnh các khái niệm chung chung từ context cho phù hợp tuyệt đối với đặc thù, cú pháp và quy tắc của môn '{course_name}'. Nếu tài liệu nói kiến thức đại cương, hãy áp dụng chuẩn xác cho {course_name}."
 
         base_rules_en = (
             "You are a PageIndex learning assistant for open educational resources (OER).\n"
@@ -4695,6 +5993,18 @@ class PageIndexEngine:
             "ONLY with: 'This question is outside the scope of the OER academic library. "
             "I can only help with academic and educational topics.'\n"
             "You must answer strictly from the provided VALID_CONTEXT extracted from document pages.\n"
+            "COPYRIGHT KEYWORD WARNING: If the question is about a mathematical concept (like derivative or calculus) "
+            "but the VALID_CONTEXT only contains license/copyright terms (like Creative Commons 'NoDerivatives' or 'ND') "
+            "or catalog index directories, without any actual mathematical explanation, you MUST treat it as NO INFORMATION "
+            "and answer exactly: 'The provided documents do not contain information to answer this question.'\n"
+            "MATH FORMULA RULE: All mathematical formulas, symbols, and equations MUST be formatted using standard LaTeX notation. "
+            "Use \\( ... \\) for inline math and $$ ... $$ for display/block math. "
+            "For example: write '\\( f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} \\)' instead of plain ascii text. "
+            "Write '\\( \\int x^2\\,dx = \\frac{1}{3}x^3 + C \\)' instead of '∫x^2 dx = 1/3x^3 + C'. "
+            "Write '\\( \\int_a^b f(x)\\,dx \\)' instead of '∫_a^b f(x)dx'. "
+            "If VALID_CONTEXT contains plain/ascii formulas, convert ONLY those formulas to LaTeX notation; do not add new formulas. "
+            "Never use plain ascii representations for equations.\n"
+            f"{course_instruction_en}\n"
             "Answer in English.\n"
             "If context is in another language, translate accurately without adding external facts.\n"
             "NEVER invent facts not found in the context.\n"
@@ -4710,8 +6020,20 @@ class PageIndexEngine:
             "bạn PHẢI trả lời DUY NHẤT: 'Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. "
             "Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục.'\n"
             "Chỉ được trả lời dựa trên VALID_CONTEXT đã lấy trực tiếp từ các trang tài liệu.\n"
-            "Trả lời bằng tiếng Việt.\n"
-            "Nếu context gốc là tiếng Anh thì DỊCH NGHĨA chính xác sang tiếng Việt, diễn đạt tự nhiên như giáo trình Việt.\n"
+            "CẢNH BÁO TRÙNG LẶP TỪ KHÓA BẢN QUYỀN: Nếu câu hỏi về khái niệm Toán học (như đạo hàm - derivative) "
+            "nhưng ngữ cảnh (VALID_CONTEXT) chỉ chứa từ khóa trùng hợp về bản quyền/giấy phép (như 'NoDerivatives' của Creative Commons) "
+            "hoặc danh mục chỉ mục (Index) mà không có nội dung giải thích toán học, bạn PHẢI xác định là KHÔNG có thông tin và trả lời: "
+            "'Tài liệu của khóa học này không có thông tin để trả lời câu hỏi này.'\n"
+            "QUY TẮC CÔNG THỨC TOÁN: Tất cả các công thức, ký hiệu toán học PHẢI được định dạng bằng mã LaTeX tiêu chuẩn. "
+            "Sử dụng \\( ... \\) cho công thức trong dòng (inline) và $$ ... $$ cho công thức dòng riêng (block). "
+            "Ví dụ: viết '\\( f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} \\)' thay vì 'f'(x) = lim_{h->0} ...'. "
+            "Viết '\\( \\int x^2\\,dx = \\frac{1}{3}x^3 + C \\)' thay vì '∫x^2 dx = 1/3x^3 + C'. "
+            "Viết '\\( \\int_a^b f(x)\\,dx \\)' thay vì '∫_a^b f(x)dx'. "
+            "Nếu VALID_CONTEXT có công thức dạng plain/ascii, chỉ chuyển chính các công thức đó sang LaTeX; không thêm công thức mới. "
+            "Tuyệt đối không dùng các định dạng text ascii rời rạc cho công thức.\n"
+            f"{course_instruction_vi}\n"
+            "LƯU Ý NGÔN NGỮ: Bắt buộc phải trả lời hoàn toàn bằng TIẾNG VIỆT (Vietnamese).\n"
+            "Nếu context gốc là tiếng Anh thì dịch chính xác sang TIẾNG VIỆT. Nếu có thuật ngữ chuyên ngành khó dịch, hãy giữ nguyên bằng tiếng Anh (English).\n"
             "TUYỆT ĐỐI KHÔNG bịa thêm nội dung không có trong context.\n"
             "KHÔNG dùng câu đồng nghĩa lặp lại (ví dụ: 'tích phân là... tích phân').\n"
             "Ngắn gọn, súc tích, mỗi ý chỉ nêu MỘT lần.\n"
@@ -4728,29 +6050,28 @@ class PageIndexEngine:
             )
         elif query_intent == "explanation" and definition_target:
             intent_instruction_en = (
-                "The question asks for a DEFINITION or EXPLANATION of a specific concept.\n"
-                "Section 1 MUST give a precise, non-circular definition from the context.\n"
-                "A non-circular definition explains the concept using DIFFERENT words, not the concept itself.\n"
-                "Section 2 should include: key properties, examples, formulas, or applications from the context.\n"
-                "If the context is in English, translate the definition accurately into the answer language.\n"
+                "The question asks for a DEFINITION or EXPLANATION of a concept.\n"
+                "Section 1: give a precise, clear general definition of the concept. You MAY phrase a standard definition for readability, but do NOT introduce specific facts, numbers, or formulas that are not in the context.\n"
+                "Section 2: include ONLY properties, examples, formulas, or applications that ACTUALLY APPEAR in the context. Do NOT invent or add examples/numbers/formulas (for instance, do NOT add '\\( f(x)=x^2 \\)', '\\( f'(x)=2x \\)', or '\\( f'(3)=6 \\)' unless they literally appear in the context).\n"
+                "If the context lacks specific details, say so instead of inventing them.\n"
+                "If the context is in English, translate accurately into the answer language without adding content.\n"
             )
             intent_instruction_vi = (
-                "Câu hỏi yêu cầu ĐỊNH NGHĨA hoặc GIẢI THÍCH một khái niệm cụ thể.\n"
-                "Phần 1 PHẢI đưa ra định nghĩa chính xác, KHÔNG lặp vòng (không dùng chính từ đó để giải thích).\n"
-                "Ví dụ SAI: 'Tích phân là phép tích phân các hàm số'. Ví dụ ĐÚNG: 'Tích phân là phép tính tìm diện tích dưới đường cong'.\n"
-                "Phần 2 nên bổ sung: tính chất quan trọng, ví dụ, công thức, hoặc ứng dụng từ context.\n"
-                "Nếu context tiếng Anh, dịch chính xác sang tiếng Việt với thuật ngữ chuẩn.\n"
+                "Câu hỏi yêu cầu ĐỊNH NGHĨA hoặc GIẢI THÍCH khái niệm.\n"
+                "Phần 1: Trình bày định nghĩa bao quát, chuẩn xác TỪ CONTEXT. NẾU context cung cấp quá chi tiết kỹ thuật hoặc KHÔNG CÓ định nghĩa cơ bản, bạn PHẢI TRẢ LỜI RÕ: 'Tài liệu của khóa học này không định nghĩa khái quát về khái niệm này, mà tập trung vào các chi tiết như: [tóm tắt chi tiết]'. TUYỆT ĐỐI KHÔNG dùng kiến thức ngoài để bịa ra định nghĩa.\n"
+                "Phần 2: Bổ sung các ví dụ, tính chất, hoặc chi tiết cụ thể mà bạn trích xuất ĐƯỢC TỪ CONTEXT để minh họa.\n"
+                "Hãy chứng minh bạn là một hệ thống RAG nghiêm ngặt: Chỉ nói những gì tài liệu có.\n"
             )
         else:
             intent_instruction_en = (
-                "Answer the question directly and clearly.\n"
-                "If the question asks for a definition, give the definition first.\n"
-                "Section 2 should add useful details: examples, formulas, or elaboration from context.\n"
+                "Answer the question directly and clearly based STRICTLY on the context.\n"
+                "If the context does not contain the answer, you MUST state: 'The provided documents do not contain information to answer this question.'\n"
+                "Section 2 should add useful details extracted from context.\n"
             )
             intent_instruction_vi = (
-                "Trả lời câu hỏi trực tiếp và rõ ràng.\n"
-                "Nếu câu hỏi hỏi định nghĩa, đưa định nghĩa trước.\n"
-                "Phần 2 nên bổ sung chi tiết hữu ích: ví dụ, công thức, hoặc giải thích thêm từ context.\n"
+                "Trả lời câu hỏi trực tiếp, tự nhiên dựa HOÀN TOÀN vào context.\n"
+                "Nếu context không chứa thông tin để trả lời, bạn PHẢI nói: 'Tài liệu của khóa học này không có thông tin để trả lời câu hỏi này.'\n"
+                "TUYỆT ĐỐI KHÔNG dùng kiến thức ngoài để bịa ra câu trả lời.\n"
             )
 
         format_block_en = (
@@ -4760,7 +6081,7 @@ class PageIndexEngine:
             "3) Sources: [Source 1]\n\n"
             "Example:\n"
             "1) Answer: The derivative of f at a is the limit of the difference quotient as h approaches 0.\n"
-            "2) Details: It measures instantaneous rate of change. For f(x)=x², f'(x)=2x, so at x=3 the rate is 6.\n"
+            "2) Details: It measures instantaneous rate of change. If the context includes the example, write formulas as \\( f(x)=x^2 \\), \\( f'(x)=2x \\), and \\( f'(3)=6 \\).\n"
             "3) Sources: [Source 1]\n"
         )
         format_block_vi = (
@@ -4768,9 +6089,9 @@ class PageIndexEngine:
             "1) Trả lời: <câu trả lời trực tiếp, ngắn gọn, KHÔNG lặp lại từ khóa trong câu hỏi để định nghĩa chính nó>\n"
             "2) Chi tiết: <thông tin bổ sung, ví dụ, công thức, hoặc danh sách gạch đầu dòng từ context>\n"
             "3) Nguồn: [Nguồn 1]\n\n"
-            "Ví dụ câu hỏi: 'Đạo hàm là gì?'\n"
-            "1) Trả lời: Đạo hàm của hàm f tại điểm a là giới hạn của tỷ số giữa độ biến thiên của hàm số và độ biến thiên của biến số khi độ biến thiên biến số tiến đến 0.\n"
-            "2) Chi tiết: Đạo hàm đo tốc độ thay đổi tức thời. Ví dụ: với f(x) = x², thì f'(x) = 2x; tại x = 3, tốc độ thay đổi bằng 6. Công thức: f'(a) = lim[h→0] (f(a+h) - f(a))/h.\n"
+            "Ví dụ câu hỏi: 'Thế năng là gì?'\n"
+            "1) Trả lời: Thế năng là cơ năng của một vật có được do vị trí của nó so với mặt đất hoặc so với vật khác.\n"
+            "2) Chi tiết: Thế năng trọng trường được tính bằng công thức \\( W_p = mgh \\). Ví dụ: một quả táo ở trên cành cây cao 3 mét có thế năng trọng trường lớn hơn khi nó nằm trên mặt đất.\n"
             "3) Nguồn: [Nguồn 1]\n"
         )
 
@@ -4792,14 +6113,20 @@ class PageIndexEngine:
                 f"{context_metadata}\n"
                 f"Câu hỏi: {question}\n"
                 f"VALID_CONTEXT:\n{context_text}\n\n"
-                "Trả lời bằng tiếng Việt:"
+                "TRẢ LỜI 100% BẰNG TIẾNG VIỆT (VIETNAMESE):"
             )
         try:
-            return self._call_local_llm(
+            answer_text = self._call_local_llm(
                 prompt,
                 json_mode=False,
                 request_timeout=llm_timeout if llm_timeout is not None else self.llm_answer_timeout,
             )
+            if answer_language == "vi":
+                answer_text = answer_text.replace("tia tiếp tuyến", "độ dốc của tiếp tuyến")
+                answer_text = answer_text.replace("Tia tiếp tuyến", "Độ dốc của tiếp tuyến")
+                answer_text = answer_text.replace("thương hiệu hiệu", "thương sai phân")
+                answer_text = answer_text.replace("giới hạn của thương hiệu", "giới hạn của thương sai phân")
+            return answer_text
         except Exception as exc:
             logger.warning("Local answer generation failed: %s", exc)
             if isinstance(exc, requests.RequestException):
@@ -4897,6 +6224,7 @@ class PageIndexEngine:
                 "title": title or "Không rõ tài liệu",
                 "url": pdf_url_with_page or "",
                 "file": minio_url or "",
+                "source_url": source_url,
                 "asset_uid": asset_uid or None,
                 "page": int(page_no) if page_no else None,
                 "section": str(ctx.get("section_title") or "").strip() or None,
@@ -4981,6 +6309,7 @@ class PageIndexEngine:
         top_k: int = 5,
         source_system: Optional[str] = None,
         language: Optional[str] = None,
+        history: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         trace: List[Dict[str, Any]] = []
         ask_deadline = time.monotonic() + max(1, self.ask_timeout)
@@ -4993,7 +6322,22 @@ class PageIndexEngine:
         def _remaining_time() -> int:
             return max(0, int(ask_deadline - time.monotonic()))
 
+        # Check for book summary request first
+        if self._is_summary_request(question):
+            resolved_book = self._resolve_book_from_history(question, history)
+            if resolved_book:
+                trace.append({"tool": "toc_summarizer_route", "book": resolved_book["title"]})
+                return self._generate_toc_summary(resolved_book, answer_language)
+
         prebundle = self._build_query_bundle(question)
+        
+        # Inject active book context from conversation history if missing from question
+        if not prebundle.document_title and history:
+            active_book = self._extract_active_book_title_from_history(history)
+            if active_book:
+                prebundle.document_title = active_book
+                trace.append({"tool": "active_book_context", "book": active_book})
+
         detected_intent = prebundle.intent
         if detected_intent == "recommendation":
             # Course-scoped: recommend the curated books of the Moodle course.
@@ -5007,6 +6351,7 @@ class PageIndexEngine:
                 top_k=top_k,
                 source_system=source_system,
                 language=language,
+                bundle=prebundle,
             )
         if prebundle.has_unresolved_placeholder:
             trace.append(
@@ -5162,6 +6507,8 @@ class PageIndexEngine:
             language=str(bundle_data.get("language") or _detect_lang(question)),
             query_mode=str(bundle_data.get("query_mode") or _detect_query_language(question)),
             course_name=str(bundle_data.get("course_name") or prebundle.course_name or ""),
+            section_name=str(bundle_data.get("section_name") or prebundle.section_name or ""),
+            document_title=str(bundle_data.get("document_title") or prebundle.document_title or ""),
             concept_target=str(bundle_data.get("concept_target") or prebundle.concept_target or ""),
             has_unresolved_placeholder=bool(
                 bundle_data.get("has_unresolved_placeholder")
@@ -5185,10 +6532,31 @@ class PageIndexEngine:
             )
             if crossbook_result is not None:
                 return crossbook_result
+            # If cross-book search returned None (no relevant pages matched above quality/score thresholds),
+            # do not fall back to the legacy per-document loop, as it would bypass the score/structural filters
+            # and retrieve low-quality noise pages, causing hallucinations.
             trace.append({
-                "tool": "crossbook_es_fallback",
-                "reason": "Page index khong tra ve ket qua; quay ve vong lap tien trinh PDF/per-document.",
+                "tool": "crossbook_refusal_final",
+                "reason": "Page index khong tra ve ket qua chat luong cao; tu choi de tranh RAG hallucination.",
             })
+            return {
+                "question": question,
+                "answer": _message_no_document(answer_language, bundle.course_name),
+                "contexts": [],
+                "confidence": "low",
+                "search_mode": "pageindex",
+                "pageindex_trace": trace,
+                "query_bundle": bundle_data,
+                "metrics": {
+                    "tier1_recall_at_k": 0.0,
+                    "tier1_recall_at_k_type": "proxy",
+                    "tier1_k": int(self.max_document_candidates),
+                    "evidence_hit_rate": 0.0,
+                    "grounded_answer_rate": 0.0,
+                    "pages_loaded_total": 0,
+                    "pages_hit_total": 0,
+                },
+            }
 
         best_result: Optional[Dict[str, Any]] = None
         for document in documents[: self.max_document_candidates]:

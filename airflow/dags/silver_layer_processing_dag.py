@@ -1,4 +1,4 @@
-﻿"""
+"""
 OER Lakehouse - Silver Layer Processing DAG
 ==========================================
 

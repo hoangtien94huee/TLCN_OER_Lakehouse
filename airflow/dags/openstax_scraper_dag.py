@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.operators.dummy import DummyOperator
 import json
 import os
 from src.bronze_openstax import OpenStaxScraperStandalone
@@ -45,12 +46,23 @@ def scrape_openstax_documents(**context):
         print(f"[OpenStax] Scraping failed: {e}")
         raise
 
-# Define task
+# Define tasks
+start_task = DummyOperator(
+    task_id='start_openstax_scraping',
+    dag=dag,
+)
+
 scrape_task = PythonOperator(
     task_id='scrape_openstax_documents',
     python_callable=scrape_openstax_documents,
     dag=dag,
 )
 
-# Simple workflow: just scrape
-scrape_task
+end_task = DummyOperator(
+    task_id='end_openstax_scraping',
+    dag=dag,
+)
+
+# Workflow structure
+start_task >> scrape_task >> end_task
+

@@ -781,102 +781,16 @@
   },
   "Giải tích": {
     "asset_uids": [
-      "3d63a9a4db0d9eebf66499b4e437337b09fe5bd06022828814a8c5e9db26f2fb",
-      "1799dbaf54b5a17315db2227e51eb8e9f2fe50c80e200601128c8db9695d7d9c",
-      "a7e46cb15d4c959a0786f6b5f293b2d76ea505845717045705e57a452c452600",
-      "18738220d76e1f45d1a9e9989726b526ecdef3ef71d7d3ddc1bffd401fd7c2d4",
-      "6dfd6609ef91e71e590d32b5d33ab55fcc8d5bb9e4e53677601f4e5a210df5ed",
-      "0340b3e71a4ddb60a00c00eec7cba4deb1cbc58c0fa65300b889a7ef6ff709a9",
-      "24cfbd393a9b3ab9cb7e405f641f754e7edeba3025e32eb0ea794a948649526d",
-      "0971f5d6d401175afa6d176e7d9aceb745547194c5837937e719147efee89ce2",
-      "442c2a8a557c55407167505c7b1742950a1358c8d41d0b6c2c142e31c590f6f2",
-      "ea56bf1c1167cc2d6dc5e02bf0724612866ee0ad05dd5a649bb7cdd80d0f39b2",
-      "5e8121afe4c55032f9ec49be49ebfbc02bebfcfa09469b29061869904b09c6dc",
-      "156d66983a1eefbd9e7c85a7e9f1d5f001d371cf0d5054630719515f16acbf17",
       "4acf9a7ac6accbdcb517b26bde043ce41ff759c5b11a5fde3751dad461c98658",
-      "1f9ef4286ee107b58eebf89987eb9c1f4485d90ba8503533834d1a0e8fd59df2",
       "5750b23cec528a4ce27c0a660e55d6e83facf8130917dc6d1360b0fa074cdd47",
-      "010d59502a3c6db0513b6144eb0cc0c6d71a49b0b29c847230d9b210ac87b134",
-      "28009c355cb7db954ad593338ecab53fc2e4a5a368c582d3fe777b981b843039",
-      "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
-      "01b176f1e613815c3d412b165e1c082a44e765095a607dafd0fe26ce42fb7e87",
-      "0d703a450043aaec4509ba947660cc80ff80a05ee7b8de3a0a4cb969ccd791e7",
-      "115c9c70886ecb0917b8490e634fd7c678ce2ee758bab36f1f25b1e7e598112f",
-      "08c79d5c3d5df1d072e084ad931523d282f87be5057c31b2840ddc6f19ab3507",
-      "06126a2c0f574ad813816649f64fd5f67fc52af5a0edb783af264f6a25e1d6ed",
-      "07ca87744e0e0340e8b88a6b62682ff6c31ac494943f3045819aef6e793fab16",
-      "5395084c3a6e6767d8d54a6801b01b59f4dffe7a690917d1db9406b42dbd0df7"
+      "1f9ef4286ee107b58eebf89987eb9c1f4485d90ba8503533834d1a0e8fd59df2",
+      "3d63a9a4db0d9eebf66499b4e437337b09fe5bd06022828814a8c5e9db26f2fb"
     ],
     "books": [
-      {
-        "asset_uid": "3d63a9a4db0d9eebf66499b4e437337b09fe5bd06022828814a8c5e9db26f2fb",
-        "title": "Optimal, Integral, Likely Optimization, Integral Calculus, and Probability for Students of Commerce and the Social Sciences",
-        "source_url": "https://open.umn.edu/opentextbooks/textbooks/optimal-integral-likely-optimization-integral-calculus-and-probability-for-students-of-commerce-and-the-social-sciences"
-      },
-      {
-        "asset_uid": "1799dbaf54b5a17315db2227e51eb8e9f2fe50c80e200601128c8db9695d7d9c",
-        "title": "Multivariable Calculus",
-        "source_url": "https://ocw.mit.edu/courses/18-02-multivariable-calculus-fall-2007/"
-      },
-      {
-        "asset_uid": "a7e46cb15d4c959a0786f6b5f293b2d76ea505845717045705e57a452c452600",
-        "title": "Multivariable Calculus",
-        "source_url": "https://ocw.mit.edu/courses/18-02sc-multivariable-calculus-fall-2010/"
-      },
-      {
-        "asset_uid": "18738220d76e1f45d1a9e9989726b526ecdef3ef71d7d3ddc1bffd401fd7c2d4",
-        "title": "Multivariable Calculus with Theory",
-        "source_url": "https://ocw.mit.edu/courses/18-024-multivariable-calculus-with-theory-spring-2011/"
-      },
-      {
-        "asset_uid": "6dfd6609ef91e71e590d32b5d33ab55fcc8d5bb9e4e53677601f4e5a210df5ed",
-        "title": "Real Analysis",
-        "source_url": "https://ocw.mit.edu/courses/18-100a-real-analysis-fall-2020/"
-      },
-      {
-        "asset_uid": "0340b3e71a4ddb60a00c00eec7cba4deb1cbc58c0fa65300b889a7ef6ff709a9",
-        "title": "Calculus with Theory",
-        "source_url": "https://ocw.mit.edu/courses/18-014-calculus-with-theory-fall-2010/"
-      },
-      {
-        "asset_uid": "24cfbd393a9b3ab9cb7e405f641f754e7edeba3025e32eb0ea794a948649526d",
-        "title": "Single Variable Calculus",
-        "source_url": "https://ocw.mit.edu/courses/18-01-single-variable-calculus-fall-2006/"
-      },
-      {
-        "asset_uid": "0971f5d6d401175afa6d176e7d9aceb745547194c5837937e719147efee89ce2",
-        "title": "Single Variable Calculus",
-        "source_url": "https://ocw.mit.edu/courses/18-01-single-variable-calculus-fall-2005/"
-      },
-      {
-        "asset_uid": "442c2a8a557c55407167505c7b1742950a1358c8d41d0b6c2c142e31c590f6f2",
-        "title": "Single Variable Calculus",
-        "source_url": "https://ocw.mit.edu/courses/18-01sc-single-variable-calculus-fall-2010/"
-      },
-      {
-        "asset_uid": "ea56bf1c1167cc2d6dc5e02bf0724612866ee0ad05dd5a649bb7cdd80d0f39b2",
-        "title": "Advanced Stochastic Processes",
-        "source_url": "https://ocw.mit.edu/courses/15-070j-advanced-stochastic-processes-fall-2013/"
-      },
-      {
-        "asset_uid": "5e8121afe4c55032f9ec49be49ebfbc02bebfcfa09469b29061869904b09c6dc",
-        "title": "Random Walks and Diffusion",
-        "source_url": "https://ocw.mit.edu/courses/18-366-random-walks-and-diffusion-fall-2006/"
-      },
-      {
-        "asset_uid": "156d66983a1eefbd9e7c85a7e9f1d5f001d371cf0d5054630719515f16acbf17",
-        "title": "Matrix Calculus for Machine Learning and Beyond",
-        "source_url": "https://ocw.mit.edu/courses/18-s096-matrix-calculus-for-machine-learning-and-beyond-january-iap-2023/"
-      },
       {
         "asset_uid": "4acf9a7ac6accbdcb517b26bde043ce41ff759c5b11a5fde3751dad461c98658",
         "title": "Free Calculus Volume 1 Textbook Available for Download - OpenStax",
         "source_url": "https://openstax.org/details/books/calculus-volume-1"
-      },
-      {
-        "asset_uid": "1f9ef4286ee107b58eebf89987eb9c1f4485d90ba8503533834d1a0e8fd59df2",
-        "title": "Free Calculus Volume 3 Textbook Available for Download - OpenStax",
-        "source_url": "https://openstax.org/details/books/calculus-volume-3"
       },
       {
         "asset_uid": "5750b23cec528a4ce27c0a660e55d6e83facf8130917dc6d1360b0fa074cdd47",
@@ -884,54 +798,14 @@
         "source_url": "https://openstax.org/details/books/calculus-volume-2"
       },
       {
-        "asset_uid": "010d59502a3c6db0513b6144eb0cc0c6d71a49b0b29c847230d9b210ac87b134",
-        "title": "Theory of Probability",
-        "source_url": "https://ocw.mit.edu/courses/18-175-theory-of-probability-spring-2014/"
+        "asset_uid": "1f9ef4286ee107b58eebf89987eb9c1f4485d90ba8503533834d1a0e8fd59df2",
+        "title": "Free Calculus Volume 3 Textbook Available for Download - OpenStax",
+        "source_url": "https://openstax.org/details/books/calculus-volume-3"
       },
       {
-        "asset_uid": "28009c355cb7db954ad593338ecab53fc2e4a5a368c582d3fe777b981b843039",
-        "title": "Real Analysis",
-        "source_url": "https://ocw.mit.edu/courses/18-100c-real-analysis-fall-2012/"
-      },
-      {
-        "asset_uid": "252002c90d49486123979db3569426de4f8253f2fe888e5bee959eafe302e9d7",
-        "title": "Statistical Method in Economics",
-        "source_url": "https://ocw.mit.edu/courses/14-381-statistical-method-in-economics-fall-2018/"
-      },
-      {
-        "asset_uid": "01b176f1e613815c3d412b165e1c082a44e765095a607dafd0fe26ce42fb7e87",
-        "title": "Probability and Random Variables",
-        "source_url": "https://ocw.mit.edu/courses/18-600-probability-and-random-variables-fall-2019/"
-      },
-      {
-        "asset_uid": "0d703a450043aaec4509ba947660cc80ff80a05ee7b8de3a0a4cb969ccd791e7",
-        "title": "Probability and Random Variables",
-        "source_url": "https://ocw.mit.edu/courses/18-440-probability-and-random-variables-spring-2014/"
-      },
-      {
-        "asset_uid": "115c9c70886ecb0917b8490e634fd7c678ce2ee758bab36f1f25b1e7e598112f",
-        "title": "Identification, Estimation, and Learning",
-        "source_url": "https://ocw.mit.edu/courses/2-160-identification-estimation-and-learning-spring-2006/"
-      },
-      {
-        "asset_uid": "08c79d5c3d5df1d072e084ad931523d282f87be5057c31b2840ddc6f19ab3507",
-        "title": "Linear Algebra",
-        "source_url": "https://open.umn.edu/opentextbooks/textbooks/linear-algebra-2016"
-      },
-      {
-        "asset_uid": "06126a2c0f574ad813816649f64fd5f67fc52af5a0edb783af264f6a25e1d6ed",
-        "title": "Design and Manufacturing II",
-        "source_url": "https://ocw.mit.edu/courses/2-008-design-and-manufacturing-ii-spring-2025/"
-      },
-      {
-        "asset_uid": "07ca87744e0e0340e8b88a6b62682ff6c31ac494943f3045819aef6e793fab16",
-        "title": "Analysis II",
-        "source_url": "https://ocw.mit.edu/courses/18-101-analysis-ii-fall-2005/"
-      },
-      {
-        "asset_uid": "5395084c3a6e6767d8d54a6801b01b59f4dffe7a690917d1db9406b42dbd0df7",
-        "title": "Precalculus",
-        "source_url": "https://open.umn.edu/opentextbooks/textbooks/precalculus-2016"
+        "asset_uid": "3d63a9a4db0d9eebf66499b4e437337b09fe5bd06022828814a8c5e9db26f2fb",
+        "title": "Optimal, Integral, Likely Optimization, Integral Calculus, and Probability for Students of Commerce and the Social Sciences",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/optimal-integral-likely-optimization-integral-calculus-and-probability-for-students-of-commerce-and-the-social-sciences"
       }
     ]
   },
@@ -1484,6 +1358,203 @@
         "asset_uid": "2dc1615f93f2817ca57a25a453d11a4bb33c8a962f172f6c5ca2e62076a0ef5d",
         "title": "Managing Global Integration",
         "source_url": "https://ocw.mit.edu/courses/15-229-managing-global-integration-spring-2012/"
+      }
+    ]
+  },
+  "Lập trình Cơ bản (C/C++)": {
+    "asset_uids": [
+      "a6735eef726f9603c69f3d06e1776d66d26cfaa46e2e395644beeb5e577c668b",
+      "8599253be9c10fed530769330034d8715af5d122e03d951c93545239ff5c0393",
+      "5e75af46579b588ec8917a9223275749be09f97366448d163db7b9569708bfc56",
+      "a99e41a9e05d17e20cb2f6482d03815f0b45150a03c16d93ff0ce73d543a3e3e",
+      "93dc0f8a40c5a52b0a03a74237c1a136153568469ed0161f59ea4b8ac9581af0"
+    ],
+    "books": [
+      {
+        "asset_uid": "a6735eef726f9603c69f3d06e1776d66d26cfaa46e2e395644beeb5e577c668b",
+        "title": "Structure and Interpretation of Computer Programs",
+        "source_url": "https://ocw.mit.edu/courses/6-001-structure-and-interpretation-of-computer-programs-spring-2005/"
+      },
+      {
+        "asset_uid": "8599253be9c10fed530769330034d8715af5d122e03d951c93545239ff5c0393",
+        "title": "Structure and Interpretation of Computer Programs",
+        "source_url": "https://ocw.mit.edu/courses/6-001-structure-and-interpretation-of-computer-programs-spring-2005/"
+      },
+      {
+        "asset_uid": "a99e41a9e05d17e20cb2f6482d03815f0b45150a03c16d93ff0ce73d543a3e3e",
+        "title": "Python for Everybody: Exploring Data Using Python 3",
+        "source_url": "https://www.py4e.com/"
+      },
+      {
+        "asset_uid": "93dc0f8a40c5a52b0a03a74237c1a136153568469ed0161f59ea4b8ac9581af0",
+        "title": "Introduction to Electrical Engineering and Computer Science I",
+        "source_url": "https://ocw.mit.edu/courses/6-01sc-introduction-to-electrical-engineering-and-computer-science-i-spring-2011/"
+      }
+    ]
+  },
+  "Cấu trúc Dữ liệu và Giải thuật": {
+    "asset_uids": [
+      "5bdeea246969f8f55317123444a085aff9a1ff4bd7801fa386d38a4cba85b499",
+      "895be2e253175e5ce167a11c7286e9d06ef6ed5e2ec51b5278ff6e83f8f267cf"
+    ],
+    "books": [
+      {
+        "asset_uid": "5bdeea246969f8f55317123444a085aff9a1ff4bd7801fa386d38a4cba85b499",
+        "title": "Introduction to Algorithms",
+        "source_url": "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-fall-2011/"
+      },
+      {
+        "asset_uid": "895be2e253175e5ce167a11c7286e9d06ef6ed5e2ec51b5278ff6e83f8f267cf",
+        "title": "Introduction to Algorithms",
+        "source_url": "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/"
+      }
+    ]
+  },
+  "Mạng máy tính": {
+    "asset_uids": [
+      "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+      "d3661450c5503d85cc14ad6d025525822626d261399b0fc43a8265ca19ff2fa0",
+      "07beae8b152fa0b0c8a47897d533697502cf3c692f390762e11d7c28d24e5cfd",
+      "3ff0158dcffc840a3445a438dcb0bd114e7673144fda841179c49a53f7d24fd5"
+    ],
+    "books": [
+      {
+        "asset_uid": "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+        "title": "Introduction to Computer Science - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-computer-science"
+      },
+      {
+        "asset_uid": "d3661450c5503d85cc14ad6d025525822626d261399b0fc43a8265ca19ff2fa0",
+        "title": "Data Communication Networks",
+        "source_url": "https://ocw.mit.edu/courses/6-263j-data-communication-networks-fall-2002/"
+      },
+      {
+        "asset_uid": "07beae8b152fa0b0c8a47897d533697502cf3c692f390762e11d7c28d24e5cfd",
+        "title": "Networks",
+        "source_url": "https://ocw.mit.edu/courses/15-992-networks-spring-2008/"
+      },
+      {
+        "asset_uid": "3ff0158dcffc840a3445a438dcb0bd114e7673144fda841179c49a53f7d24fd5",
+        "title": "Communication Systems Engineering",
+        "source_url": "https://ocw.mit.edu/courses/6-02-introduction-to-eecs-ii-digital-communication-systems-fall-2012/"
+      }
+    ]
+  },
+  "Phát triển Ứng dụng Web": {
+    "asset_uids": [
+      "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+      "9f0237976e191cd1cd6963e63969a53164a66a7b219decc5510667da6728cce7",
+      "47a3dc1e28586828555eab2bd723db5a88c751296cf15df3650cdad163014a04"
+    ],
+    "books": [
+      {
+        "asset_uid": "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+        "title": "Introduction to Computer Science - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-computer-science"
+      },
+      {
+        "asset_uid": "9f0237976e191cd1cd6963e63969a53164a66a7b219decc5510667da6728cce7",
+        "title": "Information Technology Essentials",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/information-technology-essentials"
+      },
+      {
+        "asset_uid": "47a3dc1e28586828555eab2bd723db5a88c751296cf15df3650cdad163014a04",
+        "title": "Web Programming",
+        "source_url": "https://open.umn.edu/opentextbooks/textbooks/web-programming"
+      }
+    ]
+  },
+  "Kỹ thuật Phần mềm": {
+    "asset_uids": [
+      "7b2d6a938086150ef6a500026d9301c9a047e1b0886e901870d0bbed048562a5",
+      "7b823597edd22e4f042da37476324c3630ad5406363c55d7eb0fcd35beca45d8",
+      "539debf071d912033895bdb33bd086c8f89151a5ae42b57a36697152a9676e07",
+      "5efd68ec8d1ee61f67f93cd03bded9560ecb10996b8b9c751035bd9abd607a48",
+      "fc6f691183d4e36cb7509ee7217d0a27262315499a5c568c3f32e0e4db5e873f",
+      "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8",
+      "ddc62b2bc30f761f0905e32618fc39719a0a8e8190d2808f111a87dc24429e87"
+    ],
+    "books": [
+      {
+        "asset_uid": "7b2d6a938086150ef6a500026d9301c9a047e1b0886e901870d0bbed048562a5",
+        "title": "Elements of Software Construction",
+        "source_url": "https://ocw.mit.edu/courses/6-005-elements-of-software-construction-fall-2011/"
+      },
+      {
+        "asset_uid": "5efd68ec8d1ee61f67f93cd03bded9560ecb10996b8b9c751035bd9abd607a48",
+        "title": "Social and Ethical Responsibilities of Computing (SERC)",
+        "source_url": "https://ocw.mit.edu/courses/res-11-004-ethical-practice-in-engineering-and-technology/"
+      },
+      {
+        "asset_uid": "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8",
+        "title": "Performance Engineering of Software Systems",
+        "source_url": "https://ocw.mit.edu/courses/6-172-performance-engineering-of-software-systems-fall-2018/"
+      }
+    ]
+  },
+  "Nhập môn Lập trình Python": {
+    "asset_uids": [
+      "b9307858c8b74a9552de02ff0be7e28c8642104d9ba6f0d5f96b838ccb23ae32"
+    ],
+    "books": [
+      {
+        "asset_uid": "b9307858c8b74a9552de02ff0be7e28c8642104d9ba6f0d5f96b838ccb23ae32",
+        "title": "Introduction to Python Programming - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-python-programming"
+      }
+    ]
+  },
+  "Cơ sở dữ liệu": {
+    "asset_uids": [
+      "d07fac8a9a189849d2a5557dfad88056ce0445bcfa9f12bb55e80f9db291028f"
+    ],
+    "books": [
+      {
+        "asset_uid": "d07fac8a9a189849d2a5557dfad88056ce0445bcfa9f12bb55e80f9db291028f",
+        "title": "Database Systems",
+        "source_url": "https://ocw.mit.edu/courses/6-830-database-systems-fall-2010/"
+      }
+    ]
+  },
+  "Kiến trúc Máy tính": {
+    "asset_uids": [
+      "812d3c5a17b140770f03a7b04637d3644d55b8d1f34eb01e90dde56a293675e7"
+    ],
+    "books": [
+      {
+        "asset_uid": "812d3c5a17b140770f03a7b04637d3644d55b8d1f34eb01e90dde56a293675e7",
+        "title": "Advanced System Architecture",
+        "source_url": "https://ocw.mit.edu/courses/6-823-computer-system-architecture-fall-2005/"
+      }
+    ]
+  },
+  "Công nghệ phần mềm": {
+    "asset_uids": [
+      "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+      "7b2d6a938086150ef6a500026d9301c9a047e1b0886e901870d0bbed048562a5",
+      "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8",
+      "0a95e0c52a55adcc48dd804566c303f0b0933c0bd912da05b76da9156cc01007"
+    ],
+    "books": [
+      {
+        "asset_uid": "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
+        "title": "Introduction to Computer Science - OpenStax",
+        "source_url": "https://openstax.org/details/books/introduction-computer-science"
+      },
+      {
+        "asset_uid": "7b2d6a938086150ef6a500026d9301c9a047e1b0886e901870d0bbed048562a5",
+        "title": "Elements of Software Construction",
+        "source_url": "https://ocw.mit.edu/courses/6-005-elements-of-software-construction-fall-2011/"
+      },
+      {
+        "asset_uid": "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8",
+        "title": "Performance Engineering of Software Systems",
+        "source_url": "https://ocw.mit.edu/courses/6-172-performance-engineering-of-software-systems-fall-2018/"
+      },
+      {
+        "asset_uid": "0a95e0c52a55adcc48dd804566c303f0b0933c0bd912da05b76da9156cc01007",
+        "title": "Software Engineering Concepts",
+        "source_url": "https://ocw.mit.edu/courses/16-355j-software-engineering-concepts-fall-2005/"
       }
     ]
   }

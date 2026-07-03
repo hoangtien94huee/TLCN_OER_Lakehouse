@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import logging
 import os
+import hashlib
+from collections import OrderedDict
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -59,6 +61,11 @@ app.add_middleware(
 )
 
 
+class MessageHistory(BaseModel):
+    role: str # "user" or "assistant"
+    text: str
+
+
 class AskRequest(BaseModel):
     question: str = Field(..., min_length=1)
     top_k: int = Field(5, ge=1, le=12)
@@ -72,6 +79,8 @@ class AskRequest(BaseModel):
     section_name: Optional[str] = None
     activity_name: Optional[str] = None
     page_url: Optional[str] = None
+    document_title: Optional[str] = None
+    history: Optional[List[MessageHistory]] = None
 
 
 def _contextualize_question(payload: AskRequest) -> str:
@@ -92,6 +101,8 @@ def _contextualize_question(payload: AskRequest) -> str:
         context_lines.append(f"role={payload.role}")
     if payload.page_url:
         context_lines.append(f"page_url={payload.page_url}")
+    if payload.document_title:
+        context_lines.append(f"document_title={payload.document_title}")
 
     if not context_lines:
         return payload.question
@@ -100,6 +111,19 @@ def _contextualize_question(payload: AskRequest) -> str:
         "[Moodle context]\n"
         + "\n".join(f"- {line}" for line in context_lines)
     )
+
+_api_response_cache: "OrderedDict[str, tuple[float, Dict[str, Any]]]" = OrderedDict()
+_API_CACHE_MAX_ITEMS = 500
+_API_CACHE_EXPIRATION_SECONDS = 1200  # 20 minutes expiration
+
+def _get_api_cache_key(payload: AskRequest) -> str:
+    ctx_q = _contextualize_question(payload)
+    hist_str = ""
+    if payload.history:
+        hist_str = "|".join(f"{h.role}:{h.text}" for h in payload.history)
+    key_str = f"{ctx_q}|{payload.top_k}|{payload.language}|{hist_str}"
+    logging.getLogger("uvicorn.error").info(f"DEBUG CACHE KEY_STR: {repr(key_str)}")
+    return hashlib.md5(key_str.encode("utf-8")).hexdigest()
 
 
 class DebugGetDocumentRequest(BaseModel):
@@ -159,12 +183,36 @@ async def ask_api(payload: AskRequest, x_api_key: Optional[str] = Header(default
     try:
         if api_key_required and x_api_key != api_key_required:
             raise HTTPException(status_code=401, detail="Invalid or missing API key.")
+        
+        cache_key = _get_api_cache_key(payload)
+        import logging
+        import time
+        logging.getLogger("uvicorn.error").info(f"Checking cache for key {cache_key} (q={payload.question})")
+        if cache_key in _api_response_cache:
+            ts, result = _api_response_cache[cache_key]
+            if time.time() - ts <= _API_CACHE_EXPIRATION_SECONDS:
+                logging.getLogger("uvicorn.error").info("CACHE HIT!")
+                _api_response_cache.pop(cache_key)
+                _api_response_cache[cache_key] = (ts, result)
+                return result
+            else:
+                logging.getLogger("uvicorn.error").info("CACHE EXPIRED!")
+                _api_response_cache.pop(cache_key)
+        
+        logging.getLogger("uvicorn.error").info("CACHE MISS! Calling engine.ask")
         engine = _get_pageindex_engine()
+        
+        history_list = []
+        if payload.history:
+            for item in payload.history:
+                history_list.append({"role": item.role, "text": item.text})
+
         result = engine.ask(
             question=_contextualize_question(payload),
             top_k=payload.top_k,
             source_system=payload.source_system,
             language=payload.language,
+            history=history_list,
         )
         result["moodle_context"] = {
             "course_id": payload.course_id,
@@ -187,6 +235,12 @@ async def ask_api(payload: AskRequest, x_api_key: Optional[str] = Header(default
                 src_obj["url"] = _build_proxy_pdf_url(asset_uid, page_no if isinstance(page_no, int) else None)
             normalized_sources.append(src_obj)
         result["sources"] = normalized_sources
+        
+        import time
+        if len(_api_response_cache) >= _API_CACHE_MAX_ITEMS:
+            _api_response_cache.popitem(last=False)
+        _api_response_cache[cache_key] = (time.time(), result)
+        
         return result
     except requests.HTTPError as exc:
         raise HTTPException(status_code=502, detail=f"Upstream HTTP error: {exc}") from exc

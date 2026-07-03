@@ -59,3 +59,17 @@ docs/_build/
 # Java/Scala artifacts
 **/*.jar
 lakehouse/data/iceberg-jars/
+
+saf_import
+
+saf_export.zip
+
+sample_data
+
+# Evaluation heavy folders
+evaluation/ragas_env/
+evaluation/results/
+evaluation/docs/
+evaluation/prototype_tier2_invertedindex/
+evaluation/scripts/
+evaluation/test.py

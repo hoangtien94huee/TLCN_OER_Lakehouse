@@ -12,7 +12,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init-postgres.sh:/docker-entrypoint-initdb.d/init-postgres.sh
     ports:
-      - "5432:5432"
+      - "15432:5432"
     healthcheck:
       test: [ "CMD", "pg_isready", "-U", "airflow" ]
       interval: 5s
@@ -28,8 +28,8 @@ services:
       MINIO_ROOT_USER: minioadmin
       MINIO_ROOT_PASSWORD: minioadmin
     ports:
-      - "9000:9000"
-      - "9001:9001"
+      - "19000:9000"
+      - "19001:9001"
     volumes:
       - minio_data:/data
     healthcheck:
@@ -39,8 +39,27 @@ services:
       retries: 5
     restart: unless-stopped
 
-  # Airflow Scraper
+  # Local LLM runtime for PageIndex reasoning
+  ollama:
+    image: ollama/ollama:latest
+    container_name: oer-ollama
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/bin/ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  # Airflow Scraper — chỉ cần khi chạy ETL pipeline
+  # Khởi động: docker compose --profile etl up -d
   oer-scraper:
+    profiles:
+      - etl
     build:
       context: ./airflow
       dockerfile: Dockerfile
@@ -53,16 +72,18 @@ services:
       spark-master:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "18080:8080"   # Airflow Web UI
+      - "18088:8088"   # Chatbot API
     volumes:
       - ./data/scraped:/opt/airflow/scraped_data
       - ./data:/opt/airflow/database
-      - ./data/logs:/opt/airflow/logs
+      - airflow_logs:/opt/airflow/logs
       - ./airflow/dags:/opt/airflow/dags
       - ./airflow/src:/opt/airflow/src
       - ./data/iceberg-jars:/opt/airflow/jars:ro  
       - ./data/reference:/opt/airflow/reference:ro
       - saf_import:/opt/airflow/saf_export
+      - ./data/exports:/opt/airflow/exports
     environment:
       - AIRFLOW_HOME=/opt/airflow
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
@@ -70,7 +91,6 @@ services:
       - AIRFLOW__CORE__DAGS_FOLDER=/opt/airflow/dags
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
       - AIRFLOW__WEBSERVER__EXPOSE_CONFIG=True
-      - AIRFLOW__CORE__PARALLELISM=8
       - AIRFLOW__CORE__MAX_ACTIVE_RUNS_PER_DAG=1
       - PYTHONPATH=/opt/airflow:/opt/airflow/dags
       # Java configuration for PySpark
@@ -84,42 +104,140 @@ services:
       - MINIO_BUCKET=oer-lakehouse
       # Google Gemini API for subject translation
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - SILVER_CHUNK_DRIVER_FALLBACK_ON_ZERO=0
+      - SILVER_FORCE_REPROCESS=0
       # Bronze layer PDF processing configuration
       - DOWNLOAD_STRATEGY=selective
       - MAX_PDF_SIZE_MB=20
       - IMPORTANT_CATEGORIES=lecture_notes,textbook,handout,reading
       - SKIP_CATEGORIES=exam,assignment,quiz
+      # Silver chunking configuration
+      - SILVER_MAX_PDF_PAGES=1000
+      - SILVER_CHUNK_MAX_CHARS=2400
+      - SILVER_CHUNK_OVERLAP=300
+      - SILVER_CHUNK_MIN_CHARS=400
+      # Hierarchical chunking
+      - ENABLE_HIERARCHICAL_CHUNKING=1
+      - TOC_EXTRACTION_ENABLED=1
+      - TOC_MIN_CONFIDENCE=0.60
+      - TOC_FALLBACK_CHAPTER_SIZE=50
+      - DOC_SUMMARY_MAX_CHARS=1000
+      - CHAPTER_SUMMARY_MAX_CHARS=800
+      - SECTION_CHUNK_MAX_CHARS=2400
+      - HIERARCHICAL_INDEX_ALL_TIERS=1
       # Spark cluster configuration - connect to Spark cluster
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_DEPLOY_MODE=client
-      - PYSPARK_PYTHON=python3
-      - PYSPARK_DRIVER_PYTHON=python3
+      - PYSPARK_PYTHON=python
+      - PYSPARK_DRIVER_PYTHON=python
       # Use local JARs instead of downloading from Maven
-      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.4.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
-      # Spark Memory Configuration (optimized for 7GB total system)
-      - SPARK_DRIVER_MEMORY=512m
-      - SPARK_EXECUTOR_MEMORY=512m
-      - SPARK_DRIVER_MAXRESULTSIZE=256m
-      - SPARK_SHUFFLE_PARTITIONS=2
-      # Optional: download and upload PDFs for OTL
-      - OTL_DOWNLOAD_PDFS=0
+      - SPARK_JARS=/opt/airflow/jars/iceberg-spark-runtime-3.5_2.12-1.9.2.jar,/opt/airflow/jars/hadoop-aws-3.3.4.jar,/opt/airflow/jars/aws-java-sdk-bundle-1.12.262.jar
+      # Spark Memory Configuration
+      - SPARK_DRIVER_MEMORY=4g
+      - SPARK_EXECUTOR_MEMORY=2g
+      - SPARK_DRIVER_MAXRESULTSIZE=1g
+      - SPARK_SHUFFLE_PARTITIONS=8
+      - JAVA_TOOL_OPTIONS=-Xms1g -Xmx4g
+      # Airflow parallelism
+      - AIRFLOW__CORE__PARALLELISM=16
+      - AIRFLOW__CORE__MAX_ACTIVE_TASKS_PER_DAG=8
+      # Optional: download and upload PDFs for OTL (set 0 to skip)
+      - OTL_DOWNLOAD_PDFS=1
       - PDF_DOWNLOAD_PATH=/opt/airflow/scraped_pdfs/otl
       # Elasticsearch sync configuration
       - ELASTICSEARCH_HOST=http://elasticsearch:9200
       - ELASTICSEARCH_INDEX=oer_resources
-      - ELASTICSEARCH_BATCH_SIZE=500
-      - ELASTICSEARCH_RECREATE=0
+      - ELASTICSEARCH_BATCH_SIZE=300
+      - ELASTICSEARCH_RECREATE=1
+      - ELASTICSEARCH_INCREMENTAL=1
+      - ELASTICSEARCH_TIMEOUT=180
+      - ELASTICSEARCH_STREAM_PARTITIONS=32
+      - ELASTICSEARCH_SPARK_MASTER=local[*]
+      # Embedding pipeline configuration
+      - EMBEDDING_INCREMENTAL=1
+      # Chatbot API configuration
+      # LLM quality tiers (choose one backend):
+      #   groq     → llama-3.3-70b-versatile (best Vietnamese, free tier)
+      #   gemini   → gemini-2.0-flash (very good, needs GOOGLE_API_KEY)
+      #   ollama   → qwen2.5:7b-instruct (offline, needs GPU, pull: ollama pull qwen2.5:7b-instruct)
+      - ENABLE_CHATBOT_API=1
+      - CHATBOT_API_HOST=0.0.0.0
+      - CHATBOT_API_PORT=8088
+      - CHATBOT_PUBLIC_BASE_URL=http://172.19.24.202:18088
+      # Tier-2 cross-book retrieval (inverted index oer_pages_tier2) — improves
+      # Vietnamese content retrieval over the English OER corpus. Scope-check
+      # rejects out-of-scope questions. See evaluation/prototype_tier2_invertedindex.
+      - PAGEINDEX_TIER2_BACKEND=${PAGEINDEX_TIER2_BACKEND:-elasticsearch}
+      - PAGEINDEX_TIER2_CROSSBOOK=${PAGEINDEX_TIER2_CROSSBOOK:-1}
+      - PAGEINDEX_TIER2_CROSSBOOK_SCOPE_CHECK=${PAGEINDEX_TIER2_CROSSBOOK_SCOPE_CHECK:-1}
+      - PAGEINDEX_TIER2_ES_INDEX=${PAGEINDEX_TIER2_ES_INDEX:-oer_pages_tier2}
+      # Course-scoping: in a Moodle course matching course_book_map.json, restrict
+      # retrieval to that course's books and refuse off-course questions.
+      - PAGEINDEX_TIER2_COURSE_SCOPED=${PAGEINDEX_TIER2_COURSE_SCOPED:-1}
+      - LOCAL_LLM_BACKEND=${LOCAL_LLM_BACKEND:-groq}
+      - LOCAL_LLM_BASE_URL=${LOCAL_LLM_BASE_URL:-}
+      - LOCAL_LLM_API_URL=${LOCAL_LLM_API_URL:-}
+      - LOCAL_LLM_HEALTH_URL=${LOCAL_LLM_HEALTH_URL:-}
+      - LOCAL_LLM_PROBE_REQUIRED=${LOCAL_LLM_PROBE_REQUIRED:-0}
+      - LOCAL_LLM_MODEL=${LOCAL_LLM_MODEL:-}
+      - LOCAL_LLM_API_KEY=${LOCAL_LLM_API_KEY:-}
+      - GROQ_API_KEY=${GROQ_API_KEY:-}
+      - LOCAL_LLM_GROQ_BASE_URL=${LOCAL_LLM_GROQ_BASE_URL:-https://api.groq.com/openai/v1}
+      - LOCAL_LLM_GROQ_MODEL=${LOCAL_LLM_GROQ_MODEL:-llama-3.3-70b-versatile}
+      - LOCAL_LLM_GEMINI_MODEL=${LOCAL_LLM_GEMINI_MODEL:-gemini-2.0-flash}
+      - LOCAL_LLM_GEMINI_BASE_URL=${LOCAL_LLM_GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+      - LOCAL_LLM_TIMEOUT=${LOCAL_LLM_TIMEOUT:-120}
+      - LOCAL_LLM_CONNECT_TIMEOUT=${LOCAL_LLM_CONNECT_TIMEOUT:-1}
+      - LOCAL_LLM_PROBE_TIMEOUT=${LOCAL_LLM_PROBE_TIMEOUT:-1}
+      - LOCAL_LLM_FALLBACK_BASE_URLS=${LOCAL_LLM_FALLBACK_BASE_URLS:-http://ollama:11434,http://host.docker.internal:11434,http://172.17.0.1:11434,http://localhost:11434}
+      - PAGEINDEX_ASK_TIMEOUT=${PAGEINDEX_ASK_TIMEOUT:-75}
+      - PAGEINDEX_TIER1_TIMEOUT=${PAGEINDEX_TIER1_TIMEOUT:-6}
+      - PAGEINDEX_TIER2_MIN_BUDGET=${PAGEINDEX_TIER2_MIN_BUDGET:-10}
+      - PAGEINDEX_LLM_JSON_TIMEOUT=${PAGEINDEX_LLM_JSON_TIMEOUT:-20}
+      - PAGEINDEX_LLM_ANSWER_TIMEOUT=${PAGEINDEX_LLM_ANSWER_TIMEOUT:-90}
+      - PAGEINDEX_LLM_CONTEXT_MAX_CHARS=${PAGEINDEX_LLM_CONTEXT_MAX_CHARS:-7000}
+      - PAGEINDEX_DISABLE_FALLBACK=${PAGEINDEX_DISABLE_FALLBACK:-0}
+      - PAGEINDEX_TIER1_BACKEND=${PAGEINDEX_TIER1_BACKEND:-elasticsearch}
+      - PAGEINDEX_TIER1_ES_ENABLED=${PAGEINDEX_TIER1_ES_ENABLED:-1}
+      - PAGEINDEX_TIER1_ES_HOST=${PAGEINDEX_TIER1_ES_HOST:-http://elasticsearch:9200}
+      - PAGEINDEX_TIER1_ES_INDEX=${PAGEINDEX_TIER1_ES_INDEX:-oer_resources_tier1}
+      - PAGEINDEX_TIER1_ES_USERNAME=${PAGEINDEX_TIER1_ES_USERNAME:-}
+      - PAGEINDEX_TIER1_ES_PASSWORD=${PAGEINDEX_TIER1_ES_PASSWORD:-}
+      - PAGEINDEX_TIER1_ES_TIMEOUT=${PAGEINDEX_TIER1_ES_TIMEOUT:-4}
+      - PAGEINDEX_TIER1_ES_CANDIDATE_POOL=${PAGEINDEX_TIER1_ES_CANDIDATE_POOL:-36}
+      - PAGEINDEX_TIER1_ES_TOPK_BUFFER=${PAGEINDEX_TIER1_ES_TOPK_BUFFER:-4}
+      - PAGEINDEX_TIER1_BM25_BONUS_WEIGHT=${PAGEINDEX_TIER1_BM25_BONUS_WEIGHT:-0.35}
+      - PAGEINDEX_TIER1_BM25_BONUS_CAP=${PAGEINDEX_TIER1_BM25_BONUS_CAP:-8.0}
+      - PAGEINDEX_USE_QUERY_LANGUAGE_AS_DOC_FILTER=${PAGEINDEX_USE_QUERY_LANGUAGE_AS_DOC_FILTER:-0}
+      - PAGEINDEX_CACHE_ENABLED=${PAGEINDEX_CACHE_ENABLED:-1}
+      - PAGEINDEX_CACHE_MAX_ITEMS=${PAGEINDEX_CACHE_MAX_ITEMS:-256}
+      - PAGEINDEX_INITIAL_PAGE_WINDOW=${PAGEINDEX_INITIAL_PAGE_WINDOW:-4}
+      - PAGEINDEX_PAGE_EXPAND_STEP=${PAGEINDEX_PAGE_EXPAND_STEP:-2}
+      - PAGEINDEX_PAGE_EXPAND_ACCELERATION=${PAGEINDEX_PAGE_EXPAND_ACCELERATION:-1}
+      - PAGEINDEX_PAGE_MAX_WINDOW=${PAGEINDEX_PAGE_MAX_WINDOW:-12}
+      - PAGEINDEX_MAX_ROUNDS=${PAGEINDEX_MAX_ROUNDS:-3}
+      - PAGEINDEX_MAX_DOCUMENT_CANDIDATES=${PAGEINDEX_MAX_DOCUMENT_CANDIDATES:-3}
+      - PAGEINDEX_MAX_PAGES_PER_CALL=${PAGEINDEX_MAX_PAGES_PER_CALL:-6}
+      # Chatbot-optimized: use silver chunks, avoid re-parsing PDFs
+      - ELASTICSEARCH_INDEX_PDF_CONTENT=0
+      - ELASTICSEARCH_MAX_PDF_PER_RESOURCE=1
+      - ELASTICSEARCH_PDF_MAX_PAGES=20
+      - ELASTICSEARCH_SEARCH_PDF_CHARS=2000
       # DSpace integration configuration
       - DSPACE_API_ENDPOINT=http://dspace:8080/server/api
       - DSPACE_USER=admin@dspace.org
       - DSPACE_PASSWORD=dspace
       - DSPACE_COLLECTION_UUID=1e9be5e4-6056-4f43-bad0-0288669ce6ad
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 8G
+          cpus: '6'
         reservations:
           memory: 2G
+          cpus: '2'
     restart: unless-stopped
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8080/health" ]
@@ -128,34 +246,67 @@ services:
       retries: 3
       start_period: 60s
 
-  # Spark Master - Cluster mode
+  spark-python-deps:
+    profiles:
+      - etl
+    image: bitnamilegacy/spark:3.5.4
+    container_name: oer-spark-python-deps
+    user: "0:0"
+    command:
+      - /bin/bash
+      - -lc
+      - |
+        PY_BIN=$$(command -v python3 || command -v python || true)
+        if [ -z "$$PY_BIN" ] && [ -x /opt/bitnami/python/bin/python3 ]; then PY_BIN=/opt/bitnami/python/bin/python3; fi
+        if [ -z "$$PY_BIN" ] && [ -x /opt/bitnami/python/bin/python ]; then PY_BIN=/opt/bitnami/python/bin/python; fi
+        if [ -z "$$PY_BIN" ]; then echo "No Python interpreter found in spark image"; exit 1; fi
+        $$PY_BIN -m pip --version || $$PY_BIN -m ensurepip --upgrade
+        $$PY_BIN -m pip install --no-cache-dir --upgrade pip
+        $$PY_BIN -m pip install --no-cache-dir --target /opt/spark/python-deps minio==7.1.17 PyPDF2==3.0.1 numpy==1.26.4 scikit-learn==1.3.2
+        $$PY_BIN -c "import sys; sys.path.insert(0, '/opt/spark/python-deps'); import minio, PyPDF2, numpy, sklearn; print('spark python deps ready')"
+    volumes:
+      - spark_python_deps:/opt/spark/python-deps
+    restart: "no"
+
+  # Spark Master — chỉ cần khi chạy ETL pipeline
   spark-master:
+    profiles:
+      - etl
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-master
+    depends_on:
+      spark-python-deps:
+        condition: service_completed_successfully
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
     environment:
       - SPARK_MODE=master
-      - PYSPARK_PYTHON=python3
-      - PYSPARK_DRIVER_PYTHON=python3
-      - SPARK_DRIVER_MEMORY=1g
-      - SPARK_EXECUTOR_MEMORY=1g
-      - SPARK_DRIVER_MAXRESULTSIZE=512m
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - PYSPARK_PYTHON=python
+      - PYSPARK_DRIVER_PYTHON=python
+      - SPARK_DRIVER_MEMORY=4g
+      - SPARK_EXECUTOR_MEMORY=2g
+      - SPARK_DRIVER_MAXRESULTSIZE=1g
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags
+      - PYTHONPATH=/opt/spark/python-deps:/opt/airflow:/opt/airflow/dags
       # Iceberg Hadoop Catalog support (NO REST needed!)
       - SPARK_DRIVER_EXTRA_JAVA_OPTIONS=-Dcom.amazonaws.sdk.disableEc2Metadata=true
     ports:
-      - "8081:8080" # Spark Master Web UI
-      - "7077:7077" # Spark Master Port
+      - "18081:8080" # Spark Master Web UI
+      - "17077:7077" # Spark Master Port
     volumes:
       - ./data/spark:/data/spark
       - ./data/iceberg-jars:/opt/spark/jars/iceberg
       - ./airflow/src:/opt/airflow/src
       - ./airflow/dags:/opt/airflow/dags
+      - spark_python_deps:/opt/spark/python-deps
     restart: unless-stopped
     healthcheck:
       test: [ "CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/8080'" ]
@@ -164,24 +315,31 @@ services:
       retries: 3
       start_period: 30s
 
-  # Spark Worker
+  # Spark Worker — chỉ cần khi chạy ETL pipeline
   spark-worker:
+    profiles:
+      - etl
     image: bitnamilegacy/spark:3.5.4
     container_name: oer-spark-worker
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '4'
     environment:
       - SPARK_MODE=worker
-      - PYSPARK_PYTHON=python3
-      - PYSPARK_DRIVER_PYTHON=python3
+      - PYSPARK_PYTHON=python
+      - PYSPARK_DRIVER_PYTHON=python
       - SPARK_MASTER_URL=spark://spark-master:7077
-      - SPARK_WORKER_MEMORY=512m
-      - SPARK_WORKER_CORES=1
-      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.4.3,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
+      - SPARK_WORKER_MEMORY=4g
+      - SPARK_WORKER_CORES=4
+      - SPARK_JARS_PACKAGES=org.apache.iceberg:iceberg-spark-runtime-3.5_2.12:1.9.2,org.apache.hadoop:hadoop-aws:3.3.4,com.amazonaws:aws-java-sdk-bundle:1.12.565
       - SPARK_RPC_AUTHENTICATION_ENABLED=no
       - SPARK_RPC_ENCRYPTION_ENABLED=no
       - SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED=no
       - SPARK_SSL_ENABLED=no
       - SPARK_USER=spark
-      - PYTHONPATH=/opt/airflow:/opt/airflow/dags
+      - PYTHONPATH=/opt/spark/python-deps:/opt/airflow:/opt/airflow/dags
     ports:
       - "8082:8081" # Spark Worker Web UI
     volumes:
@@ -189,8 +347,12 @@ services:
       - ./data/iceberg-jars:/opt/spark/jars/iceberg
       - ./airflow/src:/opt/airflow/src
       - ./airflow/dags:/opt/airflow/dags
+      - spark_python_deps:/opt/spark/python-deps
     depends_on:
-      - spark-master
+      spark-python-deps:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_healthy
     restart: unless-stopped
 
   # Dremio for BI access (Power BI, SQL clients)
@@ -198,15 +360,15 @@ services:
   dremio:
     profiles:
       - analytics  # Only start when 'analytics' profile is active
-    image: dremio/dremio-oss:26.0.5
+    image: dremio/dremio-oss:25.1
     container_name: oer-dremio
     depends_on:
       minio:
         condition: service_healthy
     ports:
-      - "9047:9047"   # Web UI
-      - "31010:31010" # JDBC/ODBC
-      - "32010:32010" # Flight SQL
+      - "19047:9047"   # Web UI
+      - "41010:31010" # JDBC/ODBC
+      - "42010:32010" # Flight SQL
     environment:
       - DREMIO_JAVA_SERVER_EXTRA_OPTS=-Ddremio.s3.compat=true -Ddremio.s3.unsigned=true -Dcom.amazonaws.sdk.disableEc2Metadata=true
       - SERVICES_HEAP_SIZE=2G
@@ -233,16 +395,15 @@ services:
     environment:
       - discovery.type=single-node
       - xpack.security.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
     ports:
       - "9200:9200"
-      - "9300:9300"
     volumes:
       - es_data:/usr/share/elasticsearch/data
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 2G
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=30s"]
       interval: 30s
@@ -250,38 +411,54 @@ services:
       retries: 5
     restart: unless-stopped
 
-  search-web:
-    build:
-      context: ./search_app
-    container_name: oer-search-web
+  # --- Moodle LMS (Isolated for this project) ---
+  # Start with: docker compose --profile lms up -d moodle-db moodle
+  moodle-db:
+    profiles:
+      - lms
+    image: mariadb:10.11
+    container_name: oer-moodle-db
     environment:
-      - ELASTICSEARCH_HOST=http://elasticsearch:9200
-      - ELASTICSEARCH_INDEX=oer_resources
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=dspace
-      - POSTGRES_USER=dspace
-      - POSTGRES_PASSWORD=dspace
-      - MINIO_BROWSER_ENDPOINT=http://localhost:9000/browser
-      - MINIO_BUCKET=oer-lakehouse
-      - MINIO_ENDPOINT=minio:9000
-      - MINIO_PUBLIC_ENDPOINT=http://localhost:9000
-      - MINIO_SIGNING_ENDPOINT=http://minio:9000
-      - MINIO_ACCESS_KEY=minioadmin
-      - MINIO_SECRET_KEY=minioadmin
-      - MINIO_SECURE=0
-    extra_hosts:
-      - "localhost:host-gateway"
+      - MARIADB_ROOT_PASSWORD=secret
+      - MARIADB_DATABASE=bitnami_moodle
+      - MARIADB_USER=bn_moodle
+      - MARIADB_PASSWORD=secret
+      - MARIADB_CHARACTER_SET_SERVER=utf8mb4
+      - MARIADB_COLLATION_SERVER=utf8mb4_unicode_ci
+    volumes:
+      - moodle_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mariadb-admin", "ping", "-h", "localhost", "-uroot", "-psecret"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  moodle:
+    profiles:
+      - lms
+    image: bitnamilegacy/moodle:latest
+    container_name: oer-moodle
     depends_on:
-      elasticsearch:
-        condition: service_healthy
-      postgres:
+      moodle-db:
         condition: service_healthy
     ports:
-      - "8088:8080"
+      - "18085:8080"
+    environment:
+      - MOODLE_DATABASE_TYPE=mariadb
+      - MOODLE_DATABASE_HOST=moodle-db
+      - MOODLE_DATABASE_PORT_NUMBER=3306
+      - MOODLE_DATABASE_USER=bn_moodle
+      - MOODLE_DATABASE_PASSWORD=secret
+      - MOODLE_DATABASE_NAME=bitnami_moodle
+      - MOODLE_DATABASE_MIN_VERSION=10.6
+      - MOODLE_USERNAME=admin
+      - MOODLE_PASSWORD=Admin@12345
+      - MOODLE_EMAIL=admin@example.com
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
-      - ./data/reference:/app/reference:ro
-      - ./data:/opt/airflow/database:ro
+      - moodle_data:/bitnami
     restart: unless-stopped
 
   # --- DSpace Services (Official Setup) ---
@@ -291,15 +468,15 @@ services:
     container_name: dspacesolr
     image: dspace/dspace-solr:dspace-9_x
     environment:
-      - SOLR_JAVA_MEM=-Xms512m -Xmx768m
+      - SOLR_JAVA_MEM=-Xms256m -Xmx512m
     ports:
-      - "8983:8983"
+      - "18983:8983"
     volumes:
       - dspace_solr_data:/var/solr/data
     deploy:
       resources:
         limits:
-          memory: 1024M
+          memory: 768M
     user: root
     entrypoint:
       - /bin/bash
@@ -311,7 +488,7 @@ services:
         exec gosu solr bash -c "
           # Start Solr in background with search core
           docker-entrypoint.sh solr-precreate search /opt/solr/server/solr/configsets/search &
-          SOLR_PID=\$!
+          SOLR_PID=$$!
           # Wait for Solr to be ready
           until wget -O /dev/null http://localhost:8983/solr/admin/cores?action=STATUS 2>/dev/null; do
             echo 'Waiting for Solr...'
@@ -324,7 +501,7 @@ services:
           fi
           echo 'Solr cores ready'
           # Keep container running
-          wait \$SOLR_PID
+          wait $$SOLR_PID
         "
     restart: unless-stopped
     healthcheck:
@@ -341,7 +518,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M
+          memory: 1024M
     environment:
       # DSpace configuration via environment variables
       dspace__P__dir: /dspace
@@ -384,23 +561,16 @@ services:
         java -jar /dspace/webapps/server-boot.jar --dspace.dir=/dspace
     restart: unless-stopped
 
-  # DSpace Frontend (Angular) - REMOVED
-  # Run Angular locally for better performance:
-  #   cd dspace-angular
-  #   npm install
-  #   npm run start:dev
-  # Access at http://localhost:4000
-
 volumes:
-  scraped_data:
-  database:
-  logs:
-  dags:
   postgres_data:
   minio_data:
-  spark_data:
+  spark_python_deps:
   dremio_data:
   es_data:
   dspace_assetstore:
   dspace_solr_data:
   saf_import:
+  airflow_logs:
+  ollama_data:
+  moodle_data:
+  moodle_db_data:

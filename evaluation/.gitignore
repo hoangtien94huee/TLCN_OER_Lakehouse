@@ -1,0 +1,14 @@
+# Virtualenv RAGAS (nặng, không đẩy lên git)
+ragas_env/
+
+# Log chạy
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# File kết quả tạm khi chạy lại
+results/ragas_result*.json
+results/human_eval_result.json

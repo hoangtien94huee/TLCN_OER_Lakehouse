@@ -1,6 +1,0 @@
-export enum RequestStatusEnum {
-  ACCEPTED = 'ACCEPTED',
-  REJECTED = 'REJECTED',
-  REQUESTED = 'REQUESTED',
-  TENTATIVE_REJECT = 'TENTATIVE_REJECT',
-}

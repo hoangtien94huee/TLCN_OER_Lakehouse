@@ -3,15 +3,16 @@
 Semantic Subject Matcher
 ========================
 
-Uses sentence embeddings to match OER resources (English) with curriculum subjects.
-More accurate than keyword matching - understands semantic meaning.
+Uses sentence embeddings to match OER resources (Vietnamese + English) with curriculum subjects.
+More accurate than keyword matching - understands semantic meaning across languages.
 
 Example:
     Keyword match: "Learning Management System" → matches "Machine Learning" (WRONG!)
     Semantic match: "Learning Management System" → no match (CORRECT!)
-    Semantic match: "Neural Networks and Deep Learning" → matches "Machine Learning" (CORRECT!)
+    Semantic match: "Mạng nơ-ron và học sâu" → matches "Machine Learning" (CORRECT - VI!)
 
-Model: all-MiniLM-L6-v2 (~22MB, 384 dimensions)
+Model: distiluse-base-multilingual-cased-v2 (~135MB, 512 dimensions, 50+ languages)
+Reuses the same model used by the Q&A retrieval pipeline — no duplicate memory.
 """
 
 import json
@@ -28,12 +29,13 @@ _subject_data: Optional[List[Dict]] = None
 
 
 def get_model():
-    """Lazy load the sentence transformer model."""
+    """Lazy load the multilingual sentence transformer model."""
     global _model
     if _model is None:
         from sentence_transformers import SentenceTransformer
-        _model = SentenceTransformer('all-MiniLM-L6-v2')
-        logger.info("Loaded all-MiniLM-L6-v2 model")
+        # distiluse-base-multilingual-cased-v2: ~135MB, 50+ languages (VI+EN), valid HuggingFace model
+        _model = SentenceTransformer('distiluse-base-multilingual-cased-v2')
+        logger.info("Loaded distiluse-base-multilingual-cased-v2 model")
     return _model
 
 

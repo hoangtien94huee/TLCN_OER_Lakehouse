@@ -1,22 +1,5 @@
 # OER Lakehouse - Hệ thống Quản lý Tài nguyên Giáo dục Mở
 
-<div align="center">
-
-![OER Lakehouse](https://img.shields.io/badge/OER-Lakehouse-blue?style=for-the-badge)
-![DSpace](https://img.shields.io/badge/DSpace-9.x-green?style=for-the-badge)
-![Spark](https://img.shields.io/badge/Apache%20Spark-3.5-orange?style=for-the-badge)
-![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.15-yellow?style=for-the-badge)
-
-**Nền tảng tổng hợp, tìm kiếm và gợi ý Tài nguyên Giáo dục Mở thông minh**
-
-[Tính năng](#tính-năng-chính) •
-[Kiến trúc](#kiến-trúc-hệ-thống) •
-[Cài đặt](#hướng-dẫn-cài-đặt) •
-[Sử dụng](#hướng-dẫn-sử-dụng)
-
-</div>
-
-
 ## Giới thiệu
 
 **OER Lakehouse** là giải pháp toàn diện để giải quyết bài toán phân mảnh tài liệu giáo dục mở. Hệ thống tự động thu thập, xử lý và tổ chức tài liệu từ nhiều nguồn (MIT OCW, OpenStax, Open Textbook Library), kết hợp với **DSpace 9** để quản lý kho lưu trữ số và cung cấp khả năng tìm kiếm thông minh cấp độ trang PDF.
@@ -119,11 +102,8 @@ TLCN_OER_Lakehouse/
 │   ├── Dockerfile
 │   └── requirements.txt
 │
-├── search_app/                         # FastAPI Search Application
-│   ├── main.py                         # API endpoints
-│   ├── reviews.py                      # Rating & Review system
-│   ├── templates/                      # Jinja2 templates
-│   ├── static/                         # Static assets
+├── chatbot_api/                        # FastAPI chatbot API
+│   ├── main.py                         # Chatbot endpoints
 │   ├── Dockerfile
 │   └── requirements.txt
 │
@@ -257,6 +237,91 @@ Chạy DAG `dspace_saf_import_dag` để:
 
 - Export tài liệu sang định dạng SAF
 - Import vào DSpace collection
+
+---
+
+## Tích hợp Moodle LMS local (context-aware chatbot)
+
+Repository đã bổ sung plugin mẫu tại `moodle/local/oerchatbot` để hiển thị chatbot nổi trong Moodle và gửi ngữ cảnh trang hiện tại (`course`, `section`, `activity`, `role`) về API.
+
+### 1. Kiểm tra cổng local trước khi chạy
+
+```bash
+ss -ltnp | grep -E ':8000|:8080|:18088|:18080|:8085|:8090'
+```
+
+Nếu cổng đã bị chiếm, dùng cổng khác cho Moodle/API (ví dụ Moodle `8085`, API `18088` hoặc `8090`).
+
+### 2. Cấu hình CORS cho Chatbot API
+
+Trong service chạy `chatbot_api.py`, đặt biến môi trường:
+
+```bash
+CHATBOT_API_ALLOWED_ORIGINS=http://localhost:8085
+CHATBOT_API_KEY=your_strong_key
+```
+
+Có thể khai báo nhiều origin bằng dấu phẩy.
+
+### 3. Cài plugin vào Moodle local
+
+1. Chép thư mục `moodle/local/oerchatbot` vào `<moodle_root>/local/oerchatbot`
+2. Vào Moodle Site administration để hoàn tất bước upgrade plugin
+3. Vào `Site administration -> Plugins -> Local plugins -> OER Chatbot` và đặt:
+   - `Chatbot API URL`: ví dụ `http://127.0.0.1:18088/api/ask`
+   - `Chatbot API key`: cùng giá trị với `CHATBOT_API_KEY` ở backend
+   - `Widget position`: right/left
+   - `Enable widget`: bật
+
+### 4. Dữ liệu context gửi lên API `/api/ask`
+
+Widget gửi thêm các trường:
+
+- `course_id`, `course_name`
+- `section_id`, `section_name`
+- `activity_id`, `activity_name`
+- `role`
+- `page_url`
+
+API sẽ gắn context này vào truy vấn để ưu tiên câu trả lời theo môn/chương/bài hiện tại.
+
+---
+
+## Chạy Moodle bằng Docker Compose (bản đã kiểm tra chạy)
+
+`docker-compose.yml` đã có profile `lms` với 2 service:
+
+- `moodle-db` (MariaDB 10.11)
+- `moodle` (bitnamilegacy/moodle:latest) map cổng `18085`
+
+Khởi chạy:
+
+```bash
+docker compose --profile lms up -d moodle-db moodle
+```
+
+Truy cập:
+
+- URL: `http://localhost:18085`
+- User: `admin`
+- Password: `Admin@12345`
+
+Plugin chatbot đã được mount sẵn từ repo:
+
+- `./moodle/local/oerchatbot` -> `/opt/bitnami/moodle/local/oerchatbot`
+
+Để plugin hoạt động với API hiện có:
+
+- API chatbot: `http://localhost:18088/api/ask`
+- Trong Moodle container, URL tương ứng tới host: `http://host.docker.internal:18088/api/ask`
+
+Sau lần chạy đầu, vào:
+
+`Site administration -> Plugins -> Local plugins -> OER Chatbot`
+
+và đặt `Chatbot API URL` thành:
+
+`http://host.docker.internal:18088/api/ask`
 
 ---
 
@@ -415,29 +480,6 @@ docker-compose up -d --build
 
 ---
 
-## Contributing
-
-1. Fork repository
-2. Tạo feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit changes (`git commit -m 'Add AmazingFeature'`)
-4. Push to branch (`git push origin feature/AmazingFeature`)
-5. Tạo Pull Request
-
----
-
-## License
-
-MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
-
----
-
-## Tác giả
-
-- **Nguyễn Ngọc Huy** - _Developer_ - HCMUTE
-
----
-
-## Acknowledgments
 
 - [MIT OpenCourseWare](https://ocw.mit.edu/)
 - [OpenStax](https://openstax.org/)
@@ -447,11 +489,3 @@ MIT License - xem file [LICENSE](LICENSE) để biết thêm chi tiết.
 - [Elasticsearch](https://www.elastic.co/)
 
 ---
-
-<div align="center">
-
-**Star this repository if you find it helpful!**
-
-Made with care for Open Education
-
-</div>

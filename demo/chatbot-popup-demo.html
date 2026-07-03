@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OER Chatbot Popup Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .demo-container {
+            background: white;
+            border-radius: 12px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 800px;
+            text-align: center;
+        }
+
+        .demo-container h1 {
+            color: #333;
+            margin-bottom: 20px;
+        }
+
+        .demo-container p {
+            color: #666;
+            margin-bottom: 30px;
+            line-height: 1.6;
+        }
+
+        .chatbot-popup {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 380px;
+            max-height: 600px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 5px 40px rgba(0, 0, 0, 0.2);
+            display: flex;
+            flex-direction: column;
+            transition: all 0.3s ease;
+            z-index: 9999;
+        }
+
+        .chatbot-popup.minimized {
+            max-height: 60px;
+            width: 60px;
+        }
+
+        .chatbot-popup.minimized .chatbot-body {
+            display: none;
+        }
+
+        .chatbot-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px 12px 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .chatbot-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .chatbot-header button {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chatbot-header button:hover {
+            opacity: 0.8;
+        }
+
+        .chatbot-body {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .message {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+
+        .message.bot {
+            justify-content: flex-start;
+        }
+
+        .message.user {
+            justify-content: flex-end;
+        }
+
+        .message-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 12px;
+            font-size: 14px;
+            line-height: 1.4;
+        }
+
+        .message.bot .message-bubble {
+            background: #f0f0f0;
+            color: #333;
+        }
+
+        .message.user .message-bubble {
+            background: #667eea;
+            color: white;
+        }
+
+        .chatbot-input-area {
+            padding: 15px;
+            border-top: 1px solid #eee;
+            display: flex;
+            gap: 10px;
+        }
+
+        .chatbot-input-area input {
+            flex: 1;
+            border: 1px solid #ddd;
+            border-radius: 20px;
+            padding: 10px 15px;
+            font-size: 14px;
+            outline: none;
+        }
+
+        .chatbot-input-area input:focus {
+            border-color: #667eea;
+        }
+
+        .chatbot-input-area button {
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 36px;
+            height: 36px;
+            cursor: pointer;
+            font-size: 18px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .chatbot-input-area button:hover {
+            background: #764ba2;
+        }
+
+        .status {
+            text-align: center;
+            color: #999;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .demo-note {
+            background: #f9f9f9;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin-top: 30px;
+            text-align: left;
+            border-radius: 4px;
+        }
+
+        .demo-note p {
+            margin-bottom: 8px;
+        }
+
+        .demo-note code {
+            background: #eee;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <h1>🤖 OER Chatbot UI Demo</h1>
+        <p>This is a standalone demo of the chatbot popup component. The popup appears in the bottom-right corner of your screen. Click the header to minimize/maximize it.</p>
+        
+        <div class="demo-note">
+            <p><strong>To integrate into your DSpace UI:</strong></p>
+            <p>1. The chatbot component is already created in: <code>src/app/chatbot-popup/</code></p>
+            <p>2. Mount it in your root component or theme override</p>
+            <p>3. Configure the API endpoint in your environment settings</p>
+            <p>4. Update the chatbot service to call your backend API</p>
+        </div>
+    </div>
+
+    <!-- Chatbot Popup Component -->
+    <div class="chatbot-popup" id="chatbotPopup">
+        <div class="chatbot-header" onclick="toggleMinimize()">
+            <h2>Chat with OER Assistant</h2>
+            <button onclick="event.stopPropagation(); closePopup()">×</button>
+        </div>
+
+        <div class="chatbot-body" id="chatbotMessages">
+            <div class="message bot">
+                <div class="message-bubble">
+                    👋 Hello! I'm the OER Assistant. How can I help you today?
+                </div>
+            </div>
+        </div>
+
+        <div class="chatbot-input-area">
+            <input type="text" id="messageInput" placeholder="Type your question..." onkeypress="handleKeyPress(event)">
+            <button onclick="sendMessage()">⬆️</button>
+        </div>
+
+        <div class="status">
+            Connected to API on port 8088
+        </div>
+    </div>
+
+    <script>
+        let isMinimized = false;
+
+        function toggleMinimize() {
+            isMinimized = !isMinimized;
+            const popup = document.getElementById('chatbotPopup');
+            popup.classList.toggle('minimized', isMinimized);
+        }
+
+        function closePopup() {
+            document.getElementById('chatbotPopup').style.display = 'none';
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === 'Enter') {
+                sendMessage();
+            }
+        }
+
+        function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+
+            if (!message) return;
+
+            // Add user message to chat
+            const messagesDiv = document.getElementById('chatbotMessages');
+            const userMsg = document.createElement('div');
+            userMsg.className = 'message user';
+            userMsg.innerHTML = `<div class="message-bubble">${escapeHtml(message)}</div>`;
+            messagesDiv.appendChild(userMsg);
+
+            // Clear input
+            input.value = '';
+            input.focus();
+
+            // Simulate bot response (in real app, this would call the chatbot API)
+            setTimeout(() => {
+                const botMsg = document.createElement('div');
+                botMsg.className = 'message bot';
+                botMsg.innerHTML = `<div class="message-bubble">I received your message: "${escapeHtml(message)}"<br><br>In production, this would be connected to the OER Chatbot API on http://localhost:8088</div>`;
+                messagesDiv.appendChild(botMsg);
+                messagesDiv.scrollTop = messagesDiv.scrollHeight;
+            }, 500);
+
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        function escapeHtml(text) {
+            const map = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return text.replace(/[&<>"']/g, m => map[m]);
+        }
+
+        // Focus input on load
+        window.addEventListener('load', () => {
+            document.getElementById('messageInput').focus();
+        });
+    </script>
+</body>
+</html>

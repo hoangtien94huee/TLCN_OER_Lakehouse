@@ -47,7 +47,7 @@ class MinIOUtilsStandalone:
             client = Minio(endpoint, access_key=access_key, secret_key=secret_key, secure=secure)
             print(f" MinIO client connected to {endpoint}")
             return client
-            
+
         except Exception as e:
             print(f" MinIO setup failed: {e}")
             return None

@@ -2,7 +2,7 @@
 SAF (Simple Archive Format) Exporter for DSpace Import
 Exports Gold layer OER resources to SAF format for batch import into DSpace.
 
-Simplified version - only generates dublin_core.xml (metadata only, no bitstreams).
+Generates dublin_core.xml and optionally includes PDF bitstreams from MinIO.
 Uses Iceberg 1.9.2 for reading from Gold layer.
 """
 
@@ -10,12 +10,18 @@ import os
 import logging
 import shutil
 import zipfile
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 from xml.etree.ElementTree import Element, SubElement, tostring
 from xml.dom import minidom
 
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
+
+try:
+    from minio import Minio
+except ImportError:
+    Minio = None
 
 logger = logging.getLogger(__name__)
 
@@ -30,11 +36,24 @@ class SAFExporter:
         self.minio_access = os.getenv("MINIO_ACCESS_KEY", "minioadmin")
         self.minio_secret = os.getenv("MINIO_SECRET_KEY", "minioadmin")
         self.bucket = os.getenv("MINIO_BUCKET", "oer-lakehouse")
+        self.gold_catalog = os.getenv("ICEBERG_GOLD_CATALOG", "gold")
+        self.gold_db = os.getenv("GOLD_DATABASE", "analytics")
+        self.silver_catalog = os.getenv("ICEBERG_SILVER_CATALOG", "silver")
+        self.silver_db = os.getenv("SILVER_DATABASE", "default")
         self.spark: Optional[SparkSession] = None
+        self.minio_client = None
         
     def init_spark(self):
         """Initialize Spark session for reading Iceberg tables."""
         if self.spark is None:
+            java_home = os.getenv("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64")
+            os.environ.setdefault("JAVA_HOME", java_home)
+            os.environ["PATH"] = f"{java_home}/bin:{os.environ.get('PATH', '')}"
+            os.environ.pop("JAVA_TOOL_OPTIONS", None)
+            os.environ.setdefault("SPARK_LOCAL_IP", "127.0.0.1")
+            os.environ.setdefault("SPARK_DRIVER_HOST", "oer-airflow-scraper")
+            os.environ.setdefault("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0")
+            
             jars_dir = os.getenv("SPARK_JARS_DIR", "/opt/airflow/jars")
             
             # Iceberg 1.9.2 JAR files
@@ -44,17 +63,24 @@ class SAFExporter:
                 f"{jars_dir}/aws-java-sdk-bundle-1.12.262.jar"
             ]
             
+            local_jars = ",".join(jar_files)
+            logger.info(f"[Spark] Using local JARs: {local_jars}")
+            
             self.spark = (
                 SparkSession.builder
                 .appName("SAF_Exporter_Iceberg")
                 .master("local[*]")
-                .config("spark.jars", ",".join(jar_files))
-                .config("spark.driver.extraClassPath", ",".join(jar_files))
+                .config("spark.jars", local_jars)
+                .config("spark.driver.extraClassPath", local_jars)
+                .config("spark.executor.extraClassPath", local_jars)
                 # Iceberg Catalog config
                 .config("spark.sql.extensions", "org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions")
-                .config("spark.sql.catalog.iceberg", "org.apache.iceberg.spark.SparkCatalog")
-                .config("spark.sql.catalog.iceberg.type", "hadoop")
-                .config("spark.sql.catalog.iceberg.warehouse", f"s3a://{self.bucket}/warehouse")
+                .config("spark.sql.catalog.gold", "org.apache.iceberg.spark.SparkCatalog")
+                .config("spark.sql.catalog.gold.type", "hadoop")
+                .config("spark.sql.catalog.gold.warehouse", f"s3a://{self.bucket}/gold")
+                .config("spark.sql.catalog.silver", "org.apache.iceberg.spark.SparkCatalog")
+                .config("spark.sql.catalog.silver.type", "hadoop")
+                .config("spark.sql.catalog.silver.warehouse", f"s3a://{self.bucket}/silver")
                 # S3/MinIO config
                 .config("spark.hadoop.fs.s3a.endpoint", self.minio_endpoint)
                 .config("spark.hadoop.fs.s3a.access.key", self.minio_access)
@@ -65,10 +91,22 @@ class SAFExporter:
                 # Memory settings
                 .config("spark.driver.memory", "2g")
                 .config("spark.executor.memory", "2g")
+                .config("spark.driver.maxResultSize", "1g")
+                .config("spark.driver.host", os.getenv("SPARK_DRIVER_HOST", "oer-airflow-scraper"))
+                .config("spark.driver.bindAddress", os.getenv("SPARK_DRIVER_BIND_ADDRESS", "0.0.0.0"))
                 .getOrCreate()
             )
             logger.info(f"Spark {self.spark.version} initialized with Iceberg 1.9.2")
-            
+
+        if self.minio_client is None and Minio:
+            endpoint = self.minio_endpoint.replace("http://", "").replace("https://", "").strip("/")
+            self.minio_client = Minio(
+                endpoint,
+                access_key=self.minio_access,
+                secret_key=self.minio_secret,
+                secure=self.minio_endpoint.startswith("https://"),
+            )
+
     def create_dublin_core_xml(self, row: dict) -> str:
         """Create dublin_core.xml content for an item."""
         root = Element('dublin_core')
@@ -188,32 +226,29 @@ class SAFExporter:
         """
         logger.info("Reading Gold layer data (Kimball Star Schema)...")
         
-        # Read dimension, fact, and bridge tables
-        dim_oer_path = f"s3a://{self.bucket}/gold/analytics/dim_oer_resources/data/*.parquet"
-        fact_oer_path = f"s3a://{self.bucket}/gold/analytics/fact_oer_resources/data/*.parquet"
-        dim_date_path = f"s3a://{self.bucket}/gold/analytics/dim_date/data/*.parquet"
-        bridge_oer_subjects_path = f"s3a://{self.bucket}/gold/analytics/bridge_oer_subjects/data/*.parquet"
-        dim_subjects_path = f"s3a://{self.bucket}/gold/analytics/dim_subjects/data/*.parquet"
-        
-        logger.info(f"Reading dim_oer_resources: {dim_oer_path}")
-        dim_oer = self.spark.read.parquet(dim_oer_path)
-        
-        logger.info(f"Reading fact_oer_resources: {fact_oer_path}")
-        fact_oer = self.spark.read.parquet(fact_oer_path)
-        
-        logger.info(f"Reading dim_date: {dim_date_path}")
-        dim_date = self.spark.read.parquet(dim_date_path)
-        
-        logger.info(f"Reading bridge_oer_subjects: {bridge_oer_subjects_path}")
-        bridge_oer_subjects = self.spark.read.parquet(bridge_oer_subjects_path)
-        
-        logger.info(f"Reading dim_subjects: {dim_subjects_path}")
-        dim_subjects = self.spark.read.parquet(dim_subjects_path)
+        dim_oer_table = f"{self.gold_catalog}.{self.gold_db}.dim_oer_resources"
+        fact_oer_table = f"{self.gold_catalog}.{self.gold_db}.fact_oer_resources"
+        dim_date_table = f"{self.gold_catalog}.{self.gold_db}.dim_date"
+        bridge_oer_subjects_table = f"{self.gold_catalog}.{self.gold_db}.bridge_oer_subjects"
+        dim_subjects_table = f"{self.gold_catalog}.{self.gold_db}.dim_subjects"
+
+        logger.info(f"Reading dim_oer_resources: {dim_oer_table}")
+        dim_oer = self.spark.table(dim_oer_table)
+
+        logger.info(f"Reading fact_oer_resources: {fact_oer_table}")
+        fact_oer = self.spark.table(fact_oer_table)
+
+        logger.info(f"Reading dim_date: {dim_date_table}")
+        dim_date = self.spark.table(dim_date_table)
+
+        logger.info(f"Reading bridge_oer_subjects: {bridge_oer_subjects_table}")
+        bridge_oer_subjects = self.spark.table(bridge_oer_subjects_table)
+
+        logger.info(f"Reading dim_subjects: {dim_subjects_table}")
+        dim_subjects = self.spark.table(dim_subjects_table)
         
         # Build matched_subjects array via bridge table (Kimball pattern)
         # Join bridge with dim_subjects to get subject details
-        from pyspark.sql import functions as F
-        
         subjects_with_details = bridge_oer_subjects.join(
             dim_subjects.select("subject_key", "subject_name", "subject_code"),
             "subject_key",
@@ -255,6 +290,46 @@ class SAFExporter:
             "resource_key",
             "left"
         )
+
+        # Join with Silver documents to get PDF asset paths (if available)
+        try:
+            documents_table = f"{self.silver_catalog}.{self.silver_db}.oer_documents"
+            documents_df = self.spark.table(documents_table)
+            docs = (
+                documents_df
+                .select("resource_uid", "asset_order", "asset_path", "asset_extension")
+                .filter(F.col("asset_path").isNotNull())
+                .withColumn(
+                    "is_pdf",
+                    F.when(
+                        F.col("asset_extension").isNotNull(),
+                        F.lower(F.col("asset_extension")) == "pdf",
+                    ).otherwise(F.lower(F.col("asset_path")).endswith(".pdf")),
+                )
+                .filter(F.col("is_pdf"))
+                .drop("is_pdf")
+            )
+
+            docs_agg = (
+                docs.groupBy("resource_uid")
+                .agg(
+                    F.sort_array(
+                        F.collect_list(
+                            F.struct(F.col("asset_order"), F.col("asset_path"))
+                        )
+                    ).alias("asset_entries")
+                )
+                .withColumn("asset_paths", F.expr("transform(asset_entries, x -> x.asset_path)"))
+                .drop("asset_entries")
+            )
+
+            df = df.join(
+                docs_agg,
+                df.resource_key == docs_agg.resource_uid,
+                "left"
+            ).drop("resource_uid")
+        except Exception as e:
+            logger.warning(f"Could not load silver documents table: {e}")
         
         # Filter valid records
         df = df.where(
@@ -337,10 +412,36 @@ class SAFExporter:
                 with open(dc_path, 'w', encoding='utf-8') as f:
                     f.write(dc_content)
                 
-                # Create empty contents file (required by SAF format)
+                # Create contents file (bitstreams if available)
                 contents_path = os.path.join(item_dir, "contents")
+                asset_paths = row.get("asset_paths") or []
+                written_files: List[str] = []
+
+                if asset_paths and self.minio_client:
+                    for asset_path in asset_paths:
+                        try:
+                            key = self._resolve_minio_key(asset_path)
+                            if not key:
+                                continue
+                            filename = os.path.basename(key)
+                            local_path = os.path.join(item_dir, filename)
+
+                            response = self.minio_client.get_object(self.bucket, key)
+                            with open(local_path, "wb") as out_f:
+                                for chunk in response.stream(32 * 1024):
+                                    out_f.write(chunk)
+                            response.close()
+
+                            written_files.append(filename)
+                        except Exception as e:
+                            logger.warning(f"Failed to fetch bitstream {asset_path}: {e}")
+
                 with open(contents_path, 'w', encoding='utf-8') as f:
-                    f.write('')  # Empty - no bitstreams
+                    if written_files:
+                        for filename in written_files:
+                            f.write(f"{filename}\tbundle:ORIGINAL\n")
+                    else:
+                        f.write('')
                 
                 exported_count += 1
                 
@@ -387,6 +488,20 @@ class SAFExporter:
         if self.spark:
             self.spark.stop()
             self.spark = None
+
+    def _resolve_minio_key(self, asset_path: str) -> Optional[str]:
+        raw = (asset_path or "").strip()
+        if not raw:
+            return None
+        raw = raw.split("?", 1)[0].split("#", 1)[0]
+        if raw.startswith(("s3://", "s3a://", "http://", "https://")):
+            key = raw.split("://", 1)[-1]
+            key = key.split("/", 1)[-1] if "/" in key else ""
+        else:
+            key = raw.lstrip("/")
+        if key.startswith(f"{self.bucket}/"):
+            key = key[len(self.bucket) + 1 :]
+        return key or None
 
 
 def export_gold_to_saf(limit: int = None, output_dir: str = "/opt/airflow/saf_export", create_zip: bool = True) -> str:

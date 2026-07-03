@@ -2,6 +2,7 @@ from datetime import datetime, timedelta
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.operators.bash import BashOperator
+from airflow.operators.dummy import DummyOperator
 import json
 import os
 from src.bronze_mit_ocw import MITOCWScraper
@@ -21,7 +22,7 @@ dag = DAG(
     'mit_ocw_scraper_daily',
     default_args=default_args,
     description='Daily MIT OCW scraping with MinIO backup support',
-    schedule_interval=timedelta(days=30),  # Chạy hàng ngày
+    schedule_interval=timedelta(days=1),  # Chạy hàng ngày
     start_date=datetime(2025, 1, 1),
     catchup=False,
     max_active_runs=1,
@@ -40,7 +41,7 @@ def scrape_mit_ocw_documents(**context):
             use_selenium=True,
             output_dir="/opt/airflow/scraped_data/mit_ocw",
             batch_size=int(os.getenv('BATCH_SIZE', 25)),
-            max_documents=50
+            max_documents=100
         )
         
         # Run scraper
@@ -66,12 +67,23 @@ def scrape_mit_ocw_documents(**context):
         if 'mit_scraper' in locals():
             mit_scraper.cleanup()
 
-# Define task
+# Define tasks
+start_task = DummyOperator(
+    task_id='start_mit_ocw_scraping',
+    dag=dag,
+)
+
 scrape_mit_ocw_task = PythonOperator(
     task_id='scrape_mit_ocw_documents',
     python_callable=scrape_mit_ocw_documents,
     dag=dag,
 )
 
-# Simple workflow: just scrape
-scrape_mit_ocw_task
+end_task = DummyOperator(
+    task_id='end_mit_ocw_scraping',
+    dag=dag,
+)
+
+# Workflow structure
+start_task >> scrape_mit_ocw_task >> end_task
+

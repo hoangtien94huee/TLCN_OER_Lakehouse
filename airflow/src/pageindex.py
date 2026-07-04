@@ -3691,6 +3691,22 @@ class PageIndexEngine:
         if not self.tier2_crossbook_scope_check or not self._local_llm_enabled():
             return True
         if course_name:
+            # Retrieval-confidence override: the retrieved pages are already filtered
+            # to THIS course's own books (asset_uid filter in _answer_from_crossbook_es),
+            # so a strongly-matching page means the question IS answerable from the
+            # course material. Trust the BM25 score and skip the fuzzy LLM gate to avoid
+            # FALSE refusals on abstract / paraphrased (esp. Vietnamese) questions where
+            # the 7B judge is uncertain. Only marginal-score questions still hit the gate.
+            # Tunable: lower PAGEINDEX_TIER2_SCOPE_OVERRIDE_SCORE to answer more, raise it
+            # to be stricter. Does NOT increase hallucination: a high score means the
+            # page really contains the query terms.
+            override_score = float(os.getenv("PAGEINDEX_TIER2_SCOPE_OVERRIDE_SCORE", "40.0"))
+            top_score = max(
+                (float(c.get("retrieval_score") or 0.0) for c in (contexts or [])),
+                default=0.0,
+            )
+            if top_score >= override_score:
+                return True
             # Course-membership check: reject questions about a clearly different subject.
             prompt = (
                 f"A student is studying the course \"{course_name}\".\n"

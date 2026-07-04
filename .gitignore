@@ -73,3 +73,15 @@ evaluation/docs/
 evaluation/prototype_tier2_invertedindex/
 evaluation/scripts/
 evaluation/test.py
+
+# Node
+node_modules/
+
+# Timestamped / editor backups (không đưa lên repo)
+*.bak_*
+*.bak*
+
+# Packaged sample data (nặng)
+*.zip
+sample_data_oer_chatbot.zip
+_backups/

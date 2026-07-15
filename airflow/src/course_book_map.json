@@ -1366,7 +1366,6 @@
       "a6735eef726f9603c69f3d06e1776d66d26cfaa46e2e395644beeb5e577c668b",
       "8599253be9c10fed530769330034d8715af5d122e03d951c93545239ff5c0393",
       "5e75af46579b588ec8917a9223275749be09f97366448d163db7b9569708bfc56",
-      "a99e41a9e05d17e20cb2f6482d03815f0b45150a03c16d93ff0ce73d543a3e3e",
       "93dc0f8a40c5a52b0a03a74237c1a136153568469ed0161f59ea4b8ac9581af0"
     ],
     "books": [
@@ -1379,11 +1378,6 @@
         "asset_uid": "8599253be9c10fed530769330034d8715af5d122e03d951c93545239ff5c0393",
         "title": "Structure and Interpretation of Computer Programs",
         "source_url": "https://ocw.mit.edu/courses/6-001-structure-and-interpretation-of-computer-programs-spring-2005/"
-      },
-      {
-        "asset_uid": "a99e41a9e05d17e20cb2f6482d03815f0b45150a03c16d93ff0ce73d543a3e3e",
-        "title": "Python for Everybody: Exploring Data Using Python 3",
-        "source_url": "https://www.py4e.com/"
       },
       {
         "asset_uid": "93dc0f8a40c5a52b0a03a74237c1a136153568469ed0161f59ea4b8ac9581af0",
@@ -1442,25 +1436,13 @@
   },
   "Phát triển Ứng dụng Web": {
     "asset_uids": [
-      "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
-      "9f0237976e191cd1cd6963e63969a53164a66a7b219decc5510667da6728cce7",
-      "47a3dc1e28586828555eab2bd723db5a88c751296cf15df3650cdad163014a04"
+      "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173"
     ],
     "books": [
       {
         "asset_uid": "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
         "title": "Introduction to Computer Science - OpenStax",
         "source_url": "https://openstax.org/details/books/introduction-computer-science"
-      },
-      {
-        "asset_uid": "9f0237976e191cd1cd6963e63969a53164a66a7b219decc5510667da6728cce7",
-        "title": "Information Technology Essentials",
-        "source_url": "https://open.umn.edu/opentextbooks/textbooks/information-technology-essentials"
-      },
-      {
-        "asset_uid": "47a3dc1e28586828555eab2bd723db5a88c751296cf15df3650cdad163014a04",
-        "title": "Web Programming",
-        "source_url": "https://open.umn.edu/opentextbooks/textbooks/web-programming"
       }
     ]
   },
@@ -1532,8 +1514,7 @@
     "asset_uids": [
       "325b71626edcd2dbb4023b36994f37360c1beb23954db3a945cfef31dc7c4173",
       "7b2d6a938086150ef6a500026d9301c9a047e1b0886e901870d0bbed048562a5",
-      "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8",
-      "0a95e0c52a55adcc48dd804566c303f0b0933c0bd912da05b76da9156cc01007"
+      "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8"
     ],
     "books": [
       {
@@ -1550,11 +1531,6 @@
         "asset_uid": "6a8bd887cf959b6a22ab306dfc2ea6770f298892a9c5a1f15a8e5b74effda6e8",
         "title": "Performance Engineering of Software Systems",
         "source_url": "https://ocw.mit.edu/courses/6-172-performance-engineering-of-software-systems-fall-2018/"
-      },
-      {
-        "asset_uid": "0a95e0c52a55adcc48dd804566c303f0b0933c0bd912da05b76da9156cc01007",
-        "title": "Software Engineering Concepts",
-        "source_url": "https://ocw.mit.edu/courses/16-355j-software-engineering-concepts-fall-2005/"
       }
     ]
   }

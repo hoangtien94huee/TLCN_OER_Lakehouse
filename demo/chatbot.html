@@ -476,32 +476,24 @@
             const typing = document.getElementById('typingIndicator');
             if (typing) typing.remove();
         }
-
         function cleanAnswerText(text) {
             if (!text) return '';
             // Strip "3) Nguồn: ..." or "3) Sources: ..." since sources are shown separately
             text = text.replace(/\n?\s*3\)\s*(Nguồn|Sources?)\s*[:：].*/is, '');
             // Format section headers for readability
-            text = text.replace(/^1\)\s*(Trả lời|Answer)\s*[:：]\s*/im, '**Định nghĩa:**\n');
-            text = text.replace(/^2\)\s*(Chi tiết|Details?)\s*[:：]\s*/im, '\n**Chi tiết:**\n');
+            text = text.replace(/^1\)\s*(Trả lời|Answer)\s*[:：]\s*/im, function(match, p1) {
+                return '**' + p1 + ':**\n';
+            });
+            text = text.replace(/^2\)\s*(Chi tiết|Details?)\s*[:：]\s*/im, function(match, p1) {
+                return '\n**' + p1 + ':**\n';
+            });
             return text.trim();
         }
-
         function isNoResult(answer) {
             if (!answer) {
                 return true;
             }
             const cleanText = answer.toLowerCase();
-
-            // Check for "out of scope" indicators
-            if (
-                cleanText.includes('nằm ngoài phạm vi') ||
-                cleanText.includes('outside the scope') ||
-                cleanText.includes('phi học thuật') ||
-                cleanText.includes('non-academic')
-            ) {
-                return true;
-            }
 
             // Check for "no relevant info / no document found" indicators
             if (

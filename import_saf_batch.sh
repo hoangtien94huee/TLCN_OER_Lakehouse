@@ -34,7 +34,7 @@ NC='\033[0m' # No Color
 # Default values
 BATCH_SIZE=400
 COLLECTION_UUID="9f3ea5df-1a63-463f-89b8-ec00d7dcf50a"  # OER collection
-ADMIN_EMAIL="admin@dspace.org"
+ADMIN_EMAIL="admin@gmail.com"
 DSPACE_CONTAINER="dspace"
 
 # Parse arguments

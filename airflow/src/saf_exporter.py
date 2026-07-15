@@ -493,7 +493,10 @@ class SAFExporter:
         raw = (asset_path or "").strip()
         if not raw:
             return None
-        raw = raw.split("?", 1)[0].split("#", 1)[0]
+        if raw.startswith(("http://", "https://")):
+            raw = raw.split("?", 1)[0].split("#", 1)[0]
+        else:
+            raw = raw.split("?", 1)[0]
         if raw.startswith(("s3://", "s3a://", "http://", "https://")):
             key = raw.split("://", 1)[-1]
             key = key.split("/", 1)[-1] if "/" in key else ""

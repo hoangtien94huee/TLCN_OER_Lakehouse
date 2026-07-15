@@ -87,6 +87,7 @@ from pageindex_helpers import (
     _parse_moodle_context,
     _strip_moodle_context,
     _detect_recommendation_intent,
+    _recommendation_intent_ambiguous,
     _is_recommendation_query,
     _detect_find_material_intent,
     _detect_query_intent,
@@ -134,6 +135,14 @@ from pageindex_retrieval import _RetrievalMixin
 from pageindex_reading import _ReadingMixin
 from pageindex_recommend import _RecommendMixin
 from pageindex_generation import _GenerationMixin
+
+
+def _is_greeting(question: str) -> bool:
+    q = _ascii_fold(_strip_moodle_context(question)).strip().lower().replace("?", "").replace("!", "").replace(".", "").replace(",", "")
+    greetings = {
+        "chao", "chao ban", "xin chao", "hello", "hi", "chao ad", "chao bot", "chao em", "chao anh", "chao chi", "greetings", "hey", "chao ad"
+    }
+    return q in greetings
 
 
 class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendMixin, _GenerationMixin):
@@ -444,12 +453,56 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
         def _remaining_time() -> int:
             return max(0, int(ask_deadline - time.monotonic()))
 
+        # Check for greeting first
+        if _is_greeting(question):
+            greeting_msg = (
+                "Chào bạn! Mình là trợ lý học tập OER. "
+                "Mình có thể giúp bạn giải đáp kiến thức, tìm kiếm định nghĩa, công thức hoặc cung cấp ví dụ về môn học này. "
+                "Bạn cần mình hỗ trợ gì hôm nay?"
+            )
+            if answer_language == "en":
+                greeting_msg = (
+                    "Hello! I am your OER learning assistant. "
+                    "I can help you search for information, examples, formulas, and definitions from this course's textbooks. "
+                    "How can I help you today?"
+                )
+            return {
+                "question": question,
+                "answer": greeting_msg,
+                "contexts": [],
+                "confidence": "high",
+                "search_mode": "pageindex",
+                "pageindex_trace": [{"tool": "greeting_handler", "reason": "Intercepted greeting query"}],
+                "query_bundle": {
+                    "query_vi_original": question,
+                    "intent": "greeting",
+                    "language": answer_language
+                },
+                "metrics": {
+                    "tier1_recall_at_k": 0.0,
+                    "tier1_recall_at_k_type": "proxy",
+                    "tier1_k": 1,
+                    "evidence_hit_rate": 0.0,
+                    "grounded_answer_rate": 0.0,
+                    "pages_loaded_total": 0,
+                    "pages_hit_total": 0
+                }
+            }
+
+        # Check for chapter summary request
+        chapter_num = self._parse_chapter_number(question)
+        if chapter_num is not None:
+            resolved_book = self._resolve_book_from_history(question, history)
+            if resolved_book:
+                trace.append({"tool": "chapter_summarizer_route", "book": resolved_book["title"], "chapter": chapter_num})
+                return self._generate_chapter_summary(resolved_book, chapter_num, answer_language, question)
+
         # Check for book summary request first
         if self._is_summary_request(question):
             resolved_book = self._resolve_book_from_history(question, history)
             if resolved_book:
                 trace.append({"tool": "toc_summarizer_route", "book": resolved_book["title"]})
-                return self._generate_toc_summary(resolved_book, answer_language)
+                return self._generate_toc_summary(resolved_book, answer_language, question)
 
         prebundle = self._build_query_bundle(question)
         
@@ -461,6 +514,87 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
                 trace.append({"tool": "active_book_context", "book": active_book})
 
         detected_intent = prebundle.intent
+
+        # ── LLM Intent Classification (Tier 2) ──────────────────────────────
+        # To achieve robust semantic routing and support arbitrary natural language phrasing
+        # (e.g., "cho tôi tài liệu học môn sinh học"), we use the zero-shot local LLM classifier
+        # for all queries except explicit summary requests.
+        llm_intent_used = False
+        if self._local_llm_enabled() and detected_intent != "off_topic":
+            llm_intent = self._classify_intent_with_llm(
+                _strip_moodle_context(question), timeout=6
+            )
+            trace.append({
+                "tool": "llm_intent_classifier",
+                "pattern_intent": detected_intent,
+                "llm_intent": llm_intent,
+                "trigger": "semantic_routing",
+            })
+            if llm_intent in ("recommendation", "out_of_scope", "definition", "find_material", "listing"):
+                detected_intent = llm_intent
+                prebundle.intent = llm_intent
+                llm_intent_used = True
+            elif detected_intent == "explanation" and llm_intent == "general":
+                llm_intent_used = True
+
+        # OOS guard: fast keyword check first, then LLM for uncertain cases
+        def _build_oos_response() -> Dict[str, Any]:
+            oos_answer = (
+                "This question is outside the scope of the OER academic library. "
+                "I can only help with academic and educational topics."
+                if answer_language == "en" else
+                "Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. "
+                "Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục."
+            )
+            return {
+                "question": question,
+                "answer": oos_answer,
+                "contexts": [],
+                "confidence": "low",
+                "search_mode": "pageindex",
+                "pageindex_trace": trace,
+                "query_bundle": {"intent": "off_topic", "language": answer_language},
+                "metrics": {
+                    "tier1_recall_at_k": 0.0, "tier1_recall_at_k_type": "proxy",
+                    "tier1_k": 0, "evidence_hit_rate": 0.0,
+                    "grounded_answer_rate": 0.0,
+                    "pages_loaded_total": 0, "pages_hit_total": 0,
+                },
+            }
+
+        # Tier 1 OOS: fast regex check (catches obvious lifestyle/entertainment keywords)
+        if detected_intent == "out_of_scope" or _is_obviously_out_of_scope(question):
+            trace.append({"tool": "oos_guard", "method": "pattern"})
+            return _build_oos_response()
+
+        # Tier 2 OOS: LLM check for questions that slipped through the keyword filter
+        # Only invoke LLM when the question doesn't match any academic intent patterns
+        # (intent stays 'explanation' as default, but question has no academic signals)
+        if not llm_intent_used and detected_intent == "explanation":
+            q_folded = _ascii_fold(_strip_moodle_context(question))
+            academic_signals = [
+                "la gi", "dinh nghia", "giai thich", "tinh chat", "cong thuc",
+                "what is", "define", "explain", "formula", "derivative",
+                "integral", "matrix", "probability", "algorithm", "database",
+                "tai lieu", "sach", "giao trinh",
+            ]
+            has_academic_signal = any(s in q_folded for s in academic_signals)
+            if not has_academic_signal:
+                llm_intent = self._classify_intent_with_llm(
+                    _strip_moodle_context(question), timeout=5
+                )
+                trace.append({
+                    "tool": "llm_intent_classifier",
+                    "pattern_intent": detected_intent,
+                    "llm_intent": llm_intent,
+                    "trigger": "no_academic_signal",
+                })
+                if llm_intent == "out_of_scope":
+                    return _build_oos_response()
+                detected_intent = llm_intent
+                prebundle.intent = llm_intent
+        # ── End LLM Intent Classification ───────────────────────────────────
+
         if detected_intent == "recommendation":
             # Course-scoped: recommend the curated books of the Moodle course.
             if self.tier2_course_scoped:
@@ -507,38 +641,6 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
                     "tier1_recall_at_k": 0.0,
                     "tier1_recall_at_k_type": "proxy",
                     "tier1_k": int(self.max_document_candidates),
-                    "evidence_hit_rate": 0.0,
-                    "grounded_answer_rate": 0.0,
-                    "pages_loaded_total": 0,
-                    "pages_hit_total": 0,
-                },
-            }
-
-        # Fast OOS pre-filter: skip PageIndex tree traversal for obviously non-academic questions.
-        # Saves ~5-9s latency by returning immediately before get_document().
-        if _is_obviously_out_of_scope(question):
-            oos_answer = (
-                "This question is outside the scope of the OER academic library. "
-                "I can only help with academic and educational topics."
-                if answer_language == "en" else
-                "Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. "
-                "Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục."
-            )
-            return {
-                "question": question,
-                "answer": oos_answer,
-                "contexts": [],
-                "confidence": "low",
-                "search_mode": "pageindex",
-                "pageindex_trace": trace,
-                "query_bundle": {
-                    "intent": "off_topic",
-                    "language": answer_language,
-                },
-                "metrics": {
-                    "tier1_recall_at_k": 0.0,
-                    "tier1_recall_at_k_type": "proxy",
-                    "tier1_k": 0,
                     "evidence_hit_rate": 0.0,
                     "grounded_answer_rate": 0.0,
                     "pages_loaded_total": 0,
@@ -599,6 +701,8 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
 
         documents = document_result.get("documents") or []
         if not documents:
+            if not self._crossbook_relevance_ok(question, [], course_name=prebundle.course_name):
+                return _build_oos_response()
             return {
                 "question": question,
                 "answer": _message_no_document(answer_language, prebundle.course_name),
@@ -607,15 +711,15 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
                 "search_mode": "pageindex",
                 "pageindex_trace": trace,
                 "query_bundle": document_result.get("query_bundle"),
-                "metrics": {
-                    "tier1_recall_at_k": 0.0,
-                    "tier1_recall_at_k_type": "proxy",
-                    "tier1_k": int(self.max_document_candidates),
-                    "evidence_hit_rate": 0.0,
-                    "grounded_answer_rate": 0.0,
-                    "pages_loaded_total": 0,
-                    "pages_hit_total": 0,
-                },
+                "metrics": self._build_ask_metrics(
+                    document_result=document_result,
+                    selected_document=None,
+                    pages_loaded_total=0,
+                    pages_hit_total=0,
+                    contexts=[],
+                    answer="",
+                    found_relevant_evidence=False,
+                ),
             }
 
         bundle_data = query_bundle_data
@@ -632,6 +736,7 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
             section_name=str(bundle_data.get("section_name") or prebundle.section_name or ""),
             document_title=str(bundle_data.get("document_title") or prebundle.document_title or ""),
             concept_target=str(bundle_data.get("concept_target") or prebundle.concept_target or ""),
+            concept_target_en=str(bundle_data.get("concept_target_en") or ""),
             has_unresolved_placeholder=bool(
                 bundle_data.get("has_unresolved_placeholder")
                 if "has_unresolved_placeholder" in bundle_data
@@ -661,6 +766,8 @@ class PageIndexEngine(_BackendMixin, _RetrievalMixin, _ReadingMixin, _RecommendM
                 "tool": "crossbook_refusal_final",
                 "reason": "Page index khong tra ve ket qua chat luong cao; tu choi de tranh RAG hallucination.",
             })
+            if not self._crossbook_relevance_ok(question, [], course_name=bundle.course_name):
+                return _build_oos_response()
             return {
                 "question": question,
                 "answer": _message_no_document(answer_language, bundle.course_name),

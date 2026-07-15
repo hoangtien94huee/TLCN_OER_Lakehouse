@@ -1,8 +1,8 @@
-define([], function() {
+define([], function () {
     function el(tag, attrs, text) {
         var node = document.createElement(tag);
         if (attrs) {
-            Object.keys(attrs).forEach(function(k) {
+            Object.keys(attrs).forEach(function (k) {
                 node.setAttribute(k, attrs[k]);
             });
         }
@@ -17,7 +17,7 @@ define([], function() {
             return;
         }
         var side = position === 'left' ? 'left' : 'right';
-        var style = el('style', {id: 'oerchatbot-style'});
+        var style = el('style', { id: 'oerchatbot-style' });
         style.textContent = ''
             + '.oerchatbot-btn{position:fixed;bottom:18px;' + side + ':18px;z-index:9999;background:linear-gradient(135deg,#0f6cbf,#2a8bf2);color:#fff;border:none;border-radius:999px;padding:12px 16px;cursor:pointer;font-weight:700;box-shadow:0 8px 20px rgba(15,108,191,.32);display:flex;align-items:center;gap:8px;transition:transform .18s ease,box-shadow .18s ease;}'
             + '.oerchatbot-btn:hover{transform:translateY(-1px);box-shadow:0 12px 24px rgba(15,108,191,.38);}'
@@ -36,7 +36,7 @@ define([], function() {
             + '.oerchatbot-msg-user{align-items:flex-end;}'
             + '.oerchatbot-msg-bot{align-items:flex-start;}'
             + '.oerchatbot-msg-meta{font-size:11px;color:#6b7280;margin-bottom:4px;padding:0 6px;}'
-            + '.oerchatbot-msg-bubble{max-width:88%;border:1px solid #dce7f2;border-radius:12px;padding:9px 10px;line-height:1.5;word-break:break-word;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.05);}'
+            + '.oerchatbot-msg-bubble{max-width:94%;border:1px solid #dce7f2;border-radius:12px;padding:9px 10px;line-height:1.5;word-break:break-word;background:#fff;box-shadow:0 2px 10px rgba(15,23,42,.05);}'
             + '.oerchatbot-msg-user .oerchatbot-msg-bubble{background:#eaf3ff;border-color:#cde1fb;}'
             + '.oerchatbot-msg-line{margin:2px 0;}'
             + '.oerchatbot-msg-item{display:flex;gap:6px;align-items:flex-start;margin:3px 0;}'
@@ -70,7 +70,10 @@ define([], function() {
             + '.oerchatbot-source-section{font-size:11px;color:#6b7280;margin-left:4px;}'
             + '.oerchatbot-source-pdf{font-size:11px;color:#fff;background:#0f6cbf;border-radius:10px;padding:1px 8px;margin-left:6px;text-decoration:none;}'
             + '.oerchatbot-source-pdf:hover{opacity:.85;}'
-            + '@media (max-width:680px){.oerchatbot-box{width:calc(100vw - 12px);height:calc(100vh - 80px);bottom:10px;' + side + ':6px;border-radius:14px;}.oerchatbot-btn{bottom:10px;' + side + ':10px;padding:10px 12px;}}';
+            + '@media (max-width:680px){.oerchatbot-box{width:calc(100vw - 12px);height:calc(100vh - 80px);bottom:10px;' + side + ':6px;border-radius:14px;}.oerchatbot-btn{bottom:10px;' + side + ':10px;padding:10px 12px;}}'
+            + 'mjx-container,.MathJax,.mjx-chtml,.MathJax_Display,.katex-display{max-width:100%!important;overflow-x:auto!important;overflow-y:hidden!important;}'
+            + '.oerchatbot-code-block{background:#282c34;color:#abb2bf;padding:12px;border-radius:8px;font-family:Consolas,Monaco,"Courier New",monospace;font-size:12.5px;overflow-x:auto;margin:8px 0;line-height:1.5;box-shadow:inset 0 1px 4px rgba(0,0,0,0.2);border:1px solid #1b1d23;white-space:pre;}'
+            + '.oerchatbot-code-block code{font-family:inherit;color:inherit;background:none;padding:0;border-radius:0;}';
         document.head.appendChild(style);
     }
 
@@ -98,8 +101,12 @@ define([], function() {
         if (!text) { return ''; }
         var t = text;
         t = t.replace(/\n?\s*3\)\s*(Nguồn|Sources?)\s*[:：].*/is, '');
-        t = t.replace(/^1\)\s*(Trả lời|Answer)\s*[:：]\s*/im, '**Định nghĩa:**\n');
-        t = t.replace(/^2\)\s*(Chi tiết|Details?)\s*[:：]\s*/im, '\n**Chi tiết:**\n');
+        t = t.replace(/^1\)\s*(Trả lời|Answer)\s*[:：]\s*/im, function (match, p1) {
+            return '**' + p1 + ':**\n';
+        });
+        t = t.replace(/^2\)\s*(Chi tiết|Details?)\s*[:：]\s*/im, function (match, p1) {
+            return '\n**' + p1 + ':**\n';
+        });
         return t.trim();
     }
 
@@ -108,16 +115,6 @@ define([], function() {
             return true;
         }
         var cleanText = answer.toLowerCase();
-
-        // Check for "out of scope" indicators
-        if (
-            cleanText.indexOf('nằm ngoài phạm vi') !== -1 ||
-            cleanText.indexOf('outside the scope') !== -1 ||
-            cleanText.indexOf('phi học thuật') !== -1 ||
-            cleanText.indexOf('non-academic') !== -1
-        ) {
-            return true;
-        }
 
         // Check for "no relevant info / no document found" indicators
         if (
@@ -174,10 +171,10 @@ define([], function() {
 
     function appendSources(container, sources, config) {
         if (!sources || !sources.length) { return; }
-        var validSources = sources.filter(function(s) { return s && s.title && s.url; });
+        var validSources = sources.filter(function (s) { return s && s.title && s.url; });
         if (!validSources.length) { return; }
-        var wrap = el('div', {'class': 'oerchatbot-sources'});
-        var title = el('div', {'class': 'oerchatbot-sources-title'}, '📚 Nguồn tham khảo (' + validSources.length + ')');
+        var wrap = el('div', { 'class': 'oerchatbot-sources' });
+        var title = el('div', { 'class': 'oerchatbot-sources-title' }, '📚 Nguồn tham khảo (' + validSources.length + ')');
         wrap.appendChild(title);
 
         var apiBase = '';
@@ -193,7 +190,7 @@ define([], function() {
             }
         }
 
-        validSources.forEach(function(src) {
+        validSources.forEach(function (src) {
             var url = src.url || '';
             if (apiBase && src.asset_uid) {
                 url = apiBase + '/api/pdf/' + encodeURIComponent(String(src.asset_uid));
@@ -207,13 +204,13 @@ define([], function() {
                     url = apiBase + match[0];
                 }
             }
-            var item = el('a', {'class': 'oerchatbot-source', 'href': url, 'target': '_blank', 'rel': 'noopener noreferrer'});
+            var item = el('a', { 'class': 'oerchatbot-source', 'href': url, 'target': '_blank', 'rel': 'noopener noreferrer' });
             var html = '<span class="oerchatbot-source-title">📄 ' + escapeHtml(src.title) + '</span>';
             if (src.page) { html += '<span class="oerchatbot-source-page">tr. ' + src.page + '</span>'; }
             if (src.section) { html += '<span class="oerchatbot-source-section">| ' + escapeHtml(src.section) + '</span>'; }
             html += '<span class="oerchatbot-source-pdf">Xem PDF</span>';
             item.innerHTML = html;
-            item.addEventListener('click', function(evt) {
+            item.addEventListener('click', function (evt) {
                 // Open from a direct user gesture to avoid iframe/frame navigation restrictions.
                 evt.preventDefault();
                 var targetUrl = String(url || '').trim();
@@ -232,70 +229,112 @@ define([], function() {
         container.appendChild(wrap);
     }
 
-    function formatMessageText(text) {
-        if (!text) { return ''; }
+    function formatLineWithMath(lineText) {
+        if (!lineText) { return ''; }
         var regex = /(\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\)|\$[\s\S]*?\$)/g;
-        var parts = text.split(regex);
-        var out = [];
-        
-        parts.forEach(function(part) {
+        var parts = lineText.split(regex);
+        var lineOut = [];
+        parts.forEach(function (part) {
             if (!part) return;
             var isMath = (part.indexOf('$$') === 0 && part.lastIndexOf('$$') === part.length - 2) ||
-                         (part.indexOf('\\[') === 0 && part.lastIndexOf('\\]') === part.length - 2) ||
-                         (part.indexOf('\\(') === 0 && part.lastIndexOf('\\)') === part.length - 2) ||
-                         (part.indexOf('$') === 0 && part.lastIndexOf('$') === part.length - 1);
+                (part.indexOf('\\[') === 0 && part.lastIndexOf('\\]') === part.length - 2) ||
+                (part.indexOf('\\(') === 0 && part.lastIndexOf('\\)') === part.length - 2) ||
+                (part.indexOf('$') === 0 && part.lastIndexOf('$') === part.length - 1);
             if (isMath) {
-                out.push(part);
+                lineOut.push(part);
             } else {
-                var lines = part.split(/\r?\n/);
-                lines.forEach(function(line, lineIdx) {
-                    var trimmed = line.trim();
-                    if (!trimmed) {
-                        if (lines.length > 1 && lineIdx < lines.length - 1) {
-                            out.push('<div class="oerchatbot-msg-line">&nbsp;</div>');
-                        }
-                        return;
-                    }
-                    
-                    var numbered = trimmed.match(/^(\d+)\.\s+(.*)$/);
-                    var bullet = trimmed.match(/^-\s+(.*)$/);
-                    var subbullet = trimmed.match(/^\*\s+(.*)$/);
-                    
-                    var content = trimmed;
-                    if (numbered) content = numbered[2];
-                    else if (bullet) content = bullet[1];
-                    else if (subbullet) content = subbullet[1];
-                    
-                    var processedContent = linkify(escapeHtml(content).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'));
-                    
-                    if (numbered) {
-                        out.push(
-                            '<div class="oerchatbot-msg-item">'
-                            + '<span class="oerchatbot-msg-item-num">' + numbered[1] + '.</span>'
-                            + '<span>' + processedContent + '</span>'
-                            + '</div>'
-                        );
-                    } else if (subbullet) {
-                        out.push(
-                            '<div class="oerchatbot-msg-subitem">'
-                            + '<span class="oerchatbot-msg-subitem-bullet">◦</span>'
-                            + '<span>' + processedContent + '</span>'
-                            + '</div>'
-                        );
-                    } else if (bullet) {
-                        out.push(
-                            '<div class="oerchatbot-msg-item">'
-                            + '<span class="oerchatbot-msg-item-bullet">•</span>'
-                            + '<span>' + processedContent + '</span>'
-                            + '</div>'
-                        );
-                    } else {
-                        out.push('<div class="oerchatbot-msg-line">' + processedContent + '</div>');
-                    }
-                });
+                var processed = linkify(escapeHtml(part).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'));
+                lineOut.push(processed);
             }
         });
-        
+        return lineOut.join('');
+    }
+
+    function formatMessageText(text) {
+        if (!text) { return ''; }
+
+        // First pass: extract code blocks so they are not parsed as markdown/math
+        var segments = [];
+        var codeBlockRe = /```([\s\S]*?)```/g;
+        var lastIdx = 0;
+        var m;
+        while ((m = codeBlockRe.exec(text)) !== null) {
+            if (m.index > lastIdx) {
+                segments.push({ type: 'text', value: text.substring(lastIdx, m.index) });
+            }
+            var blockContent = m[1];
+            var bLines = blockContent.split('\n');
+            var lang = 'text';
+            var startAt = 0;
+            if (bLines.length > 0 && bLines[0].trim() && bLines[0].trim().indexOf(' ') === -1 && bLines[0].trim().length < 15) {
+                lang = bLines[0].trim().toLowerCase();
+                startAt = 1;
+            }
+            var codeOnly = bLines.slice(startAt).join('\n').replace(/^\n+|\n+$/g, '');
+            segments.push({ type: 'code', lang: lang, value: codeOnly });
+            lastIdx = codeBlockRe.lastIndex;
+        }
+        if (lastIdx < text.length) {
+            segments.push({ type: 'text', value: text.substring(lastIdx) });
+        }
+
+        var out = [];
+
+        segments.forEach(function (seg) {
+            if (seg.type === 'code') {
+                out.push('<pre class="oerchatbot-code-block"><code class="language-' + seg.lang + '">' + escapeHtml(seg.value) + '</code></pre>');
+                return;
+            }
+
+            // Regular text: parse line by line
+            var lines = seg.value.split(/\r?\n/);
+            lines.forEach(function (line, lineIdx) {
+                var trimmed = line.trim();
+                if (!trimmed) {
+                    if (lines.length > 1 && lineIdx < lines.length - 1) {
+                        out.push('<div class="oerchatbot-msg-line">&nbsp;</div>');
+                    }
+                    return;
+                }
+
+                var numbered = trimmed.match(/^(\d+)\.\s+(.*)$/);
+                var bullet = trimmed.match(/^-\s+(.*)$/);
+                var subbullet = trimmed.match(/^\*\s+(.*)$/);
+
+                var content = trimmed;
+                if (numbered) content = numbered[2];
+                else if (bullet) content = bullet[1];
+                else if (subbullet) content = subbullet[1];
+
+                var processedContent = formatLineWithMath(content);
+
+                if (numbered) {
+                    out.push(
+                        '<div class="oerchatbot-msg-item">'
+                        + '<span class="oerchatbot-msg-item-num">' + numbered[1] + '.</span>'
+                        + '<span>' + processedContent + '</span>'
+                        + '</div>'
+                    );
+                } else if (subbullet) {
+                    out.push(
+                        '<div class="oerchatbot-msg-subitem">'
+                        + '<span class="oerchatbot-msg-subitem-bullet">◦</span>'
+                        + '<span>' + processedContent + '</span>'
+                        + '</div>'
+                    );
+                } else if (bullet) {
+                    out.push(
+                        '<div class="oerchatbot-msg-item">'
+                        + '<span class="oerchatbot-msg-item-bullet">•</span>'
+                        + '<span>' + processedContent + '</span>'
+                        + '</div>'
+                    );
+                } else {
+                    out.push('<div class="oerchatbot-msg-line">' + processedContent + '</div>');
+                }
+            });
+        });
+
         return out.join('');
     }
 
@@ -303,9 +342,9 @@ define([], function() {
         var wrap = el('div');
         wrap.className = 'oerchatbot-msg ' + (who === 'user' ? 'oerchatbot-msg-user' : 'oerchatbot-msg-bot');
 
-        var meta = el('div', {'class': 'oerchatbot-msg-meta'});
+        var meta = el('div', { 'class': 'oerchatbot-msg-meta' });
         meta.textContent = (who === 'user' ? 'Bạn' : 'Trợ lý OER') + ' · ' + nowHm();
-        var bubble = el('div', {'class': 'oerchatbot-msg-bubble'});
+        var bubble = el('div', { 'class': 'oerchatbot-msg-bubble' });
         var displayText = (who === 'bot') ? cleanAnswerText(text) : text;
         bubble.innerHTML = formatMessageText(displayText);
         if (who === 'bot' && sources && sources.length) {
@@ -316,15 +355,15 @@ define([], function() {
         wrap.appendChild(bubble);
         container.appendChild(wrap);
         container.scrollTop = container.scrollHeight;
-        
+
         function tryTypeset(retries) {
             if (window.renderMathInElement) {
                 window.renderMathInElement(bubble, {
                     delimiters: [
-                        {left: '$$', right: '$$', display: true},
-                        {left: '\\[', right: '\\]', display: true},
-                        {left: '$', right: '$', display: false},
-                        {left: '\\(', right: '\\)', display: false}
+                        { left: '$$', right: '$$', display: true },
+                        { left: '\\[', right: '\\]', display: true },
+                        { left: '$', right: '$', display: false },
+                        { left: '\\(', right: '\\)', display: false }
                     ],
                     throwOnError: false
                 });
@@ -332,7 +371,7 @@ define([], function() {
             }
             if (window.MathJax) {
                 if (typeof window.MathJax.typesetPromise === 'function') {
-                    window.MathJax.typesetPromise([bubble]).catch(function (err) {});
+                    window.MathJax.typesetPromise([bubble]).catch(function (err) { });
                     return;
                 } else if (window.MathJax.Hub && typeof window.MathJax.Hub.Queue === 'function') {
                     window.MathJax.Hub.Queue(["Typeset", window.MathJax.Hub, bubble]);
@@ -340,13 +379,13 @@ define([], function() {
                 }
             }
             if (retries > 0) {
-                setTimeout(function() { tryTypeset(retries - 1); }, 500);
+                setTimeout(function () { tryTypeset(retries - 1); }, 500);
             } else {
                 console.warn('OER Chatbot: Math rendering timeout.');
             }
         }
         tryTypeset(40);
-        
+
         return wrap;
     }
 
@@ -355,8 +394,8 @@ define([], function() {
         wrap.className = 'oerchatbot-msg oerchatbot-msg-bot';
         wrap.id = 'oerchatbot-typing-msg';
 
-        var meta = el('div', {'class': 'oerchatbot-msg-meta'}, 'Trợ lý OER · đang trả lời...');
-        var bubble = el('div', {'class': 'oerchatbot-msg-bubble'});
+        var meta = el('div', { 'class': 'oerchatbot-msg-meta' }, 'Trợ lý OER · đang trả lời...');
+        var bubble = el('div', { 'class': 'oerchatbot-msg-bubble' });
         bubble.innerHTML = '<div class="oerchatbot-typing"><span></span><span></span><span></span></div>';
         wrap.appendChild(meta);
         wrap.appendChild(bubble);
@@ -379,7 +418,7 @@ define([], function() {
             if (sectionEl) {
                 var nameEl = sectionEl.querySelector('.sectionname .inplaceeditable, .sectionname a, .sectionname span, h3.sectionname');
                 var name = nameEl ? (nameEl.textContent || '').trim() : '';
-                return {num: parseInt(hashMatch[1], 10), name: name || ('Topic ' + hashMatch[1])};
+                return { num: parseInt(hashMatch[1], 10), name: name || ('Topic ' + hashMatch[1]) };
             }
         }
         var sections = document.querySelectorAll('li.section[id^="section-"]');
@@ -389,7 +428,7 @@ define([], function() {
         var viewportMid = window.innerHeight / 2;
         var best = null;
         var bestDist = Infinity;
-        sections.forEach(function(sec) {
+        sections.forEach(function (sec) {
             var rect = sec.getBoundingClientRect();
             if (rect.bottom < 0 || rect.top > window.innerHeight) {
                 return;
@@ -413,7 +452,7 @@ define([], function() {
         }
         var nameEl = best.querySelector('.sectionname .inplaceeditable, .sectionname a, .sectionname span, h3.sectionname');
         var name = nameEl ? (nameEl.textContent || '').trim() : '';
-        return {num: num, name: name || ('Topic ' + num)};
+        return { num: num, name: name || ('Topic ' + num) };
     }
 
     function getContext(config) {
@@ -470,10 +509,10 @@ define([], function() {
     }
 
     function appendSuggestions(container, items, onPick) {
-        var row = el('div', {'class': 'oerchatbot-suggestions'});
-        items.forEach(function(item) {
-            var btn = el('button', {'type': 'button', 'class': 'oerchatbot-suggestion'}, item);
-            btn.addEventListener('click', function() {
+        var row = el('div', { 'class': 'oerchatbot-suggestions' });
+        items.forEach(function (item) {
+            var btn = el('button', { 'type': 'button', 'class': 'oerchatbot-suggestion' }, item);
+            btn.addEventListener('click', function () {
                 onPick(item);
             });
             row.appendChild(btn);
@@ -525,11 +564,11 @@ define([], function() {
 
     function fetchWithTimeout(url, options, timeoutMs) {
         var controller = new AbortController();
-        var timer = setTimeout(function() {
+        var timer = setTimeout(function () {
             controller.abort();
         }, timeoutMs || 90000);
-        var opts = Object.assign({}, options || {}, {signal: controller.signal});
-        return fetch(url, opts).finally(function() {
+        var opts = Object.assign({}, options || {}, { signal: controller.signal });
+        return fetch(url, opts).finally(function () {
             clearTimeout(timer);
         });
     }
@@ -542,19 +581,19 @@ define([], function() {
             statusNode.querySelector('.oerchatbot-status-text').textContent = 'Offline';
             return;
         }
-        fetch(healthUrl, {method: 'GET'})
-            .then(function(resp) {
+        fetch(healthUrl, { method: 'GET' })
+            .then(function (resp) {
                 if (!resp.ok) {
                     throw new Error('API lỗi');
                 }
                 return resp.json();
             })
-            .then(function() {
+            .then(function () {
                 statusNode.className = 'oerchatbot-status online';
                 statusNode.title = 'Đã kết nối API';
                 statusNode.querySelector('.oerchatbot-status-text').textContent = 'Online';
             })
-            .catch(function() {
+            .catch(function () {
                 statusNode.className = 'oerchatbot-status offline';
                 statusNode.title = 'Mất kết nối API';
                 statusNode.querySelector('.oerchatbot-status-text').textContent = 'Offline';
@@ -563,32 +602,32 @@ define([], function() {
 
     function ensureKatex() {
         if (window.renderMathInElement) return;
-        
+
         var link = document.createElement('link');
         link.rel = 'stylesheet';
         link.href = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css';
         document.head.appendChild(link);
-        
+
         var _amd = null;
         if (typeof define === 'function' && define.amd) {
             _amd = define.amd;
             define.amd = null;
         }
-        
+
         var script = document.createElement('script');
         script.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js';
-        script.onload = function() {
+        script.onload = function () {
             var script2 = document.createElement('script');
             script2.src = 'https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js';
-            script2.onload = function() {
+            script2.onload = function () {
                 if (_amd) { define.amd = _amd; }
             };
-            script2.onerror = function() {
+            script2.onerror = function () {
                 if (_amd) { define.amd = _amd; }
             };
             document.head.appendChild(script2);
         };
-        script.onerror = function() {
+        script.onerror = function () {
             if (_amd) { define.amd = _amd; }
         };
         document.head.appendChild(script);
@@ -596,7 +635,7 @@ define([], function() {
 
     function ensureMathJax() {
         if (window.MathJax) return;
-        
+
         window.MathJax = {
             tex: {
                 inlineMath: [['\\(', '\\)'], ['$', '$']],
@@ -630,7 +669,7 @@ define([], function() {
             if (!Array.isArray(parsed)) {
                 return [];
             }
-            return parsed.filter(function(item) {
+            return parsed.filter(function (item) {
                 return item && (item.role === 'user' || item.role === 'assistant' || item.role === 'bot') && item.text;
             }).slice(-10);
         } catch (e) {
@@ -641,7 +680,7 @@ define([], function() {
     function saveConversationHistory(config, history) {
         try {
             window.sessionStorage.setItem(historyStorageKey(config), JSON.stringify((history || []).slice(-10)));
-        } catch (e) {}
+        } catch (e) { }
     }
 
     function init(config) {
@@ -660,33 +699,33 @@ define([], function() {
                         displayMath: [['$$', '$$'], ['\\[', '\\]']]
                     }
                 });
-            } catch (e) {}
+            } catch (e) { }
         }
 
-        var btn = el('button', {'type': 'button', 'class': 'oerchatbot-btn', 'aria-label': 'Mở chatbot OER'});
+        var btn = el('button', { 'type': 'button', 'class': 'oerchatbot-btn', 'aria-label': 'Mở chatbot OER' });
         btn.innerHTML = '<span class="oerchatbot-btn-icon">🎓</span><span>' + escapeHtml(config.title || 'OER Chatbot') + '</span>';
 
-        var box = el('div', {'class': 'oerchatbot-box'});
-        var head = el('div', {'class': 'oerchatbot-head'});
-        var headLeft = el('div', {'class': 'oerchatbot-head-left'});
-        var title = el('div', {'class': 'oerchatbot-title'}, config.title || 'OER Chatbot');
+        var box = el('div', { 'class': 'oerchatbot-box' });
+        var head = el('div', { 'class': 'oerchatbot-head' });
+        var headLeft = el('div', { 'class': 'oerchatbot-head-left' });
+        var title = el('div', { 'class': 'oerchatbot-title' }, config.title || 'OER Chatbot');
         var subtitleText = (config.courseName || '').trim() ? ('Môn học: ' + config.courseName) : 'Trợ lý học tập OER';
-        var subtitle = el('div', {'class': 'oerchatbot-subtitle'}, subtitleText);
+        var subtitle = el('div', { 'class': 'oerchatbot-subtitle' }, subtitleText);
         headLeft.appendChild(title);
         headLeft.appendChild(subtitle);
 
-        var headRight = el('div', {'class': 'oerchatbot-head-right'});
-        var closeBtn = el('button', {'type': 'button', 'class': 'oerchatbot-close', 'aria-label': 'Đóng chatbot'}, '×');
+        var headRight = el('div', { 'class': 'oerchatbot-head-right' });
+        var closeBtn = el('button', { 'type': 'button', 'class': 'oerchatbot-close', 'aria-label': 'Đóng chatbot' }, '×');
         headRight.appendChild(closeBtn);
 
         head.appendChild(headLeft);
         head.appendChild(headRight);
 
-        var msgs = el('div', {'class': 'oerchatbot-msgs'});
-        var row = el('div', {'class': 'oerchatbot-row'});
-        var input = el('textarea', {'placeholder': 'Đặt câu hỏi... ví dụ: "Cơ sở dữ liệu là gì?"'});
-        var send = el('button', {'type': 'button', 'class': 'oerchatbot-send'}, 'Gửi');
-        var hint = el('div', {'class': 'oerchatbot-hint'}, 'Nhấn Enter để gửi, Shift + Enter để xuống dòng.');
+        var msgs = el('div', { 'class': 'oerchatbot-msgs' });
+        var row = el('div', { 'class': 'oerchatbot-row' });
+        var input = el('textarea', { 'placeholder': 'Đặt câu hỏi... ví dụ: "Cơ sở dữ liệu là gì?"' });
+        var send = el('button', { 'type': 'button', 'class': 'oerchatbot-send' }, 'Gửi');
+        var hint = el('div', { 'class': 'oerchatbot-hint' }, 'Nhấn Enter để gửi, Shift + Enter để xuống dòng.');
 
         row.appendChild(input);
         row.appendChild(send);
@@ -703,7 +742,7 @@ define([], function() {
             box.style.display = 'flex';
             if (!greeted) {
                 appendMessage(msgs, 'bot', getAutoGreeting(config), null, config);
-                appendSuggestions(msgs, getSuggestionButtons(config), function(suggestion) {
+                appendSuggestions(msgs, getSuggestionButtons(config), function (suggestion) {
                     sendQuestion(suggestion);
                 });
                 greeted = true;
@@ -735,7 +774,7 @@ define([], function() {
                 return;
             }
             appendMessage(msgs, 'user', q, null, config);
-            conversationHistory.push({role: 'user', text: q});
+            conversationHistory.push({ role: 'user', text: q });
             if (conversationHistory.length > 10) {
                 conversationHistory.shift();
             }
@@ -750,7 +789,7 @@ define([], function() {
             payload.language = 'vi';
             payload.history = conversationHistory.slice();
 
-            var headers = {'Content-Type': 'application/json'};
+            var headers = { 'Content-Type': 'application/json' };
             if (config.apiKey) {
                 headers['X-API-Key'] = config.apiKey;
             }
@@ -767,13 +806,13 @@ define([], function() {
                     method: 'POST',
                     headers: headers,
                     body: JSON.stringify(payload)
-                }, 90000).then(function(resp) {
+                }, 90000).then(function (resp) {
                     if (!resp.ok) {
                         return resp.json()
-                            .then(function(err) {
+                            .then(function (err) {
                                 throw new Error((err && (err.detail || err.message)) ? (err.detail || err.message) : ('HTTP ' + resp.status));
                             })
-                            .catch(function() {
+                            .catch(function () {
                                 throw new Error('HTTP ' + resp.status);
                             });
                     }
@@ -782,7 +821,7 @@ define([], function() {
                         config.apiUrl = currentApiUrl;
                     }
                     return resp.json();
-                }).catch(function(err) {
+                }).catch(function (err) {
                     // Retry only for network/connection type failures.
                     var message = String((err && err.message) || '');
                     var shouldRetry =
@@ -797,11 +836,11 @@ define([], function() {
                 });
             }
 
-            tryApiAt(0).then(function(data) {
+            tryApiAt(0).then(function (data) {
                 var answer = (data && data.answer) ? data.answer : 'Mình chưa có câu trả lời phù hợp. Bạn thử diễn đạt lại chi tiết hơn nhé.';
                 var sources = (data && data.sources) ? data.sources : [];
 
-                conversationHistory.push({role: 'assistant', text: answer});
+                conversationHistory.push({ role: 'assistant', text: answer });
                 if (conversationHistory.length > 10) {
                     conversationHistory.shift();
                 }
@@ -815,9 +854,9 @@ define([], function() {
                 }
 
                 appendMessage(msgs, 'bot', answer, sources, config);
-            }).catch(function(err) {
+            }).catch(function (err) {
                 appendMessage(msgs, 'bot', 'Kết nối tạm thời gián đoạn: ' + err.message + '. Bạn thử gửi lại sau ít giây nhé.', null, config);
-            }).finally(function() {
+            }).finally(function () {
                 removeTyping(msgs);
                 setSendingState(false);
                 input.focus();
@@ -826,10 +865,10 @@ define([], function() {
 
         btn.addEventListener('click', toggleBox);
         closeBtn.addEventListener('click', closeBox);
-        send.addEventListener('click', function() {
+        send.addEventListener('click', function () {
             sendQuestion(input.value);
         });
-        input.addEventListener('keydown', function(evt) {
+        input.addEventListener('keydown', function (evt) {
             if (evt.key === 'Enter' && !evt.shiftKey) {
                 evt.preventDefault();
                 sendQuestion(input.value);
@@ -837,5 +876,5 @@ define([], function() {
         });
     }
 
-    return {init: init};
+    return { init: init };
 });

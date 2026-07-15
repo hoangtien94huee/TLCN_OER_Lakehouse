@@ -32,7 +32,9 @@ evaluation/
 - `pipeline_outputs_course_v2_fixed.json` — answer (sau khi fix intent find_material)
 
 ### `results/`
-- `course_multirelevant_result.json` — Recall@5 = **0.85**, MRR = **0.79**
+- `course_multirelevant_result.json` — multi-relevant Recall@5 = **0.95**, MRR = **0.84** (re-eval 2026-07-09, judge 70b; single-gold 0.83/0.68)
+- `course_multirelevant_en.json` / `course_multirelevant_vi.json` — phân rã ngôn ngữ: EN **0.97/0.85**, VI **0.92/0.84**
+- `course_multirelevant_result_judge8b_baocao.json` — số cũ 06/2026 (judge 8b, outputs cũ): 0.85/0.79
 - `ragas_new70b_FINAL.json` — Answer Relevancy = **0.87** (judge llama-3.3-70b, full 130)
 - `ragas_sub_new.json` / `ragas_sub_old.json` — A/B faithfulness 8b (**0.63 → 0.84**)
 - `ragas_70b_A.json`, `ragas_70b_B.json`, `ragas_new70b_000.json`, `ragas_new70b_018.json` — faithfulness 70b (~0.77, mẫu)
@@ -69,7 +71,8 @@ python scripts/make_simple_dashboard.py
 ## Kết quả chính
 | Tầng | Chỉ số | Giá trị | Nguồn |
 |---|---|---|---|
-| Retrieval | Recall@5 / MRR | **0.85 / 0.79** | Manning 2008 · Voorhees 1999 |
+| Retrieval | Recall@5 / MRR (multi-relevant) | **0.95 / 0.84** (EN 0.97 · VI 0.92) | Manning 2008 · Voorhees 1999 · Faggioli 2023 |
+| Retrieval | Recall@5 / MRR (single-gold) | 0.83 / 0.68 (EN 0.88 · VI 0.77) | — |
 | Generation | Answer Relevancy | **0.87** | RAGAS — Es et al. 2024 |
 | Generation | Faithfulness | **0.84** (8b) / 0.77 (70b) | RAGAS |
 | Kiểm chứng | Human-eval | **0.84** | chấm tay |

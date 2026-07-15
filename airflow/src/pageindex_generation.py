@@ -167,8 +167,7 @@ class _GenerationMixin:
 
         definition_target = _extract_requested_concept(question) if _is_definition_query(question) else ""
         query_intent = _detect_query_intent(question)
-        if query_intent == "find_material":
-            return self._answer_find_material(contexts, answer_language=answer_language)
+        # We let the LLM generate the answer for find_material to provide a detailed, reasoned recommendation.
         moodle_ctx = _parse_moodle_context(question)
         section_hint = str(moodle_ctx.get("section_name") or "").strip()
         course_name = str(moodle_ctx.get("course_name") or "").strip()
@@ -190,113 +189,100 @@ class _GenerationMixin:
             course_instruction_vi = f"QUAN TRỌNG: Người dùng đang hỏi trong ngữ cảnh môn học '{course_name}'. Bạn PHẢI đối chiếu và điều chỉnh các khái niệm chung chung từ context cho phù hợp tuyệt đối với đặc thù, cú pháp và quy tắc của môn '{course_name}'. Nếu tài liệu nói kiến thức đại cương, hãy áp dụng chuẩn xác cho {course_name}."
 
         base_rules_en = (
-            "You are a PageIndex learning assistant for open educational resources (OER).\n"
-            "You ONLY answer questions about academic subjects: mathematics, science, engineering, "
-            "computer science, economics, history, literature, and other university-level disciplines.\n"
-            "SCOPE RULE: If the question is about cooking, sports scores, entertainment, personal health "
-            "advice, news, weather, shopping, travel tips, or ANY non-academic topic, you MUST respond "
-            "ONLY with: 'This question is outside the scope of the OER academic library. "
-            "I can only help with academic and educational topics.'\n"
-            "You must answer strictly from the provided VALID_CONTEXT extracted from document pages.\n"
-            "COPYRIGHT KEYWORD WARNING: If the question is about a mathematical concept (like derivative or calculus) "
-            "but the VALID_CONTEXT only contains license/copyright terms (like Creative Commons 'NoDerivatives' or 'ND') "
-            "or catalog index directories, without any actual mathematical explanation, you MUST treat it as NO INFORMATION "
-            "and answer exactly: 'The provided documents do not contain information to answer this question.'\n"
-            "MATH FORMULA RULE: All mathematical formulas, symbols, and equations MUST be formatted using standard LaTeX notation. "
-            "Use \\( ... \\) for inline math and $$ ... $$ for display/block math. "
-            "For example: write '\\( f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} \\)' instead of plain ascii text. "
-            "Write '\\( \\int x^2\\,dx = \\frac{1}{3}x^3 + C \\)' instead of '∫x^2 dx = 1/3x^3 + C'. "
-            "Write '\\( \\int_a^b f(x)\\,dx \\)' instead of '∫_a^b f(x)dx'. "
-            "If VALID_CONTEXT contains plain/ascii formulas, convert ONLY those formulas to LaTeX notation; do not add new formulas. "
-            "Never use plain ascii representations for equations.\n"
+            "You are a PageIndex OER learning assistant. Answer ONLY academic topics from VALID_CONTEXT.\n"
+            "SCOPE RULE: If the query is non-academic (cooking, sports, entertainment, health, shopping, travel, etc.), "
+            "you MUST reply ONLY with: 'This question is outside the scope of the OER academic library. I can only help with academic and educational topics.'\n"
+            "COPYRIGHT WARNING: If the query is about a math concept but VALID_CONTEXT only has license terms (like 'NoDerivatives'/'ND') or index page, "
+            "reply exactly: 'The provided documents do not contain information to answer this question.'\n"
+            "MATH FORMULA: Format all math in LaTeX: \\( ... \\) for inline, $$ ... $$ for block. Convert ascii formulas from context to LaTeX. Do not use plain ascii.\n"
             f"{course_instruction_en}\n"
-            "Answer in English.\n"
-            "If context is in another language, translate accurately without adding external facts.\n"
-            "NEVER invent facts not found in the context.\n"
-            "NEVER use circular definitions (e.g. 'an integral is... integrating').\n"
-            "Be concise. Do NOT repeat yourself. Each idea should appear ONCE.\n"
+            "Answer in English. Never invent facts. Do not use circular definitions.\n"
+            "Provide detailed step-by-step explanations, breaking down concepts. Synthesis and paraphrase clearly for students.\n"
         )
         base_rules_vi = (
-            "Bạn là trợ lý học tập PageIndex cho học liệu mở (OER).\n"
-            "Bạn CHỈ trả lời các câu hỏi về học thuật: toán học, khoa học, kỹ thuật, công nghệ thông tin, "
-            "kinh tế, lịch sử, văn học và các môn học đại học khác.\n"
-            "QUY TẮC PHẠM VI: Nếu câu hỏi về nấu ăn, kết quả thể thao, giải trí, sức khỏe cá nhân, "
-            "tin tức, thời tiết, mua sắm, du lịch hoặc BẤT KỲ chủ đề phi học thuật nào, "
-            "bạn PHẢI trả lời DUY NHẤT: 'Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. "
-            "Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục.'\n"
-            "Chỉ được trả lời dựa trên VALID_CONTEXT đã lấy trực tiếp từ các trang tài liệu.\n"
-            "CẢNH BÁO TRÙNG LẶP TỪ KHÓA BẢN QUYỀN: Nếu câu hỏi về khái niệm Toán học (như đạo hàm - derivative) "
-            "nhưng ngữ cảnh (VALID_CONTEXT) chỉ chứa từ khóa trùng hợp về bản quyền/giấy phép (như 'NoDerivatives' của Creative Commons) "
-            "hoặc danh mục chỉ mục (Index) mà không có nội dung giải thích toán học, bạn PHẢI xác định là KHÔNG có thông tin và trả lời: "
-            "'Tài liệu của khóa học này không có thông tin để trả lời câu hỏi này.'\n"
-            "QUY TẮC CÔNG THỨC TOÁN: Tất cả các công thức, ký hiệu toán học PHẢI được định dạng bằng mã LaTeX tiêu chuẩn. "
-            "Sử dụng \\( ... \\) cho công thức trong dòng (inline) và $$ ... $$ cho công thức dòng riêng (block). "
-            "Ví dụ: viết '\\( f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} \\)' thay vì 'f'(x) = lim_{h->0} ...'. "
-            "Viết '\\( \\int x^2\\,dx = \\frac{1}{3}x^3 + C \\)' thay vì '∫x^2 dx = 1/3x^3 + C'. "
-            "Viết '\\( \\int_a^b f(x)\\,dx \\)' thay vì '∫_a^b f(x)dx'. "
-            "Nếu VALID_CONTEXT có công thức dạng plain/ascii, chỉ chuyển chính các công thức đó sang LaTeX; không thêm công thức mới. "
-            "Tuyệt đối không dùng các định dạng text ascii rời rạc cho công thức.\n"
+            "Bạn là trợ lý học tập PageIndex cho học liệu mở (OER). Chỉ trả lời câu hỏi học thuật từ VALID_CONTEXT.\n"
+            "QUY TẮC PHẠM VI: Nếu câu hỏi phi học thuật (nấu ăn, thể thao, giải trí, sức khỏe, tin tức, mua sắm...), "
+            "bạn PHẢI trả lời DUY NHẤT: 'Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục.'\n"
+            "CẢNH BÁO BẢN QUYỀN: Nếu câu hỏi về Toán nhưng VALID_CONTEXT chỉ chứa từ khóa giấy phép (như 'NoDerivatives'/'ND') hoặc trang Mục lục (Index), "
+            "bạn PHẢI trả lời chính xác: 'Tài liệu của khóa học này không có thông tin để trả lời câu hỏi này.'\n"
+            "CÔNG THỨC TOÁN: Dùng LaTeX tiêu chuẩn: \\( ... \\) cho inline, $$ ... $$ cho block (Ví dụ: \\( f'(x) = \\lim_{h \\to 0} \\frac{f(x+h) - f(x)}{h} \\)). "
+            "Chuyển công thức dạng ascii trong context sang LaTeX. Không dùng text ascii rời rạc.\n"
+            "CẢNH BÁO PHÂN SỐ PDF: Văn bản PDF thường mất gạch ngang phân số đứng (ví dụ '6  x2' phải khôi phục thành '\\( \\frac{6}{x^2} \\)' rồi giải thích viết dưới dạng mũ âm '\\( 6x^{-2} \\)'). Tránh viết trùng lặp hàm số ban đầu và sau khi viết lại.\n"
             f"{course_instruction_vi}\n"
-            "LƯU Ý NGÔN NGỮ: Bắt buộc phải trả lời hoàn toàn bằng TIẾNG VIỆT (Vietnamese).\n"
-            "Nếu context gốc là tiếng Anh thì dịch chính xác sang TIẾNG VIỆT. Nếu có thuật ngữ chuyên ngành khó dịch, hãy giữ nguyên bằng tiếng Anh (English).\n"
-            "TUYỆT ĐỐI KHÔNG bịa thêm nội dung không có trong context.\n"
-            "KHÔNG dùng câu đồng nghĩa lặp lại (ví dụ: 'tích phân là... tích phân').\n"
-            "Ngắn gọn, súc tích, mỗi ý chỉ nêu MỘT lần.\n"
+            "LƯU Ý NGÔN NGỮ: Bắt buộc trả lời 100% bằng TIẾNG VIỆT. TUYỆT ĐỐI KHÔNG dùng chữ Hán (Hanzi), tiếng Trung, hoặc tiếng Nhật. "
+            "Dịch chính xác context tiếng Anh sang tiếng Việt tự nhiên, giữ nguyên thuật ngữ khó dịch nếu cần.\n"
+            "TỔNG HỢP KIẾN THỨC: Giải thích chi tiết, giải ví dụ và công thức cụ thể từng bước từ context. Không bịa thêm thông tin ngoài context. "
+            "Dùng ký hiệu chuẩn thông dụng thay vì các ký hiệu dẫn dắt trung gian của sách (như m_sec).\n"
         )
+
 
         if is_listing:
             intent_instruction_en = (
                 "The question asks for a LIST. Extract ALL relevant items from the context.\n"
-                "Section 1 MUST contain a bullet list with ALL items found.\n"
+                "At '1) Answer:', you MUST provide a bullet list with ALL items found.\n"
             )
             intent_instruction_vi = (
                 "Câu hỏi yêu cầu LIỆT KÊ. Trích xuất TẤT CẢ các mục liên quan từ context.\n"
-                "Phần 1 PHẢI chứa danh sách gạch đầu dòng với TẤT CẢ mục tìm được.\n"
+                "Tại mục '1) Trả lời:' PHẢI chứa danh sách gạch đầu dòng với TẤT CẢ mục tìm được.\n"
             )
         elif query_intent == "explanation" and definition_target:
             intent_instruction_en = (
                 "The question asks for a DEFINITION or EXPLANATION of a concept.\n"
-                "Section 1: give a precise, clear general definition of the concept. You MAY phrase a standard definition for readability, but do NOT introduce specific facts, numbers, or formulas that are not in the context.\n"
-                "Section 2: include ONLY properties, examples, formulas, or applications that ACTUALLY APPEAR in the context. Do NOT invent or add examples/numbers/formulas (for instance, do NOT add '\\( f(x)=x^2 \\)', '\\( f'(x)=2x \\)', or '\\( f'(3)=6 \\)' unless they literally appear in the context).\n"
+                "At '1) Answer:': give a precise, clear general definition of the concept. You MAY phrase a standard definition for readability, but do NOT introduce specific facts, numbers, or formulas that are not in the context.\n"
+                "At '2) Details:': include ONLY properties, examples, formulas, or applications that ACTUALLY APPEAR in the context. Do NOT invent or add examples/numbers/formulas (for instance, do NOT add '\\( f(x)=x^2 \\)', '\\( f'(x)=2x \\)', or '\\( f'(3)=6 \\)' unless they literally appear in the context).\n"
                 "If the context lacks specific details, say so instead of inventing them.\n"
                 "If the context is in English, translate accurately into the answer language without adding content.\n"
             )
             intent_instruction_vi = (
                 "Câu hỏi yêu cầu ĐỊNH NGHĨA hoặc GIẢI THÍCH khái niệm.\n"
-                "Phần 1: Trình bày định nghĩa bao quát, chuẩn xác TỪ CONTEXT. NẾU context cung cấp quá chi tiết kỹ thuật hoặc KHÔNG CÓ định nghĩa cơ bản, bạn PHẢI TRẢ LỜI RÕ: 'Tài liệu của khóa học này không định nghĩa khái quát về khái niệm này, mà tập trung vào các chi tiết như: [tóm tắt chi tiết]'. TUYỆT ĐỐI KHÔNG dùng kiến thức ngoài để bịa ra định nghĩa.\n"
-                "Phần 2: Bổ sung các ví dụ, tính chất, hoặc chi tiết cụ thể mà bạn trích xuất ĐƯỢC TỪ CONTEXT để minh họa.\n"
+                "Tại mục '1) Trả lời:': Trình bày định nghĩa bao quát, chuẩn xác TỪ CONTEXT. NẾU context cung cấp quá chi tiết kỹ thuật hoặc KHÔNG CÓ định nghĩa cơ bản, bạn PHẢI TRẢ LỜI RÕ: 'Tài liệu của khóa học này không định nghĩa khái quát về khái niệm này, mà tập trung vào các chi tiết như: [tóm tắt chi tiết]'. TUYỆT ĐỐI KHÔNG dùng kiến thức ngoài để bịa ra định nghĩa.\n"
+                "Tại mục '2) Chi tiết:': Bổ sung các ví dụ, tính chất, hoặc chi tiết cụ thể CÓ THẬT TỪ CONTEXT để minh họa. TUYỆT ĐỐI KHÔNG tự bịa ra ví dụ, số liệu, hoặc công thức mới. NẾU trong ngữ cảnh (VALID_CONTEXT) có sẵn ví dụ cụ thể (như bài toán tính đạo hàm của một hàm cụ thể), bạn NÊN trích xuất chính xác ví dụ đó để minh họa.\n"
                 "Hãy chứng minh bạn là một hệ thống RAG nghiêm ngặt: Chỉ nói những gì tài liệu có.\n"
+            )
+        elif query_intent == "find_material":
+            intent_instruction_en = (
+                "The user is asking which book/material is suitable to learn about a specific topic.\n"
+                "Based on the contexts, identify which book(s) contain the most relevant content, chapters, or index for the topic.\n"
+                "At '1) Answer:': state the most relevant book title(s) from the context.\n"
+                "At '2) Details:': explain which chapters, sections, or pages cover the topic, based strictly on the context.\n"
+            )
+            intent_instruction_vi = (
+                "Người dùng đang hỏi cuốn sách/tài liệu nào phù hợp để học về một chủ đề cụ thể.\n"
+                "Dựa trên ngữ cảnh (VALID_CONTEXT), hãy xác định cuốn sách nào chứa chương học hoặc nội dung giải thích trực tiếp nhất về chủ đề đó.\n"
+                "Tại mục '1) Trả lời:': Nêu tên cuốn sách phù hợp nhất để học chủ đề này.\n"
+                "Tại mục '2) Chi tiết:': Giải thích rõ chương hoặc phần nào trong cuốn sách đó nói về chủ đề này (ví dụ: Chương 3 của cuốn sách chứa định nghĩa đạo hàm...), dựa hoàn toàn trên ngữ cảnh.\n"
             )
         else:
             intent_instruction_en = (
                 "Answer the question directly and clearly based STRICTLY on the context.\n"
-                "If the context does not contain the answer, you MUST state: 'The provided documents do not contain information to answer this question.'\n"
-                "Section 2 should add useful details extracted from context.\n"
+                "If the context does not contain the answer, you MUST state at '1) Answer:': 'The provided documents do not contain information to answer this question.'\n"
+                "At '2) Details:', add useful details extracted ONLY from context.\n"
             )
             intent_instruction_vi = (
                 "Trả lời câu hỏi trực tiếp, tự nhiên dựa HOÀN TOÀN vào context.\n"
-                "Nếu context không chứa thông tin để trả lời, bạn PHẢI nói: 'Tài liệu của khóa học này không có thông tin để trả lời câu hỏi này.'\n"
-                "TUYỆT ĐỐI KHÔNG dùng kiến thức ngoài để bịa ra câu trả lời.\n"
+                "Nếu context không chứa thông tin để trả lời, bạn PHẢI nói ở mục '1) Trả lời:': 'Tài liệu của khóa học này không có thông tin để trả lời câu hỏi này.'\n"
+                "Mục '2) Chi tiết:' bổ sung các thông tin liên quan từ context.\n"
+                "TUYỆT ĐỐI KHÔNG dùng kiến thức ngoài để bịa ra câu trả lời hay ví dụ.\n"
             )
 
         format_block_en = (
             "MANDATORY FORMAT (exactly 3 sections):\n"
             "1) Answer: <direct answer to the question>\n"
-            "2) Details: <supporting details, examples, or bullet list from context>\n"
+            "2) Details: <supporting details, examples, or bullet list FROM THE CONTEXT ONLY — do NOT invent formulas or examples>\n"
             "3) Sources: [Source 1]\n\n"
             "Example:\n"
-            "1) Answer: The derivative of f at a is the limit of the difference quotient as h approaches 0.\n"
-            "2) Details: It measures instantaneous rate of change. If the context includes the example, write formulas as \\( f(x)=x^2 \\), \\( f'(x)=2x \\), and \\( f'(3)=6 \\).\n"
+            "1) Answer: A derivative measures the instantaneous rate of change of a function.\n"
+            "2) Details: The formal definition uses the limit of the difference quotient. Only include formulas or examples if they literally appear in the VALID_CONTEXT.\n"
             "3) Sources: [Source 1]\n"
         )
         format_block_vi = (
             "ĐỊNH DẠNG BẮT BUỘC (đúng 3 phần):\n"
             "1) Trả lời: <câu trả lời trực tiếp, ngắn gọn, KHÔNG lặp lại từ khóa trong câu hỏi để định nghĩa chính nó>\n"
-            "2) Chi tiết: <thông tin bổ sung, ví dụ, công thức, hoặc danh sách gạch đầu dòng từ context>\n"
+            "2) Chi tiết: <thông tin bổ sung, công thức, ví dụ lấy TRỰC TIẾP TỪ CONTEXT — TUYỆT ĐỐI KHÔNG bịa ví dụ hay công thức mới>\n"
             "3) Nguồn: [Nguồn 1]\n\n"
             "Ví dụ câu hỏi: 'Thế năng là gì?'\n"
-            "1) Trả lời: Thế năng là cơ năng của một vật có được do vị trí của nó so với mặt đất hoặc so với vật khác.\n"
-            "2) Chi tiết: Thế năng trọng trường được tính bằng công thức \\( W_p = mgh \\). Ví dụ: một quả táo ở trên cành cây cao 3 mét có thế năng trọng trường lớn hơn khi nó nằm trên mặt đất.\n"
+            "1) Trả lời: Thế năng là năng lượng mà vật có được do vị trí của nó trong trường lực.\n"
+            "2) Chi tiết: Theo tài liệu, thế năng trọng trường tính theo công thức \\( W_p = mgh \\) (nếu công thức đó có trong context).\n"
             "3) Nguồn: [Nguồn 1]\n"
         )
 
@@ -425,6 +411,29 @@ class _GenerationMixin:
                 clean = re.sub(r"\s+", " ", raw_text).strip()
                 snippet = clean[:200] + ("..." if len(clean) > 200 else "")
 
+            # --- Section title accuracy fix ---
+            # The indexed section_title can be stale (inherited from the first chunk
+            # of a section and not updated when the page crosses into a new section).
+            # Detect the actual section heading from the first line of the page text
+            # and prefer it over the metadata when they clearly differ.
+            metadata_section = str(ctx.get("section_title") or "").strip()
+            actual_section = metadata_section
+            if raw_text:
+                # Look for numbered heading pattern at the start of the text (e.g. "3.2 | The Derivative as a Function")
+                first_lines = raw_text.strip()[:300]
+                heading_match = re.search(
+                    r"^(\d+\.\d+(?:\.\d+)?)\s*[\|\-]?\s*([A-Z][^\n]{5,80})",
+                    first_lines,
+                    re.MULTILINE,
+                )
+                if heading_match:
+                    detected = f"{heading_match.group(1)}: {heading_match.group(2).strip()}"
+                    # Only override if metadata section is different section number
+                    meta_num_match = re.search(r"(\d+\.\d+)", metadata_section)
+                    detected_num = heading_match.group(1)
+                    if meta_num_match and meta_num_match.group(1) != detected_num:
+                        actual_section = detected
+
             sources.append({
                 "title": title or "Không rõ tài liệu",
                 "url": pdf_url_with_page or "",
@@ -432,7 +441,7 @@ class _GenerationMixin:
                 "source_url": source_url,
                 "asset_uid": asset_uid or None,
                 "page": int(page_no) if page_no else None,
-                "section": str(ctx.get("section_title") or "").strip() or None,
+                "section": actual_section or None,
                 "snippet": snippet,
             })
         return sources

@@ -1,36 +1,15 @@
-"""
-Indexer for Tier-2 page-level inverted index (oer_pages_tier2).
 
-Builds an Elasticsearch inverted index of per-page book text so that Tier-2
-retrieval can use BM25 over the whole book instead of loading the PDF and
-scanning a TOC-selected range with linear keyword overlap.
-
-CPU only. No LLM, no GPU, no embeddings — pure text inverted index.
-
-Page-text source is pluggable:
-  - PROTOTYPE/eval env: reads pre-extracted pages from a cached JSON
-    (produced from local PDFs), so we can verify on the 12 eval books.
-  - PRODUCTION: swap load_pages() to use the engine's MinIO + pypdf
-    extraction (_get_pdf_bytes + _get_page_texts_cached) — same text logic.
-
-Usage:
-  python3 build_tier2_index.py --pages /tmp/vi_book_pages.json --recreate
-  python3 build_tier2_index.py --pages /tmp/vi_book_pages.json --resume
-"""
 import argparse, json, sys, time
 import requests
 
 ES_HOST = "http://localhost:9200"
 INDEX   = "oer_pages_tier2"
-
 MAPPING = {
     "settings": {
         "number_of_shards": 1,
         "number_of_replicas": 0,
         "analysis": {
             "analyzer": {
-                # standard English-ish analyzer; a synonym filter (bilingual
-                # glossary) can be plugged here later as the optional Phase 4.
                 "page_text": {
                     "type": "custom",
                     "tokenizer": "standard",

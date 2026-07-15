@@ -19,6 +19,7 @@ class QueryBundle:
     section_name: str = ""
     document_title: str = ""
     concept_target: str = ""
+    concept_target_en: str = ""
     has_unresolved_placeholder: bool = False
 
 

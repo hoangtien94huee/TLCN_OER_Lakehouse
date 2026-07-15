@@ -388,6 +388,77 @@ class _BackendMixin:
             self._local_llm_unavailable = False
             logger.warning("Local LLM probe failed, will try direct API call. detail=%s", self._local_llm_last_error)
 
+    def _classify_intent_with_llm(self, question: str, timeout: int = 6) -> str:
+        """Zero-shot intent classifier using the local LLM.
+        Returns one of: recommendation | definition | find_material | listing | general | out_of_scope.
+        Called when pattern-based detection is ambiguous.
+
+        Intent definitions:
+          - recommendat ion: user asks for book/document suggestions for a course/subject (no specific topic)
+          - definition: user asks what a concept means (is, explain, define)
+          - find_material: user asks which document covers a specific topic
+          - listing: user asks to enumerate items/properties/types
+          - general: academic question not matching above categories
+          - out_of_scope: NOT an academic/educational question (food, games, sports, shopping, travel, personal advice, etc.)
+        """
+        if not self._local_llm_enabled():
+            return "general"
+        prompt = (
+            "You are an intent classifier for an OER (Open Educational Resources) academic chatbot.\n"
+            "Classify the user question into EXACTLY ONE intent label.\n\n"
+            "Intent labels:\n"
+            "- recommendation: asking for book, document, or learning resource suggestions for a general course or subject as a whole (e.g., 'cho tôi tài liệu học môn sinh học', 'gợi ý tài liệu giải tích', 'tìm sách triết học')\n"
+            "- definition: asking what a concept/term means or to explain it\n"
+            "- find_material: asking which specific document/book covers a particular topic, concept, or chapter (e.g., 'tài liệu nào nói về đạo hàm', 'sách nào có chương về tích phân')\n"
+            "- listing: asking to list properties, types, examples, or components\n"
+            "- general: an academic question not matching above\n"
+            "- out_of_scope: NOT academic — food, cooking, games, sports, entertainment, shopping, travel, personal advice, current events, etc.\n\n"
+            "Examples:\n"
+            "Q: gợi ý tài liệu cho môn học này → recommendation\n"
+            "Q: tài liệu nào phù hợp cho môn học này → recommendation\n"
+            "Q: sách nào thích hợp cho khóa học này → recommendation\n"
+            "Q: cho tôi tài liệu học môn sinh học → recommendation\n"
+            "Q: tôi muốn tìm tài liệu tự học triết học → recommendation\n"
+            "Q: đạo hàm là gì → definition\n"
+            "Q: explain what a derivative is → definition\n"
+            "Q: tài liệu nào nói về tích phân → find_material\n"
+            "Q: which book covers linear regression → find_material\n"
+            "Q: tính chất của ma trận là gì → listing\n"
+            "Q: list the types of joins in SQL → listing\n"
+            "Q: tôi nên học gì trước → general\n"
+            "Q: công thức nấu phở → out_of_scope\n"
+            "Q: gợi ý phim hay → out_of_scope\n"
+            "Q: game nào hay nhất 2024 → out_of_scope\n"
+            "Q: kết quả bóng đá hôm nay → out_of_scope\n"
+            "Q: giá vàng hôm nay → out_of_scope\n"
+            "Q: làm sao để giảm cân → out_of_scope\n\n"
+            f"Question: {question}\n"
+            "Answer with the intent label only (one word, no explanation):"
+        )
+        try:
+            raw = self._call_local_llm(prompt, request_timeout=timeout)
+            raw = raw.strip().lower().split()[0] if raw.strip() else ""
+            # Normalize common model quirks
+            raw = raw.rstrip(".,;:!?\"'")
+            valid = {"recommendation", "definition", "find_material", "listing", "general", "out_of_scope"}
+            if raw in valid:
+                return raw
+            # Fuzzy match fallbacks
+            if any(k in raw for k in ["recommend", "suggest", "sach", "goi y"]):
+                return "recommendation"
+            if any(k in raw for k in ["defin", "explain", "la gi"]):
+                return "definition"
+            if any(k in raw for k in ["find", "material", "which"]):
+                return "find_material"
+            if any(k in raw for k in ["list", "liet"]):
+                return "listing"
+            if any(k in raw for k in ["scope", "off", "ngoai"]):
+                return "out_of_scope"
+            return "general"
+        except Exception as exc:
+            logger.warning("LLM intent classification failed, defaulting to 'general'. detail=%s", exc)
+            return "general"
+
     def _call_local_llm(
         self,
         prompt: str,

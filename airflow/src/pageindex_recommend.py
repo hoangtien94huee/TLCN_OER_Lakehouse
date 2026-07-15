@@ -160,6 +160,24 @@ class _RecommendMixin:
             ]
             subject_focus_terms = _dedupe_keep_order(subject_focus_terms + en_keywords)
 
+        subject_noise_terms = {
+            "neu", "muon", "thi", "phu", "hop", "hoc", "cho", "toi", "minh", "ban",
+            "lam", "quen", "nhap", "mon", "tai", "lieu", "sach", "goi", "y", "de",
+            "xuat", "hoc", "neu", "thi", "phu", "hop", "muon", "cho", "toi", "choing",
+            "nao", "giup", "giup", "xin", "chao", "chao", "cam", "on", "cam", "on",
+            "want", "study", "suitable", "appropriate", "need", "material", "materials",
+            "book", "books", "textbook", "textbooks", "resource", "resources", "learning",
+            "education", "educational", "academic", "provide", "suggest", "recommend",
+            "recommendation", "recommendations", "find", "search", "get", "give", "please",
+            "would", "like", "about", "topic", "topics", "course", "courses", "class",
+            "classes", "subject", "subjects", "intro", "introduction", "introductory",
+            "basic", "basics", "fundamental", "fundamentals", "general", "advanced",
+        }
+        subject_focus_terms = [
+            t for t in subject_focus_terms
+            if _ascii_fold(t.lower()) not in subject_noise_terms
+        ]
+
         if preferred_subject_name.strip():
             subject_focus_phrases = _extract_subject_focus_phrases(preferred_subject_name, subject_focus_terms)
         else:
@@ -213,53 +231,8 @@ class _RecommendMixin:
         if not is_database_domain:
             anchor_terms = _dedupe_keep_order(subject_focus_terms)
             anchor_phrases = _dedupe_keep_order(subject_focus_phrases)
-        offdomain_terms = [
-            "economics",
-            "labor",
-            "macroeconomics",
-            "microeconomics",
-            "biology",
-            "chemistry",
-            "medicine",
-            "anatomy",
-            "finance",
-            "accounting",
-            "marketing",
-            "law",
-            "politics",
-            "kinh",
-            "sinh",
-            "duoc",
-            "psychology",
-            "sociology",
-            "philosophy",
-            "geography",
-            "geology",
-            "astronomy",
-        ]
-        offdomain_phrases = [
-            "labor economics",
-            "macroeconomics",
-            "microeconomics",
-            "economic growth",
-            "biology",
-            "biological",
-            "materials and structures",
-            "mechanics of materials",
-            "mechanical engineering",
-            "structural engineering",
-            "civil engineering",
-            "chemical engineering",
-            "electrical engineering",
-            "aerospace engineering",
-            "anatomy",
-            "medicine",
-            "pharmacology",
-            "organic chemistry",
-            "inorganic chemistry",
-            "molecular biology",
-            "political science",
-        ]
+        offdomain_terms = []
+        offdomain_phrases = []
         if subject_focus_terms:
             focus_set = set(subject_focus_terms)
             offdomain_terms = [t for t in offdomain_terms if t not in focus_set]
@@ -584,6 +557,78 @@ class _RecommendMixin:
             )
         return contexts
 
+    def _summarize_book_descriptions_with_llm(
+        self,
+        books: List[Dict[str, Any]],
+        answer_language: str = "vi",
+    ) -> List[str]:
+        if not books:
+            return []
+            
+        cleaned_descriptions = []
+        for idx, item in enumerate(books, start=1):
+            tier1_doc = item.get("tier1") or {}
+            title = str(item.get("title") or tier1_doc.get("title") or f"Book {idx}").strip()
+            desc = str(tier1_doc.get("description") or "").strip()
+            desc = re.sub(r"\{\{%.*?%\}\}", " ", desc, flags=re.DOTALL)
+            desc = re.sub(r"\[[^\]]{1,180}\]\([^)]*\)", " ", desc)
+            desc = re.sub(r"\s+", " ", desc).strip()
+            if len(desc) > 300:
+                desc = desc[:300] + "..."
+            cleaned_descriptions.append((title, desc))
+            
+        summaries = []
+        for title, desc in cleaned_descriptions:
+            if not desc:
+                summaries.append("Tài liệu học liệu mở hỗ trợ chương trình học.")
+                continue
+                
+            # Direct translation for each description to ensure high quality and prevent Qwen bilingual Chinese-mix bias
+            if answer_language == "vi" and self._local_llm_enabled():
+                prompt = (
+            "Bạn là một trợ lý học thuật OER thông thái.\n"
+            "Hãy viết một câu tóm tắt mô tả ngắn gọn (tầm 15-25 từ) bằng tiếng Việt cho mỗi tài liệu học tập dưới đây.\n"
+            "Yêu cầu:\n"
+            "1. Dịch nghĩa và diễn đạt tóm tắt một cách tự nhiên, súc tích sang tiếng Việt.\n"
+            "2. Trả về dưới dạng một danh sách chuỗi JSON duy nhất, ví dụ: [\"Tóm tắt sách 1\", \"Tóm tắt sách 2\"]. Không giải thích gì thêm, không bọc trong markdown code blocks khác.\n\n"
+            "Danh sách tài liệu:\n"
+        )
+        for idx, (title, desc) in enumerate(cleaned_descriptions, start=1):
+            prompt += f"{idx}. {title}\nDescription: {desc}\n\n"
+            
+        try:
+            default_val = []
+            summaries = self._call_local_llm_json(prompt, default_val, request_timeout=10)
+            if isinstance(summaries, list) and len(summaries) == len(books):
+                cleaned_summaries = []
+                for s in summaries:
+                    s_clean = str(s or "").strip()
+                    s_clean = re.sub(r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", s_clean)
+                    s_clean = re.sub(r"\s+", " ", s_clean).strip()
+                    cleaned_summaries.append(s_clean)
+                return cleaned_summaries
+        except Exception as exc:
+            logger.warning("Local LLM batch description summary failed: %s", exc)
+            
+        fallbacks = []
+        for title, desc in cleaned_descriptions:
+            if not desc:
+                fallbacks.append("Tài liệu học liệu mở hỗ trợ chương trình học.")
+                continue
+            sentences = re.split(r'(?<=[.!?])\s+', desc)
+            kept = []
+            length = 0
+            for s in sentences:
+                if length + len(s) > 180 and kept:
+                    break
+                kept.append(s)
+                length += len(s)
+            summary = " ".join(kept)
+            if len(summary) > 200:
+                summary = summary[:197] + "..."
+            fallbacks.append(summary)
+        return fallbacks
+
     def _format_recommendation_answer(
         self,
         documents: Sequence[Dict[str, Any]],
@@ -597,18 +642,15 @@ class _RecommendMixin:
         confidence_label_en = "High" if confidence == "high" else ("Medium" if confidence == "medium" else "Low")
         has_subject = bool(preferred_subject_name.strip())
 
+        summaries = self._summarize_book_descriptions_with_llm(list(documents), answer_language)
+
         lines: List[str] = []
         for idx, item in enumerate(documents, start=1):
             tier1_doc = item.get("tier1") or {}
             title = str(item.get("title") or tier1_doc.get("title") or f"Tài liệu {idx}").strip()
-            default_reason = "Relevant to the current course." if answer_language == "en" else "Phù hợp với nội dung đang tìm."
-            reason = str(item.get("recommendation_reason") or default_reason).strip()
-            if answer_language == "en":
-                line = f"{idx}. {title}\n- Why: {reason}"
-            else:
-                line = f"{idx}. {title}\n- {reason}"
+            line = f"{idx}. {title}"
             lines.append(line)
-        body = "\n\n".join(lines)
+        body = "\n".join(lines)
 
         limited_note_en = "\nNote: limited high-quality matches were found." if len(documents) < 3 else ""
         limited_note_vi = "\nLưu ý: hệ thống chỉ tìm được số ít tài liệu thật sự sát nội dung." if len(documents) < 3 else ""
@@ -716,6 +758,11 @@ class _RecommendMixin:
 
     def _resolve_book_from_history(self, question: str, history: Optional[List[Dict[str, str]]] = None) -> Optional[Dict[str, Any]]:
         import re
+        doc_title = _extract_document_title_hint(question)
+        if doc_title:
+            book = self._search_book_by_title(doc_title)
+            if book:
+                return book
         q_clean = _ascii_fold(_strip_moodle_context(question))
         question_with_context = question
         
@@ -810,7 +857,12 @@ class _RecommendMixin:
                                 return book
 
         # Fallback: extract title directly from question
-        summary_keywords = ["tom tat sach", "tom tat cuon", "tom tat quyen", "tom tat", "summarize book", "summarize"]
+        summary_keywords = [
+            "tom tat sach", "tom tat cuon", "tom tat quyen", "tom tat", 
+            "summarize book", "summarize",
+            "muc luc sach", "muc luc cuon", "muc luc quyen", "muc luc", 
+            "toc of", "toc", "chapters of", "chapters", "outline of", "outline"
+        ]
         for kw in summary_keywords:
             if kw in q_clean:
                 parts = q_clean.split(kw)
@@ -833,17 +885,310 @@ class _RecommendMixin:
                 return match.group(1).strip()
         return ""
 
-    def _is_summary_request(self, question: str) -> bool:
-        q = _ascii_fold(question)
-        keywords = [
-            "tom tat", "tóm tắt", "muc luc", "mục lục", "chuong trinh", "chương trình",
-            "summarize", "summary", "toc", "chapters", "outline"
-        ]
-        return any(kw in q for kw in keywords)
+    def _parse_chapter_number(self, question: str) -> Optional[int]:
+        q = _ascii_fold(question).lower()
+        match = re.search(r"\b(chuong|chapter)\s+(\d+)\b", q)
+        if match:
+            return int(match.group(2))
+        roman_map = {"i": 1, "ii": 2, "iii": 3, "iv": 4, "v": 5, "vi": 6, "vii": 7, "viii": 8, "ix": 9, "x": 10}
+        match_roman = re.search(r"\b(chuong|chapter)\s+([ivxldm]+)\b", q)
+        if match_roman:
+            roman = match_roman.group(2)
+            if roman in roman_map:
+                return roman_map[roman]
+        return None
 
-    def _generate_toc_summary(self, book: Dict[str, Any], answer_language: str = "vi") -> Dict[str, Any]:
+    def _is_generic_section(self, sec_t: str, ch_t: str) -> bool:
+        """Return True if a section title should be skipped (generic or redundant)."""
+        generic_sections = {
+            "introduction", "chapter review", "review", "preface", "contents",
+            "table of contents", "index", "glossary", "answers", "bibliography",
+            "references", "key terms", "key concepts", "exercises", "problems",
+        }
+        sl = sec_t.lower().strip()
+        cl = ch_t.lower().strip()
+        if sl in generic_sections:
+            return True
+        if re.match(r'^(introduction|chapter review|key (terms|concepts|equations)|section (summary|exercises))$', sl):
+            return True
+        if sl and cl and (sl in cl or cl in sl):
+            return True
+        if re.match(r'^(chapter|appendix|chuong|phu luc)\s+[\dA-Za-z]+$', sl, re.IGNORECASE):
+            return True
+        return False
+
+    def _sample_chapter_pages_from_es(
+        self,
+        asset_uid: str,
+        chapter_num: int,
+        chapter_title: str,
+        max_pages: int = 5,
+    ) -> List[Dict[str, Any]]:
+        import requests
+        
+        q = {
+            "query": {
+                "bool": {
+                    "must": [
+                        {"term": {"asset_uid": asset_uid}}
+                    ],
+                    "should": [
+                        {"match": {"chapter_title": f"chapter {chapter_num} {chapter_title}"}},
+                        {"match": {"section_title": f"chapter {chapter_num} {chapter_title}"}},
+                    ],
+                    "minimum_should_match": 1,
+                    "must_not": [
+                        {"match": {"section_title": "answers answer key review exercises problems index appendix glossary student resources"}},
+                        {"match": {"chapter_title": "answers answer key review exercises index appendix glossary"}},
+                    ]
+                }
+            },
+            "sort": [
+                {"page_no": {"order": "asc"}}
+            ],
+            "size": max_pages,
+            "_source": ["page_no", "text", "section_title", "chapter_title"]
+        }
+        
+        auth = None
+        if getattr(self, "tier1_es_username", None) and getattr(self, "tier1_es_password", None):
+            auth = (self.tier1_es_username, self.tier1_es_password)
+            
+        tier2_index = getattr(self, "tier2_es_index", "oer_pages_tier2")
+        es_host = getattr(self, "tier1_es_host", "http://elasticsearch:9200")
+        es_timeout = float(getattr(self, "tier1_es_timeout", 180.0))
+        timeout_val = (1.0, es_timeout)
+        
+        try:
+            resp = requests.post(
+                f"{es_host}/{tier2_index}/_search",
+                json=q,
+                timeout=timeout_val,
+                auth=auth,
+            )
+            resp.raise_for_status()
+            hits = resp.json().get("hits", {}).get("hits", [])
+            pages = []
+            for h in hits:
+                src = h.get("_source") or {}
+                pages.append({
+                    "page_no": src.get("page_no"),
+                    "text": src.get("text"),
+                    "section_title": src.get("section_title"),
+                    "chapter_title": src.get("chapter_title"),
+                })
+            return pages
+        except Exception as exc:
+            logger.warning("Error sampling chapter pages from ES via requests: %s", exc)
+            return []
+
+    def _generate_chapter_summary(
+        self,
+        book: Dict[str, Any],
+        chapter_num: int,
+        answer_language: str = "vi",
+        question: Optional[str] = None,
+    ) -> Dict[str, Any]:
         asset_uid = book.get("asset_uid")
         book_title = book.get("title")
+        
+        structure = self.get_document_structure(asset_uid)
+        sections = structure.get("sections") or []
+        
+        chapter_title = ""
+        chapter_sections = []
+        
+        roman_numerals = ["", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x"]
+        roman_str = roman_numerals[chapter_num] if chapter_num < len(roman_numerals) else ""
+        
+        # Pass 1: Try to match explicit labels containing "chapter <num>" or "chuong <num>"
+        for sec in sections:
+            ch_t = (sec.get("chapter_title") or "").strip()
+            ch_t_lower = _ascii_fold(ch_t).lower()
+            
+            # Skip preface/about/etc.
+            if any(term in ch_t_lower for term in ["about openstax", "preface", "introduction", "about the authors"]):
+                continue
+                
+            is_match = False
+            patterns = [
+                rf"\bchapter\s+{chapter_num}\b",
+                rf"\bchuong\s+{chapter_num}\b",
+            ]
+            if roman_str:
+                patterns.append(rf"\bchapter\s+{roman_str}\b")
+                patterns.append(rf"\bchuong\s+{roman_str}\b")
+                
+            for pat in patterns:
+                if re.search(pat, ch_t_lower):
+                    is_match = True
+                    break
+                    
+            if is_match:
+                if not chapter_title:
+                    chapter_title = ch_t
+                sec_t = (sec.get("section_title") or "").strip()
+                if sec_t and sec_t != ch_t and sec_t not in chapter_sections:
+                    if not self._is_generic_section(sec_t, ch_t):
+                        chapter_sections.append(sec_t)
+                        
+        # Pass 2: Fallback to matching standalone number (e.g. "2 Limits")
+        if not chapter_title:
+            for sec in sections:
+                ch_t = (sec.get("chapter_title") or "").strip()
+                ch_t_lower = _ascii_fold(ch_t).lower()
+                
+                # Skip preface/about/etc.
+                if any(term in ch_t_lower for term in ["about openstax", "preface", "introduction", "about the authors"]):
+                    continue
+                    
+                is_match = False
+                patterns = [
+                    rf"\b{chapter_num}\b",
+                ]
+                for pat in patterns:
+                    if re.search(pat, ch_t_lower):
+                        is_match = True
+                        break
+                        
+                if is_match:
+                    if not chapter_title:
+                        chapter_title = ch_t
+                    sec_t = (sec.get("section_title") or "").strip()
+                    if sec_t and sec_t != ch_t and sec_t not in chapter_sections:
+                        if not self._is_generic_section(sec_t, ch_t):
+                            chapter_sections.append(sec_t)
+                        
+        if not chapter_title:
+            chapter_title = f"Chương {chapter_num}"
+            
+        outline_str = ""
+        if chapter_sections:
+            outline_str = "\n".join([f"  * {s}" for s in chapter_sections[:6]])
+            
+        sampled_pages = self._sample_chapter_pages_from_es(str(asset_uid or ""), chapter_num, chapter_title, max_pages=5)
+        
+        page_contents = []
+        for p in sampled_pages:
+            pno = p.get("page_no")
+            text = _normalize_pdf_text(str(p.get("text") or ""))
+            if len(text) > 600:
+                text = text[:600] + "..."
+            page_contents.append(f"[Trang {pno}]: {text}")
+            
+        content_highlights = "\n\n".join(page_contents)
+        
+        prompt = (
+            "Bạn là một trợ lý học tập OER thông thái. Hãy viết một bài tóm tắt chương sách chất lượng cao và có cấu trúc rõ ràng.\n\n"
+            "[HỆ THỐNG: BẮT BUỘC TRẢ LỜI 100% BẰNG TIẾNG VIỆT TỰ NHIÊN. TUYỆT ĐỐI KHÔNG DÙNG TIẾNG TRUNG/CHINESE, KHÔNG DÙNG CHỮ HÁN.]\n\n"
+            f"Tên sách: {book_title}\n"
+            f"Tên chương: {chapter_title}\n"
+            f"Cấu trúc các mục con (Outline):\n{outline_str}\n\n"
+            f"Nội dung chi tiết trích xuất từ các trang sách:\n{content_highlights}\n\n"
+            "Yêu cầu:\n"
+            "1. Tóm tắt một cách bao quát, khoa học và dễ hiểu nội dung chính của chương này (không liệt kê danh sách thô sơ).\n"
+            "2. Giải thích rõ các khái niệm cốt lõi, công thức quan trọng hoặc định lý được đề cập trong cấu trúc/nội dung chương.\n"
+            "3. Bắt buộc trả lời hoàn toàn bằng tiếng Việt tự nhiên. Chỉ giữ lại thuật ngữ chuyên ngành tiếng Anh nếu cần thiết.\n"
+            "4. Định dạng câu trả lời dưới dạng các phần rõ ràng: 1) Tóm tắt khái quát, 2) Các khái niệm/nội dung cốt lõi (dưới dạng bullet points).\n"
+            "Hãy trả lời trực tiếp phần tóm tắt bằng tiếng Việt, không thêm lời chào mở đầu hay kết bài."
+        )
+        
+        try:
+            summary = self._call_local_llm(prompt, request_timeout=180)
+        except Exception as exc:
+            logger.warning("Local LLM call for chapter summary failed: %s", exc)
+            summary = f"Dưới đây là cấu trúc chương {chapter_num} ({chapter_title}):\n\n" + (outline_str if outline_str else "Không lấy được cấu trúc chi tiết.")
+            
+        summary_lines = []
+        for line in str(summary or "").splitlines():
+            line = re.sub(r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", line)
+            line = re.sub(r"\s+", " ", line).strip()
+            if line and not any(c.isalnum() for c in line):
+                continue
+            if line:
+                summary_lines.append(line)
+        cleaned_summary = "\n".join(summary_lines).strip()
+        
+        contexts = []
+        for p in sampled_pages[:3]:
+            contexts.append({
+                "text": p.get("text")[:200] + "...",
+                "page_no": p.get("page_no"),
+                "title": book_title,
+                "section_title": p.get("section_title"),
+                "chapter_title": p.get("chapter_title"),
+                "source_url": book.get("source_url"),
+                "minio_url": None,
+                "asset_uid": asset_uid,
+                "chunk_id": f"{asset_uid}::chapter_summary_{p.get('page_no')}",
+                "retrieval_score": 1.0,
+            })
+            
+        return {
+            "question": question,
+            "answer": cleaned_summary,
+            "contexts": contexts,
+            "sources": [],
+            "confidence": "high",
+            "search_mode": "pageindex",
+            "pageindex_trace": [
+                {
+                    "tool": "chapter_summarizer",
+                    "book": book_title,
+                    "chapter": chapter_title,
+                    "sections_found": len(chapter_sections),
+                }
+            ],
+            "query_bundle": None,
+            "metrics": self._build_ask_metrics(
+                document_result={},
+                selected_document=book,
+                pages_loaded_total=len(sampled_pages),
+                pages_hit_total=len(sampled_pages),
+                contexts=contexts,
+                answer=cleaned_summary,
+                found_relevant_evidence=True,
+            )
+        }
+
+    def _is_summary_request(self, question: str) -> bool:
+        q = _ascii_fold(question).lower().strip()
+        keywords = [
+            "tom tat", "muc luc", "chuong trinh",
+            "summarize", "summary", "toc", "outline"
+        ]
+        if not any(kw in q for kw in keywords):
+            return False
+
+        # If it asks about a specific chapter, section, page, or academic sub-topic, it is a content query, not a book-level summary
+        content_markers = [
+            "chuong ", "chapter ", "section ", "tiet ", "phan ", "trang ", "page ",
+            "dinh ly", "theorem", "cong thuc", "formula", "bai tap", "exercise",
+            "tóm tắt chương", "tom tat chuong", "summarize chapter"
+        ]
+        if any(marker in q for marker in content_markers):
+            return False
+
+        # Match specific chapter/section patterns like "chapter 1", "chương i", "trang 45"
+        if re.search(r"\b(chuong|chapter|section|tiet|phan|page|trang)\s+(\d+|[ivxldm]+)\b", q):
+            return False
+
+        return True
+
+    def _generate_toc_summary(self, book: Dict[str, Any], answer_language: str = "vi", question: Optional[str] = None) -> Dict[str, Any]:
+        asset_uid = book.get("asset_uid")
+        book_title = book.get("title")
+        
+        # Determine if this is specifically a Table of Contents request (vs. a summary request)
+        is_toc_only = False
+        if question:
+            q_lower = _ascii_fold(question)
+            toc_keywords = ["muc luc", "toc", "outline", "danh sach chuong", "cac chuong", "cau truc", "chapters"]
+            summary_keywords = ["tom tat", "tong quan", "summary", "summarize", "noi dung", "noi ve"]
+            has_toc = any(kw in q_lower for kw in toc_keywords)
+            has_summary = any(kw in q_lower for kw in summary_keywords)
+            if has_toc and not has_summary:
+                is_toc_only = True
         description = book.get("description") or ""
         clean_description_raw = re.sub(r"\{\{%.*?%\}\}", " ", str(description or ""), flags=re.DOTALL)
         clean_description_raw = re.sub(r"\[[^\]]{1,180}\]\([^)]*\)", " ", clean_description_raw)
@@ -865,30 +1210,6 @@ class _RecommendMixin:
         sampled_page_count = 0
         
         toc_lines = []
-        # Generic/boilerplate section labels to always skip
-        _GENERIC_SECTIONS = {
-            "introduction", "chapter review", "review", "preface", "contents",
-            "table of contents", "index", "glossary", "answers", "bibliography",
-            "references", "key terms", "key concepts", "exercises", "problems",
-        }
-
-        def _is_generic_section(sec_t: str, ch_t: str) -> bool:
-            """Return True if a section title should be skipped (generic or redundant)."""
-            sl = sec_t.lower().strip()
-            cl = ch_t.lower().strip()
-            # Exact generic labels
-            if sl in _GENERIC_SECTIONS:
-                return True
-            # Starts with generic word
-            if re.match(r'^(introduction|chapter review|key (terms|concepts|equations)|section (summary|exercises))$', sl):
-                return True
-            # sec_title is a substring of ch_title (e.g. "Chapter 1" inside "Chapter 1 Integration")
-            if sl and cl and (sl in cl or cl in sl):
-                return True
-            # Bare chapter/appendix labels like "Chapter 1", "Appendix A"
-            if re.match(r'^(chapter|appendix|chuong|phu luc)\s+[\dA-Za-z]+$', sl, re.IGNORECASE):
-                return True
-            return False
 
         if sections:
             # Deduplicate chapter keys and filter sub-sections
@@ -900,7 +1221,7 @@ class _RecommendMixin:
                     continue
                 if ch_title not in raw_chapters:
                     raw_chapters[ch_title] = []
-                if sec_title and sec_title != ch_title and not _is_generic_section(sec_title, ch_title) and sec_title not in raw_chapters[ch_title]:
+                if sec_title and sec_title != ch_title and not self._is_generic_section(sec_title, ch_title) and sec_title not in raw_chapters[ch_title]:
                     raw_chapters[ch_title].append(sec_title)
 
             sorted_ch_keys = sorted(raw_chapters.keys(), key=len, reverse=True)
@@ -921,7 +1242,7 @@ class _RecommendMixin:
                 if ch_title in filtered_ch_keys:
                     if ch_title not in chapters:
                         chapters[ch_title] = []
-                    if sec_title and sec_title != ch_title and not _is_generic_section(sec_title, ch_title) and sec_title not in chapters[ch_title]:
+                    if sec_title and sec_title != ch_title and not self._is_generic_section(sec_title, ch_title) and sec_title not in chapters[ch_title]:
                         chapters[ch_title].append(sec_title)
             for ch, secs in chapters.items():
                 toc_lines.append(f"- **{ch}**")
@@ -952,11 +1273,21 @@ class _RecommendMixin:
             
         if summary_mode == "toc":
             evidence_label = "Mục lục"
-            scope_note = (
-                "Hãy liệt kê đầy đủ danh sách các chương chính và dịch toàn bộ tiêu đề chương sang tiếng Việt "
-                "BẮT BUỘC dịch 100% tiêu đề các chương (dạng: Chương 1, Chương 2,...) và tiêu đề các mục con sang tiếng Việt tự nhiên. "
-                "Không giữ nguyên tiếng Anh cho tiêu đề. Trình bày dưới dạng danh sách phân cấp thụt lề rõ ràng."
-            )
+            if is_toc_only:
+                scope_note = (
+                    "Hãy liệt kê đầy đủ danh sách các chương chính và dịch toàn bộ tiêu đề chương sang tiếng Việt "
+                    "BẮT BUỘC dịch 100% tiêu đề các chương (dạng: Chương 1, Chương 2,...) và tiêu đề các mục con sang tiếng Việt tự nhiên. "
+                    "Không giữ nguyên tiếng Anh cho tiêu đề. Trình bày dưới dạng danh sách phân cấp thụt lề rõ ràng."
+                )
+            else:
+                scope_note = (
+                    "Dựa trên mục lục/cấu trúc của cuốn sách được cung cấp dưới đây, hãy viết một bài tóm tắt tổng quan "
+                    "và chi tiết về nội dung chính của cuốn sách. "
+                    "Bao gồm: 1) Giới thiệu khái quát cuốn sách nói về chủ đề gì, đối tượng học viên hướng tới. "
+                    "2) Tóm tắt các chủ đề kiến thức lớn hoặc các phần chính được giảng dạy trong sách (tổng hợp lại các chương "
+                    "theo mạch kiến thức một cách thông minh, không chỉ đơn giản là dịch và sao chép lại danh mục tiêu đề chương thô sơ). "
+                    "Tuyệt đối không liệt kê danh sách chương mục thô sơ như một mục lục."
+                )
         elif summary_mode == "no_toc_sampled_pages":
             evidence_label = "Mô tả và các trang mẫu"
             scope_note = (
@@ -974,6 +1305,7 @@ class _RecommendMixin:
         prompt = (
             "Bạn là một trợ lý học tập OER thông thái. Hãy viết một tóm tắt ngắn gọn và có cấu trúc "
             "về nội dung chính chương trình học của cuốn sách dưới đây dựa trên bằng chứng được cung cấp.\n\n"
+            "[HỆ THỐNG: BẮT BUỘC TRẢ LỜI 100% BẰNG TIẾNG VIỆT TỰ NHIÊN. TUYỆT ĐỐI KHÔNG DÙNG TIẾNG TRUNG/CHINESE, KHÔNG DÙNG CHỮ HÁN.]\n\n"
             f"Tên sách: {book_title}\n"
             f"Mô tả sơ lược: {clean_description}\n"
             f"Chế độ tóm tắt: {summary_mode}\n"
@@ -985,14 +1317,17 @@ class _RecommendMixin:
             "4. Chỉ dùng thông tin có trong mô tả/bằng chứng; không bịa thêm chương, tác giả, ví dụ hoặc công thức không có trong bằng chứng.\n"
             "5. Tuyệt đối không đưa URL, đường dẫn /courses/..., mã học phần nội bộ, markdown link lỗi, hoặc câu so sánh kiểu 'So với [tài liệu]...'.\n"
             "6. Với Đại số tuyến tính, dịch 'diagonalization' là 'chéo hóa' và 'singular value decomposition' là 'phân rã giá trị kỳ dị'.\n"
-            "Hãy trả lời trực tiếp phần tóm tắt, không thêm lời chào mở đầu hay kết bài."
+            "Hãy trả lời trực tiếp phần tóm tắt bằng tiếng Việt, không thêm lời chào mở đầu hay kết bài."
         )
         try:
             summary = self._call_local_llm(prompt, request_timeout=180)
         except Exception as exc:
             logger.warning("Local LLM call for summary failed, fallback to raw list. detail=%s", exc)
             if summary_mode == "toc":
-                summary = "Dưới đây là cấu trúc các chương chính:\n\n" + toc_str
+                if is_toc_only:
+                    summary = "Dưới đây là cấu trúc các chương chính:\n\n" + toc_str
+                else:
+                    summary = "Dưới đây là tóm tắt nội dung dựa trên cấu trúc tài liệu:\n\n" + clean_description
             elif sampled_pages:
                 summary = "Tài liệu không có TOC khả dụng. Dưới đây là các điểm chính suy ra từ mô tả và trang mẫu:\n\n" + toc_str
             else:
@@ -1011,13 +1346,16 @@ class _RecommendMixin:
             line = line.replace("。", ".")
             line = line.replace("chẩn đoán hóa", "chéo hóa").replace("Chẩn đoán hóa", "Chéo hóa")
             line = re.sub(r"[\u3000-\u303f\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]", "", line)
-            line = re.sub(r"\s+", " ", line).rstrip()
-            if line.strip():
+            line = re.sub(r"\s+", " ", line).strip()
+            # Skip lines that contain only punctuation (like "., ; ; ; ; ; ,, .")
+            if line and not any(c.isalnum() for c in line):
+                continue
+            if line:
                 summary_lines.append(line)
         summary = "\n".join(summary_lines).strip() or str(summary or "").strip()
 
         # Post-process TOC mode: ensure chapter-level lines (starting with "- ") are bold
-        if summary_mode == "toc":
+        if summary_mode == "toc" and is_toc_only:
             bolded_lines = []
             for line in summary.splitlines():
                 stripped = line.lstrip()
@@ -1065,7 +1403,7 @@ class _RecommendMixin:
             "question": f"Tóm tắt sách {book_title}",
             "answer": answer,
             "contexts": contexts,
-            "sources": self._build_sources(contexts),
+            "sources": [],
             "confidence": "high",
             "search_mode": "pageindex",
             "pageindex_trace": [
@@ -1101,6 +1439,24 @@ class _RecommendMixin:
         answer_language = _resolve_answer_language(language, question)
         moodle_context = _parse_moodle_context(question)
         preferred_subject_name = str(moodle_context.get("course_name") or "").strip()
+        if not preferred_subject_name and self._local_llm_enabled():
+            prompt = (
+                "You are an academic course extractor.\n"
+                "Extract the main academic subject or course name mentioned in the user's query.\n"
+                "Output ONLY the extracted subject name in Vietnamese (1-3 words, e.g. 'Giải tích', 'Sinh học', 'Vật lý', 'Cơ sở dữ liệu').\n"
+                "If the query is a general question or does not mention a specific course, output 'general'.\n\n"
+                f"Query: {question}\n"
+                "Subject:"
+            )
+            try:
+                extracted = self._call_local_llm(prompt, request_timeout=6).strip()
+                extracted = re.sub(r'["\'.]', "", extracted).strip()
+                if extracted and extracted.lower() not in {"general", "none", "unknown", "không", "gợi ý", "tài liệu"}:
+                    preferred_subject_name = extracted
+                    logger.info("Extracted subject name using LLM: '%s' from query '%s'", preferred_subject_name, question)
+            except Exception as e:
+                logger.warning("LLM subject extraction failed: %s", e)
+
         profile = self._build_recommendation_profile(question, preferred_subject_name, bundle)
         retrieval_query = self._build_recommendation_query(question, preferred_subject_name, profile)
 

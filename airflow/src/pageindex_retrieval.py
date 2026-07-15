@@ -95,6 +95,7 @@ from pageindex_helpers import (
     _build_course_scope_profile,
     _evaluate_course_scope_text,
     _extract_requested_concept,
+    _extract_find_material_target,
     _has_example_cue,
     _has_definition_cue,
     _has_targeted_definition_cue,
@@ -138,6 +139,8 @@ class _RetrievalMixin:
         section_name = _extract_section_name_hint(question)
         document_title = _extract_document_title_hint(question)
         concept_target = _extract_requested_concept(question_core)
+        if not concept_target and intent == "find_material":
+            concept_target = _extract_find_material_target(question_core)
         has_unresolved_placeholder = _contains_unresolved_placeholder(question_core)
         keywords_base = _tokenize(question_core)
         query_en_semantic = question_core
@@ -157,52 +160,76 @@ class _RetrievalMixin:
                 query_vi_semantic = " ".join(keywords_vi)
 
         if query_mode in {"vi", "mixed"} and self._local_llm_enabled():
+            course_ctx_str = f"Course: {course_name}" if course_name else "Course: General Academic"
             prompt = (
-                "Ban la bo phan rewrite query cho he thong PageIndex.\n"
-                "Tai lieu goc chu yeu bang tieng Anh, nguoi dung co the hoi bang tieng Viet/Anh/mixed.\n"
-                "Hay chuan hoa query song ngu de truy hoi metadata va section/page.\n"
-                "Tra ve JSON theo schema:\n"
-                "{"
-                "\"query_en_semantic\": string, "
-                "\"query_vi_semantic\": string, "
-                "\"keywords_en\": [string], "
-                "\"keywords_vi\": [string]"
-                "}\n"
-                f"Cau hoi: {question_core}\n"
-                "Directly return the final JSON structure. Do not output anything else."
+                "You are a translation assistant for an academic search engine.\n"
+                f"{course_ctx_str}\n"
+                f"Vietnamese Query: {question_core}\n\n"
+                "Task:\n"
+                "1. Translate the search query into a clean, natural English academic search phrase. "
+                "Provide 2-3 search variations/synonyms separated by 'OR' (e.g. 'find derivative example OR differentiate function example OR calculate derivative example') to maximize term recall across different textbooks.\n"
+                "2. Extract the key English search terms (keywords) split by commas.\n\n"
+                "Output format:\n"
+                "Translation: <english search variations separated by OR>\n"
+                "Keywords: <comma-separated key terms>\n"
             )
-            fallback = {
-                "query_en_semantic": query_en_semantic,
-                "query_vi_semantic": query_vi_semantic,
-                "keywords_en": keywords_en,
-                "keywords_vi": keywords_vi,
-            }
             try:
-                data = self._call_local_llm_json(
+                response_text = self._call_local_llm(
                     prompt,
-                    fallback,
                     request_timeout=llm_timeout if llm_timeout is not None else self.llm_json_timeout,
                 )
+                if response_text and len(response_text) > 3:
+                    # Parse the structured output
+                    translation_val = ""
+                    keywords_val = ""
+                    for line in response_text.splitlines():
+                        line_strip = line.strip()
+                        if line_strip.lower().startswith("translation:"):
+                            translation_val = line_strip[len("translation:"):].strip().replace('"', "").replace("'", "")
+                        elif line_strip.lower().startswith("keywords:"):
+                            keywords_val = line_strip[len("keywords:"):].strip().replace('"', "").replace("'", "")
+
+                    # Fallback if model did not follow format exactly
+                    if not translation_val and not keywords_val:
+                        translation_val = response_text.replace('"', "").replace("'", "")
+                        translation_val = translation_val.split(":")[-1].strip() if ":" in translation_val else translation_val
+                        keywords_val = translation_val
+
+                    if translation_val:
+                        query_en_semantic = translation_val
+
+                    raw_keywords = [k.strip() for k in keywords_val.split(",") if k.strip()]
+                    if not raw_keywords and translation_val:
+                        raw_keywords = [translation_val]
+
+                    kw_en = list(keywords_en)
+                    for k in raw_keywords:
+                        kw_en.extend(_tokenize(k))
+                    if kw_en:
+                        keywords_en = _dedupe_keep_order(kw_en)
             except Exception as exc:
-                logger.warning("Local LLM query rewrite timed out or failed, using fallback. detail=%s", exc)
-                data = fallback
-            query_en_semantic = str(data.get("query_en_semantic") or question_core).strip()
-            query_vi_semantic = str(data.get("query_vi_semantic") or question_core).strip()
-            kw_en = [str(x).strip() for x in data.get("keywords_en") or [] if str(x).strip()]
-            kw_vi = [str(x).strip() for x in data.get("keywords_vi") or [] if str(x).strip()]
-            
-            # Merge heuristic fallbacks to guarantee key term preservation
-            for term in fallback["keywords_en"]:
-                if term not in kw_en:
-                    kw_en.append(term)
-            for term in fallback["keywords_vi"]:
-                if term not in kw_vi:
-                    kw_vi.append(term)
-                    
-            if kw_en:
-                keywords_en = _tokenize(" ".join(kw_en))
-            if kw_vi:
-                keywords_vi = _tokenize(" ".join(kw_vi))
+                logger.warning("Local LLM plain text query rewrite timed out or failed, using fallback. detail=%s", exc)
+
+        # Concept-focused query rewrite (flag PAGEINDEX_CONCEPT_APPEND, default off). When a
+        # VI query DESCRIBES a named technique without stating it (e.g. a description of
+        # "repeatedly halving a sorted range" -> "binary search"), lead the search with that canonical term and
+        # DROP the noisy OR-expansion variants that can pull BM25 off-target (measured: the
+        # target page rose from rank ~13 to ~2). Two valves keep this near zero-impact on
+        # normal queries: the extractor returns "" when no single concept applies, and
+        # _concept_term_in_corpus rejects a term absent from the course's books -> both cases
+        # leave the OR-expansion untouched, so a wrong/hallucinated extraction cannot hijack
+        # the query. The primary translation variant is kept as an anchor so a sparse term
+        # (e.g. "SELECT") does not lose context.
+        if (
+            query_mode in {"vi", "mixed"}
+            and self._local_llm_enabled()
+            and os.getenv("PAGEINDEX_CONCEPT_APPEND", "0").strip().lower() in {"1", "true", "yes", "on"}
+        ):
+            concept_term = self._extract_concept_term(question_core, course_name, llm_timeout=llm_timeout)
+            if concept_term and self._concept_term_in_corpus(concept_term, course_name):
+                primary_variant = str(query_en_semantic or "").split(" OR ")[0].strip()
+                query_en_semantic = f"{concept_term} {primary_variant}".strip()
+                keywords_en = _dedupe_keep_order(_tokenize(concept_term) + keywords_en)
 
         if not keywords_en:
             keywords_en = _derive_en_keywords_from_vi(question_core, keywords_vi)
@@ -250,7 +277,7 @@ class _RetrievalMixin:
             concept_seed_terms = [
                 term
                 for term in _expand_definition_target_tokens(concept_target)
-                if len(str(term or "").strip()) >= 3
+                if len(str(term or "").strip()) >= 2
             ][:12]
             if concept_seed_terms:
                 keywords_en = _dedupe_keep_order(keywords_en + concept_seed_terms)
@@ -267,6 +294,10 @@ class _RetrievalMixin:
         keywords_en = _dedupe_keep_order(keywords_en)
         keywords_vi = _dedupe_keep_order(keywords_vi)
 
+        concept_target_en = ""
+        if concept_target and query_mode in {"vi", "mixed"}:
+            concept_target_en = self._translate_concept_to_en(concept_target, course_name=course_name)
+
         return QueryBundle(
             query_vi_original=question,
             query_en_semantic=query_en_semantic,
@@ -280,6 +311,7 @@ class _RetrievalMixin:
             section_name=section_name,
             document_title=document_title,
             concept_target=concept_target,
+            concept_target_en=concept_target_en,
             has_unresolved_placeholder=has_unresolved_placeholder,
         )
 
@@ -724,7 +756,8 @@ class _RetrievalMixin:
         )
         course_profile = _build_course_scope_profile(bundle.course_name)
         course_scope_eval = _evaluate_course_scope_text(f"{title} {section_scope_text}", course_profile)
-        concept_terms = _expand_definition_target_tokens(bundle.concept_target) if bundle.concept_target else []
+        concept_src = bundle.concept_target_en if bundle.concept_target_en else bundle.concept_target
+        concept_terms = _expand_definition_target_tokens(concept_src) if concept_src else []
         definition_query = _is_definition_query(bundle.query_vi_original)
         concept_overlap_score = _overlap_score(f"{title} {section_scope_text}", concept_terms) if concept_terms else 0.0
         semantic_terms = _dedupe_keep_order(_tokenize(bundle.query_en_semantic) + _tokenize(bundle.query_vi_semantic))
@@ -888,6 +921,7 @@ class _RetrievalMixin:
                     "course_name": bundle.course_name,
                     "section_name": bundle.section_name,
                     "concept_target": bundle.concept_target,
+                    "concept_target_en": bundle.concept_target_en,
                     "has_unresolved_placeholder": bundle.has_unresolved_placeholder,
                 },
                 "subject_hints": subject_hints,
@@ -967,6 +1001,7 @@ class _RetrievalMixin:
                 "course_name": bundle.course_name,
                 "section_name": bundle.section_name,
                 "concept_target": bundle.concept_target,
+                "concept_target_en": bundle.concept_target_en,
                 "has_unresolved_placeholder": bundle.has_unresolved_placeholder,
             },
             "subject_hints": subject_hints,
@@ -1440,21 +1475,9 @@ class _RetrievalMixin:
         return self.tier2_crossbook and self._tier2_es_active()
 
     def _crossbook_relevance_ok(self, question: str, contexts: List[Dict[str, Any]], llm_timeout: Optional[int] = None, course_name: Optional[str] = None) -> bool:
-        """One semantic LLM check. Without course_name: is the question academic
-        (vs lifestyle)? With course_name: is the question within that course's
-        subject? Returns True if relevant (or if no LLM — don't block)."""
         if not self.tier2_crossbook_scope_check or not self._local_llm_enabled():
             return True
         if course_name:
-            # Retrieval-confidence override: the retrieved pages are already filtered
-            # to THIS course's own books (asset_uid filter in _answer_from_crossbook_es),
-            # so a strongly-matching page means the question IS answerable from the
-            # course material. Trust the BM25 score and skip the fuzzy LLM gate to avoid
-            # FALSE refusals on abstract / paraphrased (esp. Vietnamese) questions where
-            # the 7B judge is uncertain. Only marginal-score questions still hit the gate.
-            # Tunable: lower PAGEINDEX_TIER2_SCOPE_OVERRIDE_SCORE to answer more, raise it
-            # to be stricter. Does NOT increase hallucination: a high score means the
-            # page really contains the query terms.
             override_score = float(os.getenv("PAGEINDEX_TIER2_SCOPE_OVERRIDE_SCORE", "40.0"))
             top_score = max(
                 (float(c.get("retrieval_score") or 0.0) for c in (contexts or [])),
@@ -1507,6 +1530,189 @@ class _RetrievalMixin:
         data = self._call_local_llm_json(prompt, {"relevant": True}, request_timeout=llm_timeout)
         return bool(data.get("relevant", True))
 
+    def _translate_concept_to_en(self, concept: str, course_name: Optional[str] = None) -> str:
+        if not concept:
+            return ""
+        folded = _ascii_fold(concept.lower().strip())
+        local_map = {
+            "dao ham": "derivative",
+            "nguyen ham": "antiderivative",
+            "tich phan": "integral",
+            "gioi han": "limit",
+            "co so du lieu": "database",
+            "he quan tri co so du lieu": "dbms",
+            "ngon ngu truy van": "sql",
+            "chuan hoa": "normalization",
+            "giao dich": "transaction",
+            "chuoi": "series",
+            "tiem can": "asymptote"
+        }
+        if folded in local_map:
+            return local_map[folded]
+
+        course_ctx = f"Course/Subject: {course_name}\n" if course_name else ""
+        prompt = (
+            "You are a translation assistant for a database/academic search engine.\n"
+            f"{course_ctx}"
+            "Translate this Vietnamese academic concept or phrase to standard English. Output ONLY the English translation, no other text:\n"
+            f"Concept: {concept}\n"
+            "Translation:"
+        )
+        try:
+            res = self._call_local_llm(prompt, request_timeout=8)
+            if res:
+                return res.strip().replace('"', "").replace("'", "")
+        except Exception:
+            pass
+        return ""
+
+    def _extract_concept_term(
+        self,
+        question_core: str,
+        course_name: Optional[str] = None,
+        llm_timeout: Optional[int] = None,
+    ) -> str:
+        """Canonical English term a query DESCRIBES but does not name (e.g. 'binary search').
+
+        Backs the concept-append augment (flag PAGEINDEX_CONCEPT_APPEND). Returns "" when
+        the model finds no single standard named concept, so callers can safely skip the
+        append and leave the query untouched — this "NONE" escape hatch is what keeps the
+        feature near zero-impact on queries that already retrieve well.
+        """
+        if not question_core:
+            return ""
+        course_ctx = f"Course: {course_name}\n" if course_name else ""
+        prompt = (
+            "You help an academic search engine.\n"
+            f"{course_ctx}"
+            f'Student question (Vietnamese): "{question_core}"\n\n'
+            "If this question is asking about ONE specific technique or concept that has a "
+            "standard, well-known English technical name, output ONLY that canonical term "
+            "(e.g. 'binary search', 'gradient descent'). If there is no single standard "
+            "named concept, output exactly: NONE\n"
+            "Answer with just the term or NONE, nothing else."
+        )
+        try:
+            res = self._call_local_llm(
+                prompt,
+                request_timeout=llm_timeout if llm_timeout is not None else self.llm_json_timeout,
+            )
+        except Exception as exc:
+            logger.warning("Concept-term extraction failed, skipping append. detail=%s", exc)
+            return ""
+        term = (res or "").strip().strip('"').strip("'").rstrip(".").strip()
+        if not term or term.upper().startswith("NONE") or len(term) > 50 or "\n" in term:
+            return ""
+        return term
+
+    def _concept_term_in_corpus(self, concept_term: str, course_name: Optional[str] = None) -> bool:
+        """Fallback valve for the concept-focused rewrite: True only if the extracted term
+        actually occurs (as a phrase) in the course's books. A hallucinated or wrong term
+        returns 0 hits -> we distrust it and leave the OR-expansion untouched. Any error
+        (ES down, unresolved course) also returns False, so query building never breaks and
+        degrades to the safe existing behaviour.
+        """
+        term = (concept_term or "").strip()
+        if not term:
+            return False
+        filters: List[Dict[str, Any]] = []
+        if course_name:
+            books = self._resolve_course_books(course_name)
+            uids = [str(u) for u in ((books or {}).get("asset_uids") or [])]
+            if uids:
+                filters.append({"terms": {"asset_uid": uids}})
+        body = {
+            "size": 0,
+            "query": {"bool": {"must": [{"match_phrase": {"text": term}}], "filter": filters}},
+        }
+        auth = None
+        if self.tier1_es_username and self.tier1_es_password:
+            auth = (self.tier1_es_username, self.tier1_es_password)
+        try:
+            resp = requests.post(
+                f"{self.tier1_es_host}/{self.tier2_es_index}/_search",
+                json=body,
+                timeout=(1, min(float(self.tier1_timeout), float(self.tier1_es_timeout))),
+                auth=auth,
+            )
+            resp.raise_for_status()
+            total = ((resp.json().get("hits") or {}).get("total") or {}).get("value", 0)
+            return int(total) > 0
+        except Exception as exc:
+            logger.warning("Concept-term corpus check failed, keeping OR-expansion. detail=%s", exc)
+            return False
+
+    def _translate_section_name(self, section_name: str) -> str:
+        if not section_name:
+            return ""
+
+        # Initialize translation cache if not exists
+        if not hasattr(self, "_section_translation_cache"):
+            self._section_translation_cache = {}
+
+        cached = self._section_translation_cache.get(section_name)
+        if cached:
+            return cached
+
+        # Predefined dictionary lookup for common Vietnamese math topics to ensure zero latency and high accuracy
+        dict_lookup = {
+            "gioi han": "limit limits continuity",
+            "dao ham": "derivative derivative differentiation derivatives tangent",
+            "dao ham rieng": "partial derivative partial derivatives",
+            "dao ham theo huong": "directional derivative directional derivatives gradient",
+            "cuc tri": "extrema maximum minimum optimization local extrema Lagrange multipliers",
+            "tich phan": "integral integration integrals antiderivative",
+            "tich phan xac dinh": "definite integral definite integrals integration",
+            "tich phan bat dinh": "indefinite integral indefinite integrals antiderivatives",
+            "tich phan boi": "multiple integral double integral triple integral integrals",
+            "tich phan kep": "double integral double integrals integration",
+            "tich phan ba": "triple integral triple integrals integration",
+            "tich phan duong": "line integral line integrals stokes green stokes theorem",
+            "tich phan mat": "surface integral surface integrals divergence stokes",
+            "chuoi": "series sequence sequences infinite series power series taylor Maclaurin",
+            "phuong trinh vi phan": "differential equation differential equations",
+            "vi phan": "differential differentials linearization",
+            "ma tran": "matrix matrices linear system linear systems determinant determinant",
+            "dinh thuc": "determinant determinants matrix",
+            "khong gian vector": "vector space vector spaces subspace subspaces",
+            "anh xa tuyen tinh": "linear transformation linear transformations mapping",
+            "tri rieng": "eigenvalue eigenvalues eigenvector eigenvectors",
+            "cheo hoa": "diagonalization diagonalize matrix matrices"
+        }
+
+        folded = _ascii_fold(section_name).lower()
+        # Direct key match or substring match
+        matched_en = ""
+        for k, v in dict_lookup.items():
+            if k == folded or (len(k) > 5 and k in folded):
+                matched_en = v
+                break
+
+        if matched_en:
+            self._section_translation_cache[section_name] = matched_en
+            return matched_en
+
+        # If not found in dictionary, fallback to LLM translation
+        if not self._local_llm_enabled():
+            return ""
+
+        prompt = (
+            "You are a translation assistant for a mathematical search engine.\n"
+            f"Translate the following math topic/concept to a short English phrase. Output ONLY the English translation, no other text:\n"
+            f"Topic: {section_name}\n"
+            f"Translation:"
+        )
+        try:
+            translated = self._call_local_llm(prompt, request_timeout=3)
+            if translated:
+                translated_clean = translated.strip().replace('"', "").replace("'", "")
+                self._section_translation_cache[section_name] = translated_clean
+                return translated_clean
+        except Exception:
+            pass
+
+        return ""
+
     def _answer_from_crossbook_es(
         self,
         question: str,
@@ -1517,22 +1723,6 @@ class _RetrievalMixin:
         answer_language: str,
         remaining_time_fn,
     ) -> Optional[Dict[str, Any]]:
-        """Phuong an 2: single BM25 query over the page index across ALL books,
-        take the best pages, answer in one Groq call. Returns None to fall back
-        to the legacy per-document loop when the index yields nothing."""
-        # Lead with extracted KEYWORDS (discriminative content terms) so generic
-        # question words ("what is ...") do not dominate. Do NOT boost `title`:
-        # the book title is repeated on every page doc, so boosting it lets a
-        # stopword in the question hijack retrieval to a book whose TITLE matches
-        # (e.g. "What is X?" -> "What is Capitalism?"). Match on page content only.
-        # Since the ES index is 100% English textbooks, use English query signals only
-        # when available to avoid accent-folding collisions.
-        # Guard against the VI-leak path: query_en_semantic falls back to the raw
-        # Vietnamese question (see _build_query_bundle) when the concept is not in
-        # the static map AND the LLM rewrite fails (GPU offline / Groq throttle).
-        # Mixing Vietnamese tokens into a BM25 query over a 100%-English index
-        # accent-folds into spurious matches (Turkish/Portuguese pages). Only use
-        # query_en_semantic when it is actually ASCII (English).
         en_semantic = str(bundle.query_en_semantic or "").strip()
         if not en_semantic.isascii():
             en_semantic = ""
@@ -1567,12 +1757,13 @@ class _RetrievalMixin:
         if clean_words:
             query_text = " ".join(clean_words)
 
+        concept_src = bundle.concept_target_en if bundle.concept_target_en else bundle.concept_target
         focused_definition_query = False
-        if _is_definition_query(bundle.query_vi_original) and str(bundle.concept_target or "").strip():
+        if _is_definition_query(bundle.query_vi_original) and concept_src.strip():
             concept_terms = [
                 term
-                for term in _expand_definition_target_tokens(bundle.concept_target)
-                if len(str(term or "").strip()) >= 3
+                for term in _expand_definition_target_tokens(concept_src)
+                if len(str(term or "").strip()) >= 2
             ]
             concept_terms = _dedupe_keep_order(concept_terms)[:12]
             if concept_terms:
@@ -1587,7 +1778,7 @@ class _RetrievalMixin:
                 "type": "best_fields",
                 "fields": ["text", "section_title^2", "chapter_title^2", "title"],
                 "operator": "or",
-                "minimum_should_match": "1<40%" if focused_definition_query else "2<70%"
+                "minimum_should_match": "1<30%" if focused_definition_query else "2<30%"
             }
         }
         if course:
@@ -1599,19 +1790,28 @@ class _RetrievalMixin:
             }
         else:
             query_block = {"bool": {"must": [match_clause]}}
-
-        if focused_definition_query and bundle.concept_target:
-            concept_terms_en = [t for t in _expand_definition_target_tokens(bundle.concept_target) if t not in ["dao", "ham"]]
+        if (focused_definition_query or bundle.intent == "find_material") and concept_src:
+            query_block["bool"].setdefault("should", [])
+            # Boost exact/phrase match of the English concept target in section, chapter, and book titles
+            query_block["bool"]["should"].append({
+                "multi_match": {
+                    "query": concept_src,
+                    "fields": ["section_title^30", "chapter_title^30", "title^15", "text^5"],
+                    "type": "phrase",
+                    "boost": 2.0
+                }
+            })
+            # Also boost if any individual terms match these title fields to handle slight phrasing differences
+            concept_terms_en = [t for t in _expand_definition_target_tokens(concept_src) if t not in ["dao", "ham"]]
             if concept_terms_en:
-                primary_concept_en = concept_terms_en[0]
-                query_block["bool"].setdefault("should", [])
                 query_block["bool"]["should"].append({
                     "multi_match": {
-                        "query": primary_concept_en,
-                        "fields": ["section_title^15", "text^5"],
+                        "query": " ".join(concept_terms_en),
+                        "fields": ["section_title^15", "chapter_title^15", "title^10"],
+                        "operator": "or",
+                        "minimum_should_match": "30%"
                     }
                 })
-
         if getattr(bundle, "document_title", None):
             query_block["bool"].setdefault("should", [])
             query_block["bool"]["should"].append({
@@ -1683,7 +1883,22 @@ class _RetrievalMixin:
         docs_by_uid = {str(d.get("asset_uid") or ""): d for d in (documents or [])}
         contexts: List[Dict[str, Any]] = []
         course_profile = _build_course_scope_profile(bundle.course_name)
-        definition_target_terms = _expand_definition_target_tokens(bundle.concept_target) if focused_definition_query else []
+        definition_target_terms = _expand_definition_target_tokens(concept_src) if (focused_definition_query or bundle.intent == "find_material") else []
+
+        # Determine the earliest page number for each book that matches the target concept (introduction page)
+        min_pages_by_book = {}
+        if focused_definition_query and definition_target_terms:
+            for hit in hits:
+                src = hit.get("_source") or {}
+                uid = str(src.get("asset_uid") or "")
+                page_no = int(src.get("page_no") or 9999)
+                text_lower = _strip_surrogate_chars(str(src.get("text") or "")).lower()
+                ch_title = str(src.get("chapter_title") or "").lower()
+                sec_title = str(src.get("section_title") or "").lower()
+                scope_text = " ".join([ch_title, sec_title, text_lower])
+                if _overlap_score(scope_text, definition_target_terms) > 0.0:
+                    if uid not in min_pages_by_book or page_no < min_pages_by_book[uid]:
+                        min_pages_by_book[uid] = page_no
         for hit in hits:
             src = hit.get("_source") or {}
             text = _strip_surrogate_chars(str(src.get("text") or "")).strip()
@@ -1695,6 +1910,7 @@ class _RetrievalMixin:
             ch_title = str(src.get("chapter_title") or "").lower()
             sec_title = str(src.get("section_title") or "").lower()
             page_no = src.get("page_no")
+            es_page_no = int(page_no or 0)
 
             # Word count threshold
             words = text_lower.split()
@@ -1764,20 +1980,78 @@ class _RetrievalMixin:
             if bool(scope_eval.get("mismatch")):
                 continue
             concept_overlap = _overlap_score(scope_text, definition_target_terms) if definition_target_terms else 0.0
-            definition_bonus = 0.0
-            if focused_definition_query:
-                if concept_overlap <= 0.0:
+            
+            # Non-hardcoded general heuristic: For multi-word academic concepts (length >= 2),
+            # require at least 2 distinct matched terms of the English keywords or concept tokens
+            # to filter out generic single-word page matches.
+            concept_src_tokens = [t for t in _tokenize(concept_src) if t not in ENGLISH_STOPWORDS]
+            if focused_definition_query and len(concept_src_tokens) >= 2:
+                valid_keywords = [
+                    t for t in (bundle.keywords_en or [])
+                    if t not in ENGLISH_STOPWORDS and not t.isdigit() and len(t) >= 3
+                ]
+                if not valid_keywords:
+                    valid_keywords = concept_src_tokens
+                concept_token_hits = sum(1 for t in valid_keywords if t in set(_tokenize(scope_text)))
+                if concept_token_hits < min(2, len(concept_src_tokens)):
+                    concept_overlap = 0.0
+            ranking_bonus = 0.0
+            if focused_definition_query or bundle.intent == "find_material":
+                if focused_definition_query and concept_overlap <= 0.0:
                     continue
-                definition_bonus += concept_overlap * 4.0
+                ranking_bonus += concept_overlap * 4.0
                 if _has_targeted_definition_cue(scope_text, definition_target_terms):
-                    definition_bonus += 12.0
+                    ranking_bonus += 12.0
                 elif _has_definition_cue(scope_text):
-                    definition_bonus += 4.0
+                    ranking_bonus += 4.0
+
+                # Dynamic Relative Page Position Boost: earliest page matching the target concept gets the highest priority
+                if focused_definition_query and uid in min_pages_by_book:
+                    if es_page_no == min_pages_by_book[uid]:
+                        ranking_bonus += 15.0
+                    elif es_page_no <= min_pages_by_book[uid] + 3:
+                        ranking_bonus += 8.0
+
                 if int(src.get("page_no") or 0) <= 120:
-                    definition_bonus += 2.0
+                    ranking_bonus += 2.0
                 if "volume 1" in _ascii_fold(scope_text):
-                    definition_bonus += 8.0
-            score = float(hit.get("_score") or 0.0) + definition_bonus
+                    ranking_bonus += 8.0
+
+            # Systemic Single-Variable vs Multivariable routing rule:
+            # Detects if query is about single-variable calculus (Calculus 1 & 2: derivatives, basic integrals, limits)
+            # or multivariable calculus (Calculus 3: partial derivatives, multiple integrals, vector fields).
+            q_lower = query_text.lower()
+            vi_lower = _ascii_fold(bundle.query_vi_original)
+
+            is_calculus_query = any(t in q_lower for t in ["derivative", "limit", "tangent", "differential", "differentiation", "integral", "integration", "series", "sequence"]) or \
+                                 any(t in vi_lower for t in ["dao ham", "tich phan", "gioi han", "chuoi", "tiem can"])
+
+            if is_calculus_query:
+                multivariable_markers = [
+                    "partial", "several variables", "multivariable", "vector", "double", "triple", "multiple",
+                    "rieng", "nhieu bien", "kep", "boi", "mat", "duong", "gradient", "divergence", "curl", "stokes", "gauss", "green"
+                ]
+                has_multivariable = any(t in q_lower for t in multivariable_markers) or any(t in vi_lower for t in multivariable_markers)
+
+                book_title = _ascii_fold(src.get("title") or meta.get("title") or "")
+                is_multivariable_book = "volume 3" in book_title or "multivariable" in book_title
+
+                if not has_multivariable:
+                    # Boost single-variable calculus books
+                    if not is_multivariable_book:
+                        ranking_bonus += 12.0
+                    # Penalize multivariable calculus books
+                    else:
+                        ranking_bonus -= 12.0
+                else:
+                    # Boost multivariable calculus books
+                    if is_multivariable_book:
+                        ranking_bonus += 12.0
+                    # Penalize single-variable calculus books
+                    else:
+                        ranking_bonus -= 12.0
+
+            score = float(hit.get("_score") or 0.0) + ranking_bonus
             if is_exercise_page:
                 score -= 10.0
             es_page_no = int(src.get("page_no") or 0)
@@ -1794,9 +2068,21 @@ class _RetrievalMixin:
             })
         if not contexts:
             return None
-        if focused_definition_query:
-            contexts.sort(key=lambda item: float(item.get("retrieval_score") or 0.0), reverse=True)
-        contexts = contexts[:max(1, int(self.tier2_crossbook_pages))]
+
+        # Always sort by retrieval_score to apply definition bonuses, course boosts, and exercise penalties
+        contexts.sort(key=lambda item: float(item.get("retrieval_score") or 0.0), reverse=True)
+
+        # Apply book diversity filter: limit to at most 3 pages per book to prevent a single book from monopolizing the slots.
+        MAX_PAGES_PER_BOOK = 3
+        diverse_contexts = []
+        book_counts = {}
+        for item in contexts:
+            uid = item.get("asset_uid")
+            count = book_counts.get(uid, 0)
+            if count < MAX_PAGES_PER_BOOK:
+                diverse_contexts.append(item)
+                book_counts[uid] = count + 1
+        contexts = diverse_contexts[:max(1, int(self.tier2_crossbook_pages))]
 
         # Primary document = book owning the top-ranked page (for attribution).
         top_uid = contexts[0]["asset_uid"]
@@ -1824,6 +2110,30 @@ class _RetrievalMixin:
             trace.append({"tool": "crossbook_scope_guard", "relevant": False,
                           "course_scoped": course["name"] if course else None,
                           "reason": "Cau hoi ngoai pham vi mon hoc / hoc lieu -> tu choi."})
+            if not course:
+                oos_msg = (
+                    "This question is outside the scope of the OER academic library. I can only help with academic and educational topics."
+                    if answer_language == "en" else
+                    "Câu hỏi này nằm ngoài phạm vi thư viện học liệu mở OER. Mình chỉ hỗ trợ các câu hỏi về học thuật và giáo dục."
+                )
+                return {
+                    "question": question,
+                    "answer": oos_msg,
+                    "contexts": [],
+                    "confidence": "low",
+                    "search_mode": "pageindex",
+                    "pageindex_trace": trace,
+                    "query_bundle": document_result.get("query_bundle"),
+                    "metrics": self._build_ask_metrics(
+                        document_result=document_result,
+                        selected_document=None,
+                        pages_loaded_total=0,
+                        pages_hit_total=0,
+                        contexts=[],
+                        answer="",
+                        found_relevant_evidence=False,
+                    ),
+                }
             return {
                 "question": question,
                 "answer": _message_no_relevant(answer_language, primary_doc.get("title") or ""),

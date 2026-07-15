@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 """
 
@@ -934,10 +934,6 @@ class _PartitionChunker:
             )
         return toc
 
-    def chunk_document_record(self, row: Dict[str, Any]) -> List[Dict[str, Any]]:
-        records, _ = self.chunk_document_record_with_status(row)
-        return records
-
     def chunk_document_record_with_status(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
         asset_path = clean_scalar(row.get("asset_path")) or ""
         if not asset_path.lower().endswith(".pdf"):
@@ -988,10 +984,6 @@ class _PartitionChunker:
         if not records:
             return [], "no_chunks"
         return records, "ok"
-
-    def chunk_document_hierarchical(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        chunks, structure_record, _ = self.chunk_document_hierarchical_with_status(row)
-        return chunks, structure_record
 
     def chunk_document_hierarchical_with_status(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]], str]:
         asset_path = clean_scalar(row.get("asset_path")) or ""
@@ -1634,9 +1626,6 @@ class SilverTransformer:
             df = df.withColumn("bronze_source_path", F.input_file_name())
         return df
 
-    def _normalize_record_python(self, row: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        return _normalize_record_with_matcher(row, self.subject_matcher, self.programs_by_subject)
-
     def _base_schema(self) -> T.StructType:
         matched_struct = T.StructType(
             [
@@ -1914,9 +1903,6 @@ class SilverTransformer:
         )
         current_assets = documents_df.select("asset_uid").dropDuplicates(["asset_uid"]) if self._has_rows(documents_df) else self._empty_asset_uid_df()
         return existing_assets.join(current_assets, on="asset_uid", how="left_anti")
-
-    def _enrich_document_record(self, row: Dict[str, Any]) -> Dict[str, Any]:
-        return _enrich_document_with_client(row, self.minio_client, self.bucket)
 
     def _get_pdf_bytes(self, asset_path: str) -> Optional[bytes]:
         if not self.minio_client or not asset_path:
@@ -2502,52 +2488,6 @@ class SilverTransformer:
         )
         return chunks_df, structures_df, diagnostics
 
-    def _chunk_document_record(self, row: Dict[str, Any]) -> List[Dict[str, Any]]:
-        asset_path = clean_scalar(row.get("asset_path")) or ""
-        if not asset_path.lower().endswith(".pdf"):
-            return []
-        resource_uid = clean_scalar(row.get("resource_uid"))
-        asset_uid = clean_scalar(row.get("asset_uid"))
-        if not resource_uid or not asset_uid:
-            return []
-
-        records: List[Dict[str, Any]] = []
-        now = datetime.utcnow()
-        for page_no, chunk_order, chunk_text in self._extract_pdf_pages(asset_path):
-            chunk_text_safe = strip_surrogate_chars(chunk_text)
-            token_count = len(re.findall(r"\w+", chunk_text_safe))
-            chunk_id = deterministic_hash(f"{asset_uid}::{page_no}::{chunk_order}::{chunk_text_safe[:128]}")
-            records.append(
-                {
-                    "chunk_id": chunk_id,
-                    "resource_uid": resource_uid,
-                    "asset_uid": asset_uid,
-                    "page_no": int(page_no),
-                    "chunk_order": int(chunk_order),
-                    "chunk_text": chunk_text_safe,
-                    "token_count": int(token_count),
-                    "lang": ensure_language_code(row.get("language")),
-                    "chunk_type": "section_detail",
-                    "chunk_tier": 3,
-                    "chapter_id": None,
-                    "chapter_title": None,
-                    "chapter_number": None,
-                    "chapter_page_start": None,
-                    "chapter_page_end": None,
-                    "section_id": None,
-                    "section_title": None,
-                    "section_number": None,
-                    "section_page_start": int(page_no),
-                    "section_page_end": int(page_no),
-                    "parent_chunk_id": None,
-                    "has_children": False,
-                    "is_summary": False,
-                    "summary_method": None,
-                    "updated_at": now,
-                }
-            )
-        return records
-
     def _build_flat_toc(self, total_pages: int) -> List[Dict[str, Any]]:
         chapter_size = max(10, self.toc_fallback_chapter_size)
         toc: List[Dict[str, Any]] = []
@@ -2566,226 +2506,6 @@ class SilverTransformer:
                 }
             )
         return toc
-
-    def _chunk_document_hierarchical(self, row: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
-        asset_path = clean_scalar(row.get("asset_path")) or ""
-        if not asset_path.lower().endswith(".pdf"):
-            return [], None
-        resource_uid = clean_scalar(row.get("resource_uid"))
-        asset_uid = clean_scalar(row.get("asset_uid"))
-        if not resource_uid or not asset_uid:
-            return [], None
-
-        pdf_bytes = self._get_pdf_bytes(asset_path)
-        if not pdf_bytes:
-            return self._chunk_document_record(row), None
-
-        page_texts, total_pages = self._extract_pdf_page_texts(pdf_bytes)
-        if total_pages <= 0:
-            return self._chunk_document_record(row), None
-
-        toc_result = {"method": "flat", "confidence": 0.5, "toc": [], "total_pages": total_pages, "structure_valid": False}
-        if self.toc_enabled and self.toc_extractor:
-            toc_result = self.toc_extractor.extract(pdf_bytes, max_pages=total_pages)
-
-        toc = toc_result.get("toc") or []
-        confidence = float(toc_result.get("confidence") or 0.0)
-        method = str(toc_result.get("method") or "flat")
-        structure_valid = bool(toc_result.get("structure_valid"))
-
-        # Keep tier navigation stable even when TOC confidence is low.
-        if not toc:
-            toc = self._build_flat_toc(total_pages)
-            method = "flat"
-            confidence = 0.5
-
-        if confidence < self.toc_min_confidence:
-            method = "flat"
-            toc = self._build_flat_toc(total_pages)
-
-        now = datetime.utcnow()
-        lang = ensure_language_code(row.get("language"))
-        chunk_records: List[Dict[str, Any]] = []
-        section_global_order = 0
-        emit_summary_tiers = should_emit_hierarchical_summary_chunks(method)
-
-        # Tier 1: Document summary
-        doc_summary = ""
-        if emit_summary_tiers and self.summarizer:
-            doc_summary = self.summarizer.generate_document_summary(row, toc, max_chars=self.doc_summary_max_chars)
-        doc_summary = strip_surrogate_chars(doc_summary)
-        if doc_summary:
-            doc_chunk_id = deterministic_hash(f"{asset_uid}::tier1::doc_summary")
-            chunk_records.append(
-                {
-                    "chunk_id": doc_chunk_id,
-                    "resource_uid": resource_uid,
-                    "asset_uid": asset_uid,
-                    "page_no": 1,
-                    "chunk_order": 1,
-                    "chunk_text": doc_summary,
-                    "token_count": int(len(re.findall(r"\w+", doc_summary))),
-                    "lang": lang,
-                    "chunk_type": "doc_summary",
-                    "chunk_tier": 1,
-                    "chapter_id": None,
-                    "chapter_title": None,
-                    "chapter_number": None,
-                    "chapter_page_start": None,
-                    "chapter_page_end": None,
-                    "section_id": None,
-                    "section_title": None,
-                    "section_number": None,
-                    "section_page_start": None,
-                    "section_page_end": None,
-                    "parent_chunk_id": None,
-                    "has_children": True,
-                    "is_summary": True,
-                    "summary_method": "extractive",
-                    "updated_at": now,
-                }
-            )
-
-        for chapter_idx, chapter in enumerate(toc, start=1):
-            chapter_id = clean_scalar(chapter.get("chapter_id")) or f"ch{chapter_idx:02d}"
-            chapter_title = clean_scalar(chapter.get("chapter_title")) or f"Chapter {chapter_idx}"
-            chapter_number = int(chapter.get("chapter_number") or chapter_idx)
-            chapter_start = max(1, min(int(chapter.get("page_start") or 1), total_pages))
-            chapter_end = max(chapter_start, min(int(chapter.get("page_end") or chapter_start), total_pages))
-
-            chapter_text = "\n\n".join(
-                [page_texts.get(page_no, "") for page_no in range(chapter_start, chapter_end + 1) if page_texts.get(page_no, "").strip()]
-            ).strip()
-            if not chapter_text:
-                continue
-
-            chapter_summary = chapter_title
-            if emit_summary_tiers and self.summarizer:
-                chapter_summary = self.summarizer.generate_chapter_summary(
-                    chapter_text,
-                    chapter_title,
-                    max_chars=self.chapter_summary_max_chars,
-                )
-            chapter_summary = strip_surrogate_chars(chapter_summary)
-            chapter_chunk_id: Optional[str] = None
-            if emit_summary_tiers:
-                chapter_chunk_id = deterministic_hash(f"{asset_uid}::tier2::{chapter_id}")
-                chunk_records.append(
-                    {
-                        "chunk_id": chapter_chunk_id,
-                        "resource_uid": resource_uid,
-                        "asset_uid": asset_uid,
-                        "page_no": chapter_start,
-                        "chunk_order": chapter_idx,
-                        "chunk_text": chapter_summary,
-                        "token_count": int(len(re.findall(r"\w+", chapter_summary))),
-                        "lang": lang,
-                        "chunk_type": "chapter_summary",
-                        "chunk_tier": 2,
-                        "chapter_id": chapter_id,
-                        "chapter_title": chapter_title,
-                        "chapter_number": chapter_number,
-                        "chapter_page_start": chapter_start,
-                        "chapter_page_end": chapter_end,
-                        "section_id": None,
-                        "section_title": None,
-                        "section_number": None,
-                        "section_page_start": None,
-                        "section_page_end": None,
-                        "parent_chunk_id": None,
-                        "has_children": True,
-                        "is_summary": True,
-                        "summary_method": "extractive",
-                        "updated_at": now,
-                    }
-                )
-
-            sections = chapter.get("sections") or []
-            if not sections:
-                sections = [
-                    {
-                        "section_id": f"{chapter_id}_sec01",
-                        "section_number": f"{chapter_number}.1",
-                        "section_title": chapter_title,
-                        "page_start": chapter_start,
-                        "page_end": chapter_end,
-                    }
-                ]
-
-            for section_idx, section in enumerate(sections, start=1):
-                section_id = clean_scalar(section.get("section_id")) or f"{chapter_id}_sec{section_idx:02d}"
-                section_number = clean_scalar(section.get("section_number")) or f"{chapter_number}.{section_idx}"
-                section_title = clean_scalar(section.get("section_title")) or chapter_title
-                section_start = max(chapter_start, min(int(section.get("page_start") or chapter_start), chapter_end))
-                section_end = max(section_start, min(int(section.get("page_end") or chapter_end), chapter_end))
-
-                section_text = "\n\n".join(
-                    [page_texts.get(page_no, "") for page_no in range(section_start, section_end + 1) if page_texts.get(page_no, "").strip()]
-                ).strip()
-                if not section_text:
-                    continue
-
-                detail_chunks = self._chunk_text_smart(
-                    section_text,
-                    max_chars=self.section_chunk_max_chars,
-                    min_chars=max(self.chunk_min_chars, 220),
-                    overlap_chars=self.chunk_overlap_chars,
-                )
-
-                for local_idx, detail in enumerate(detail_chunks, start=1):
-                    if not detail:
-                        continue
-                    detail = strip_surrogate_chars(detail)
-                    section_global_order += 1
-                    detail_id = deterministic_hash(f"{asset_uid}::tier3::{section_id}::{local_idx}::{detail[:128]}")
-                    chunk_records.append(
-                        {
-                            "chunk_id": detail_id,
-                            "resource_uid": resource_uid,
-                            "asset_uid": asset_uid,
-                            "page_no": section_start,
-                            "chunk_order": section_global_order,
-                            "chunk_text": detail,
-                            "token_count": int(len(re.findall(r"\w+", detail))),
-                            "lang": lang,
-                            "chunk_type": "section_detail",
-                            "chunk_tier": 3,
-                            "chapter_id": chapter_id,
-                            "chapter_title": chapter_title,
-                            "chapter_number": chapter_number,
-                            "chapter_page_start": chapter_start,
-                            "chapter_page_end": chapter_end,
-                            "section_id": section_id,
-                            "section_title": section_title,
-                            "section_number": section_number,
-                            "section_page_start": section_start,
-                            "section_page_end": section_end,
-                            "parent_chunk_id": chapter_chunk_id,
-                            "has_children": False,
-                            "is_summary": False,
-                            "summary_method": None,
-                            "updated_at": now,
-                        }
-                    )
-
-        structure_record = {
-            "structure_id": deterministic_hash(asset_uid),
-            "asset_uid": asset_uid,
-            "resource_uid": resource_uid,
-            "source_system": clean_scalar(row.get("source_system")),
-            "has_toc": method != "flat",
-            "toc_extracted_at": now,
-            "toc_method": method,
-            "toc_confidence": confidence,
-            "total_pages": total_pages,
-            "total_chapters": len(toc),
-            "total_sections": int(sum(len(ch.get("sections") or []) for ch in toc)),
-            "table_of_contents_json": json.dumps(sanitize_nested_strings(toc), ensure_ascii=False),
-            "structure_valid": structure_valid,
-            "created_at": now,
-            "updated_at": now,
-        }
-        return chunk_records, structure_record
 
     # -----------------------------
     # Iceberg write helpers

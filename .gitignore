@@ -85,3 +85,4 @@ node_modules/
 *.zip
 sample_data_oer_chatbot.zip
 _backups/
+scratch/

@@ -91,8 +91,10 @@ def _derive_en_keywords_from_vi(text: str, base_tokens: Sequence[str]) -> List[s
 
     phrase_map = [
         ("dai so tuyen tinh", ["linear", "algebra"]),
+        ("tuyen tinh", ["linear"]),
         ("giai tich", ["calculus"]),
         ("hoi quy tuyen tinh", ["linear", "regression"]),
+        ("hoi quy", ["regression"]),
         ("hoc may", ["machine", "learning"]),
         ("thong ke", ["statistics"]),
         ("xac suat", ["probability"]),
@@ -104,24 +106,33 @@ def _derive_en_keywords_from_vi(text: str, base_tokens: Sequence[str]) -> List[s
         ("mang no ron", ["neural", "network"]),
         ("phan tich du lieu", ["data", "analysis"]),
         ("vi du", ["example"]),
+        ("phan phoi chuan", ["normal", "distribution"]),
+        ("kiem dinh gia thuyet", ["hypothesis", "testing", "test"]),
+        ("dinh nghia", ["definition"]),
+        ("giai thich", ["explanation"]),
+        ("khai niem", ["concept"]),
+        ("sinh hoc", ["biology", "biological"]),
+        ("sinh", ["biology"]),
+        ("vat ly", ["physics", "physical"]),
+        ("ly", ["physics"]),
+        ("hoa hoc", ["chemistry", "chemical"]),
+        ("hoa", ["chemistry"]),
+        ("triet hoc", ["philosophy", "philosophical"]),
+        ("triet", ["philosophy"]),
+        ("tin hoc", ["computer", "programming"]),
+        ("lap trinh", ["computer", "programming"]),
+        ("giao duc", ["education", "educational"]),
     ]
     for phrase, mapped in phrase_map:
         if phrase in norm:
             keywords.extend(mapped)
 
     token_map = {
-        "hoi": ["regression"],
-        "quy": ["regression"],
         "tuyen": ["linear"],
-        "tinh": ["linear"],
         "thong": ["statistics"],
         "ke": ["statistics"],
         "xac": ["probability"],
         "suat": ["probability"],
-        "giai": ["explain"],
-        "thich": ["explain"],
-        "khai": ["concept"],
-        "niem": ["concept"],
     }
     for tok in base_tokens:
         keywords.extend(token_map.get(tok, []))
@@ -262,17 +273,36 @@ def _strip_moodle_context(question: str) -> str:
 
 
 def _detect_recommendation_intent(question: str) -> bool:
+    """3-tier intent detection for book recommendation:
+    Tier 1: High-confidence exact phrase matches.
+    Tier 2: Course-scope signals (user asks about resources for this course/subject in general).
+    Tier 3: Ambiguous — defer to LLM (see _recommendation_intent_ambiguous).
+    """
     q = _ascii_fold(_strip_moodle_context(question))
     moodle_ctx = _parse_moodle_context(question)
+
+    # --- Tier 1: High-confidence exact phrases ---
     exact_markers = [
+        # Vietnamese explicit recommendation
         "goi y sach",
         "goi y tai lieu",
+        "goi y giao trinh",
         "tai lieu tham khao",
         "sach tham khao",
         "de xuat sach",
         "de xuat tai lieu",
+        "gioi thieu sach",
+        "gioi thieu tai lieu",
+        # Explicit course-scoped
         "tai lieu cho mon nay",
         "sach cho mon nay",
+        "tai lieu cua mon",
+        "sach cua mon",
+        "tai lieu hoc phan",
+        "tai lieu mon hoc",
+        "sach mon hoc",
+        "sach giao khoa",
+        # English
         "recommend book",
         "recommend books",
         "recommend resource",
@@ -283,24 +313,72 @@ def _detect_recommendation_intent(question: str) -> bool:
         "suggest resources",
         "reference material",
         "reading list",
+        "course material",
+        "course book",
     ]
     if any(marker in q for marker in exact_markers):
         return True
 
+    # --- Tier 2: Course-scope signals (no specific topic → user wants whole-course resources) ---
+    # e.g. "tài liệu nào phù hợp cho môn học này", "sách nào thích hợp cho môn"
+    course_scope_patterns = [
+        # "phù hợp/thích hợp/dùng cho môn [này/đó]"
+        r"(phu hop|thich hop|duoc dung|dung)\s+(cho|trong)\s+(mon|hoc phan|khoa hoc)",
+        r"(tai lieu|sach|giao trinh|cuon).{0,20}(mon hoc|mon nay|khoa hoc nay|hoc phan)",
+        r"(mon hoc|mon nay|khoa hoc nay|hoc phan).{0,30}(tai lieu|sach|giao trinh)",
+        r"(co|dang dung|su dung|hoc).{0,20}(tai lieu|sach|giao trinh).{0,20}(nao|gi)\b",
+    ]
+    for pat in course_scope_patterns:
+        if re.search(pat, q):
+            return True
+
+    # --- Tier 1b: verb + noun combination ---
     rec_verbs = ["goi y", "de xuat", "gioi thieu", "recommend", "suggest", "tim"]
     rec_nouns = [
         "tai lieu", "sach", "book", "books", "resource", "resources",
-        "material", "materials", "textbook", "reference",
+        "material", "materials", "textbook", "reference", "giao trinh",
     ]
     has_verb = any(v in q for v in rec_verbs)
     has_noun = any(n in q for n in rec_nouns)
     if has_verb and has_noun:
         return True
 
+    # --- Affirmative follow-up response ---
     affirmative = {"co", "co nhe", "ok", "yes", "yes please", "duoc"}
     if q in affirmative and str(moodle_ctx.get("course_name") or "").strip():
         return True
+
     return False
+
+
+def _recommendation_intent_ambiguous(question: str) -> bool:
+    """Returns True when the question is asking about documents/books without a
+    specific topic — suggesting course-level recommendation — but pattern matching
+    alone isn't definitive. Use this to trigger LLM intent classification.
+
+    Example ambiguous queries:
+      - "tài liệu nào cho môn học này?"
+      - "sách học nào tốt?"
+      - "có tài liệu nào không?"
+    """
+    q = _ascii_fold(_strip_moodle_context(question))
+    # Already high-confidence, no need for LLM
+    if _detect_recommendation_intent(question):
+        return False
+    # Check if any doc/book noun is present without a specific topic keyword
+    doc_nouns = ["tai lieu", "sach", "giao trinh", "textbook", "book", "resource", "material"]
+    has_doc_noun = any(n in q for n in doc_nouns)
+    if not has_doc_noun:
+        return False
+    # Presence of question words without specific topic → ambiguous
+    question_words = ["nao", "gi", "nhu the nao", "co khong", "phu hop", "thich hop",
+                      "which", "what", "any", "suitable"]
+    has_question_word = any(w in q for w in question_words)
+    # Topic-specific indicators (if present → not ambiguous, it's find_material)
+    topic_indicators = ["ve", "giai thich", "noi ve", "chua", "bao gom", "co chua", "about",
+                        "explain", "cover", "contain", "regarding", "on the topic"]
+    has_topic = any(t in q for t in topic_indicators)
+    return has_question_word and not has_topic
 
 
 def _is_recommendation_query(question: str) -> bool:
@@ -312,17 +390,25 @@ def _detect_find_material_intent(question: str) -> bool:
     biết TÊN tài liệu chứa chủ đề, KHÔNG phải giải thích nội dung. Khác với
     recommendation (gợi ý sách cho cả môn) ở chỗ có chủ đề cụ thể + từ để hỏi "nào"."""
     q = _ascii_fold(_strip_moodle_context(question))
+    # If course-scope patterns matched (no specific topic), this is recommendation not find_material
+    course_scope_patterns = [
+        r"(tai lieu|sach|giao trinh).{0,20}(mon hoc|mon nay|khoa hoc nay|hoc phan)",
+        r"(mon hoc|mon nay|khoa hoc nay|hoc phan).{0,30}(tai lieu|sach|giao trinh)",
+        r"(phu hop|thich hop).{0,30}(mon|hoc phan|khoa hoc)",
+    ]
+    for pat in course_scope_patterns:
+        if re.search(pat, q):
+            return False  # This is recommendation, not find_material
     vi_markers = ["tai lieu nao", "sach nao", "giao trinh nao", "cuon nao", "tai lieu gi", "sach gi"]
     en_markers = ["which document", "which book", "which material", "which textbook",
                   "which resource", "what document", "what book", "what material"]
     return any(m in q for m in vi_markers + en_markers)
 
-
 def _detect_query_intent(question: str) -> str:
-    if _is_recommendation_query(question):
-        return "recommendation"
     if _detect_find_material_intent(question):
         return "find_material"
+    if _is_recommendation_query(question):
+        return "recommendation"
     q = _strip_moodle_context(question).lower()
     q_folded = _ascii_fold(q)
     listing_markers = [
@@ -369,7 +455,7 @@ def _extract_definition_target(question: str) -> str:
     patterns = [
         r"(?:what is|define|definition of|explain)\s+(.+)$",
         r"(.+?)\s+(?:la gi|dinh nghia|khai niem)\??$",
-        r"(?:giai thich)\s+(.+)$",
+        r"(?:giai thich|dinh nghia|khai niem)\s+(.+)$",
     ]
     for pattern in patterns:
         match = re.search(pattern, q)
@@ -602,48 +688,29 @@ def _evaluate_course_scope_text(text: Optional[str], profile: Dict[str, Any]) ->
 
 def _extract_requested_concept(question: str) -> str:
     core = _strip_moodle_context(question)
-    folded_core = _ascii_fold(core)
-    known_concepts = [
-        ("dao ham cua mot ham so", "dao ham ham so"),
-        ("dao ham cua ham so", "dao ham ham so"),
-        ("derivative of a function", "derivative function"),
-        ("dao ham", "dao ham"),
-        ("derivative", "derivative"),
-        ("tich phan xac dinh", "tich phan xac dinh"),
-        ("definite integral", "definite integral"),
-        ("tich phan khong xac dinh", "tich phan khong xac dinh"),
-        ("indefinite integral", "indefinite integral"),
-        ("tich phan", "tich phan"),
-        ("integral", "integral"),
-        ("gioi han cua ham so", "gioi han ham so"),
-        ("limit of a function", "limit function"),
-        ("gioi han", "gioi han"),
-        ("limit", "limit"),
-        ("ham so", "ham so"),
-        ("function", "function"),
-        ("ma tran", "ma tran"),
-        ("matrix", "matrix"),
-        ("vector rieng", "vector rieng"),
-        ("eigenvector", "eigenvector"),
-        ("gia tri rieng", "gia tri rieng"),
-        ("eigenvalue", "eigenvalue"),
-        ("co so du lieu", "co so du lieu"),
-        ("database management system", "database management system"),
-        ("database", "database"),
-        ("sql", "sql"),
-    ]
-    for phrase, canonical in known_concepts:
-        if re.search(rf"\b{re.escape(phrase)}\b", folded_core):
-            return canonical
-
     target = _extract_definition_target(core)
     if not target and _is_definition_query(core):
         match = re.search(r"^\s*(.+?)\s*(?:\?|$)", _ascii_fold(core))
         if match:
             target = str(match.group(1) or "").strip()
+    
     cleaned = _ascii_fold(target)
     if not cleaned:
         return ""
+    
+    known_concepts = {
+        "dao ham cua mot ham so": "dao ham ham so",
+        "dao ham cua ham so": "dao ham ham so",
+        "derivative of a function": "derivative function",
+        "gioi han cua ham so": "gioi han ham so",
+        "limit of a function": "limit function",
+        "database management system": "co so du lieu",
+        "database": "co so du lieu",
+        "dbms": "co so du lieu",
+        "sql": "co so du lieu"
+    }
+    
+    cleaned = known_concepts.get(cleaned, cleaned)
     cleaned = re.sub(
         r"\b(trong|in|for)\s+(calculus|giai tich|toan|mathematics)\s*(?:i{1,3}|[1-3])\b",
         " ",
@@ -662,6 +729,30 @@ def _extract_requested_concept(question: str) -> str:
     if _is_implicit_concept_placeholder(cleaned):
         return ""
     return cleaned[:120]
+
+
+def _extract_find_material_target(question: str) -> str:
+    core = _strip_moodle_context(question)
+    q = _ascii_fold(core)
+    
+    # Common Vietnamese patterns for find_material
+    patterns = [
+        r"(?:hoc ve|tim hieu ve|noi ve|viet ve|giai thich ve|day ve|huong dan ve|cover|explain|about|on the topic of|on|regarding)\s+(.+?)(?:\s+(?:thi|cho|thi dung|nao|gi|de|phu hop|tot)\b|$)",
+        r"(?:sach|tai lieu|giao trinh|cuon)\s+(?:nao|gi)\s+(?:hoc|ve|noi ve|giai thich ve)\s+(.+)$",
+        r"(?:sach|tai lieu|giao trinh|cuon)\s+(?:nao|gi)\s+(?:phu hop cho|phu hop de hoc)\s+(.+)$",
+        r"(?:sach|tai lieu|giao trinh|cuon)\s+(?:nao|gi)\s+(?:ve)\s+(.+)$",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, q)
+        if match:
+            target = match.group(1).strip()
+            # Clean up target (remove trailing/leading noise words)
+            target = re.sub(r"\b(thi|dung|nao|gi|tot|phu hop|de|co|duoc|nhat)\b", "", target).strip()
+            if target:
+                return target
+    # Fallback to the requested concept extraction if patterns didn't match
+    return _extract_requested_concept(question)
+
 
 
 def _has_example_cue(text: Optional[str]) -> bool:
@@ -875,6 +966,8 @@ def _is_obviously_out_of_scope(question: str) -> bool:
         # Sports scores / entertainment news
         r"\b(score of|kết quả trận|vô địch .{0,20}năm|fifa|world cup|v-league|aff cup)\b",
         r"\b(best.*series|netflix|phim.*hay|gợi ý phim)\b",
+        # Games / gaming / esports
+        r"\b(game|trò chơi|video game|gaming|esport)\b",
         # Personal lifestyle / shopping
         r"\b(lose weight|tăng cân|giảm cân nhanh|bằng lái xe|visa du lịch|đặt vé)\b",
         r"\b(best.*laptop.*buy|laptop gaming.*giá|stock price of|giá vàng hôm nay)\b",
@@ -896,8 +989,9 @@ def _is_obviously_out_of_scope(question: str) -> bool:
         r"\b(price\s+of\s+(gold|silver|oil)\s+(today|now|hôm nay))\b",
         # Personal fitness / bodybuilding
         r"\b(build\s+muscle|muscle\s+(gain|building)|diet\s+(plan\s+)?to\s+(lose|build|gain))\b",
-        # Current leaders (English)
+        # Current leaders (English & Vietnamese)
         r"\b(current\s+(prime\s+minister|president|chancellor)\s+of\b)",
+        r"\b(tổng thống|chủ tịch nước|tổng bí thư)\b",
     ]
     for pattern in _OOS_PATTERNS:
         if re.search(pattern, q):
@@ -1173,6 +1267,10 @@ def _expand_definition_target_tokens(target: str) -> List[str]:
         "database": ["co so du lieu", "he quan tri co so du lieu"],
         "dbms": ["co so du lieu", "he quan tri co so du lieu"],
         "sql": ["truy van", "ngon ngu truy van"],
+        "phan phoi chuan": ["normal distribution", "normal distributions"],
+        "normal distribution": ["phan phoi chuan", "normal distributions"],
+        "kiem dinh gia thuyet": ["hypothesis testing", "hypothesis test"],
+        "hypothesis testing": ["kiem dinh gia thuyet", "hypothesis test"],
         "dao ham": [
             "derivative",
             "derivatives",
@@ -1227,6 +1325,7 @@ __all__ = [
     '_parse_moodle_context',
     '_strip_moodle_context',
     '_detect_recommendation_intent',
+    '_recommendation_intent_ambiguous',
     '_is_recommendation_query',
     '_detect_find_material_intent',
     '_detect_query_intent',
